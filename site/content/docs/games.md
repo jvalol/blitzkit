@@ -1,7 +1,6 @@
 ---
 title: Games
 weight: 3
-ai_drafted: true
 ---
 
 # Games

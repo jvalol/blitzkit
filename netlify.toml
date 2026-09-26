@@ -24,15 +24,11 @@
   # Keep aligned with the Hugo that jva.lol pins and that is installed locally.
   HUGO_VERSION = "0.166.0"
 
-# /docs/promises/ was a page of its own for about two hours on 2026-09-26, and
-# then a section of Getting started for about an hour after that.
-#
-# Both are gone. A promise is a commitment about the future, and this engine is
-# pre-1.0 with no stability policy, so the word wrote a cheque nobody had
-# signed. What the specs really are is a development discipline: behaviour
-# written down before it is built, with tests holding it there. That is repo
-# business, and the repo says it in CLAUDE.md and specs/README.md.
+# /docs/promises/ was this page's name for about two hours on 2026-09-26. The
+# word was wrong: a promise is a commitment about the future, and this engine
+# is pre-1.0 with no stability policy. It is at /docs/how-its-built/ now, which
+# claims nothing and says what a reader gets.
 [[redirects]]
   from = "/docs/promises/"
-  to = "/docs/getting-started/"
+  to = "/docs/how-its-built/"
   status = 301

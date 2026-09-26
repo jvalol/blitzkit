@@ -1,7 +1,6 @@
 ---
 title: blitzkit
 type: docs
-ai_drafted: true
 ---
 
 # blitzkit
