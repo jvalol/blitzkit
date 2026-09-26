@@ -5,10 +5,12 @@ ai_drafted: true
 ---
 
 # blitzkit
+A small 2D and 3D game engine in Rust, over wgpu with nothing in between.
 
-A small 2D and 3D game engine in Rust, over wgpu. A game implements one trait
-and calls `start()`, and the engine owns the window, the event loop, drawing,
-keyboard and mouse input, and sound.
+Implement one trait and call `start()`.
+
+See the [examples]({{< relref "docs/examples" >}}) or the
+[sibling game repos]({{< relref "docs/games" >}}) to get more detailed examples.
 
 ```
 cargo add blitzkit
@@ -18,5 +20,4 @@ cargo add blitzkit
   program that opens a window.
 - [What it does]({{< relref "docs/examples" >}}) is the five examples that ship
   with it.
-- [What it promises]({{< relref "docs/promises" >}}) is the part that is
-  unusual: every behaviour is a written spec naming the test that proves it.
+- [Games]({{< relref "docs/games" >}}) is the five that run on it.
