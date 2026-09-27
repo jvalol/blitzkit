@@ -5,9 +5,9 @@ weight: 3
 
 # Games
 
-Five games run on blitzkit. Each one is its own repository, and each depends on
-the published crate rather than a local checkout, so the engine gets used the
-way anyone else would use it.
+Five games run on it. Each one's its own repo and each takes
+blitzkit from crates.io rather than a local checkout, so I'm using the engine
+the same way you would.
 
 ## pong
 

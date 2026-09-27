@@ -11,12 +11,12 @@ weight: 1
 cargo add blitzkit
 ```
 
-It needs Rust 1.87 or newer, which is wgpu's minimum.
+You'll need Rust 1.87 or newer, which is what wgpu wants.
 
 ## The whole interface
 
-A game implements `Game` and calls `start()`. The engine owns the window and
-the event loop and hands the game what happened.
+Your game implements `Game` and calls `start()`. I keep the window and the
+event loop, and hand you what happened.
 
 ```rust
 use blitzkit::{start, Game};
@@ -44,16 +44,15 @@ fn main() {
 
 ## What arrives
 
-Input reaches the game as `KeyboardInput` and `MouseInput`, never as winit
-types. Anything uploaded to the GPU comes back as a handle, `MeshId` or
-`TextureId`, never as a buffer. The maths in the public API is glam's: `Vec2`,
-`Vec3`, `Mat4`, `Quat`.
+Input comes in as `KeyboardInput` and `MouseInput`. You never see a winit type.
+Anything you put on the GPU comes back as a handle, `MeshId` or `TextureId`,
+never a buffer. The maths is glam's: `Vec2`, `Vec3`, `Mat4`, `Quat`.
 
-A missing device disables a feature rather than panicking. Sound works that way
-already: with no audio device the engine runs silent.
+A missing device switches a feature off instead of panicking. Sound already
+works that way, so with no audio device it just runs silent.
 
 ## The API
 
-Every type and function is on
-[docs.rs](https://docs.rs/blitzkit), generated from the source, so it cannot
-drift from what is published. This site does not restate signatures.
+Every type and function is on [docs.rs](https://docs.rs/blitzkit), generated
+from the source, so it can't drift from what I published. I'm not going to
+restate signatures here.
