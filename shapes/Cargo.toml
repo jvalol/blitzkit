@@ -1,0 +1,13 @@
+[package]
+name = "blitzkit-shapes"
+version = "0.1.0"
+edition = "2018"
+# Same floor as the engine, which is wgpu's. Without it clippy assumes the
+# latest toolchain and suggests APIs that are not there at 1.87.
+rust-version = "1.87"
+publish = false
+description = "Named shapes the blitzkit examples draw. Not part of the engine."
+
+[dependencies]
+blitzkit = { path = ".." }
+glam = "0.33"

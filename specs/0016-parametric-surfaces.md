@@ -74,9 +74,9 @@ the result, and gets a shape the same size either way.
 - Parameters arrive as 0 to 1 and land in the texture coordinates. — `mesh::tests::a_surface_is_parameterized_from_zero_to_one`
 - Two-sided geometry has every triangle twice, wound both ways. — `mesh::tests::two_sided_adds_the_other_side`
 - The reversed copy carries the reversed normal. — `mesh::tests::the_other_side_faces_the_other_way`
-- The Klein bottle's two ends meet, reflected, which is what closes it. — `mesh::tests::the_klein_bottle_closes_on_itself`
-- The Klein bottle is centered and fits a unit box. — `mesh::tests::the_klein_bottle_fits_the_unit_box`
-- The Klein bottle comes back two-sided. — `mesh::tests::the_klein_bottle_is_two_sided`
+- The Klein bottle's two ends meet, reflected, which is what closes it. — `blitzkit_shapes::klein::tests::the_klein_bottle_closes_on_itself`
+- The Klein bottle is centered and fits a unit box. — `blitzkit_shapes::klein::tests::the_klein_bottle_fits_the_unit_box`
+- The Klein bottle comes back two-sided. — `blitzkit_shapes::klein::tests::the_klein_bottle_is_two_sided`
 - A lattice keeps ribbons and cuts everything else. — `mesh::tests::a_lattice_keeps_only_the_ribbons`
 - A lattice drops the corners it no longer uses. — `mesh::tests::a_lattice_keeps_no_corner_it_does_not_use`
 - A lattice of no lines is empty rather than whole. — `mesh::tests::a_lattice_of_no_lines_is_nothing`

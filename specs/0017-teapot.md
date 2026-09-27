@@ -40,13 +40,13 @@ it is drawn from the outside, which is how it has always been drawn.
 
 ## Acceptance criteria
 
-- The data is Newell's: 306 points, 32 patches, all indices in range. — `teapot::tests::the_data_is_newells`
-- Its faces wind outwards, which the volume they enclose proves. — `teapot::tests::the_teapot_faces_outwards`
-- It is centered and fits a unit box, wider than it is tall. — `teapot::tests::the_teapot_fits_the_unit_box`
-- It stands on the axis it should, in Newell's proportions. — `teapot::tests::the_teapot_stands_up`
-- Every corner has a normal, including the ones the model gives none. — `teapot::tests::every_corner_of_the_teapot_is_lit`
-- A patch meets its four corner control points and no others. — `teapot::tests::a_patch_starts_and_ends_on_its_corner_points`
-- The Bernstein weights at any point add to one. — `teapot::tests::the_bernstein_weights_are_a_whole`
+- The data is Newell's: 306 points, 32 patches, all indices in range. — `blitzkit_shapes::teapot::tests::the_data_is_newells`
+- Its faces wind outwards, which the volume they enclose proves. — `blitzkit_shapes::teapot::tests::the_teapot_faces_outwards`
+- It is centered and fits a unit box, wider than it is tall. — `blitzkit_shapes::teapot::tests::the_teapot_fits_the_unit_box`
+- It stands on the axis it should, in Newell's proportions. — `blitzkit_shapes::teapot::tests::the_teapot_stands_up`
+- Every corner has a normal, including the ones the model gives none. — `blitzkit_shapes::teapot::tests::every_corner_of_the_teapot_is_lit`
+- A patch meets its four corner control points and no others. — `blitzkit_shapes::teapot::tests::a_patch_starts_and_ends_on_its_corner_points`
+- The Bernstein weights at any point add to one. — `blitzkit_shapes::teapot::tests::the_bernstein_weights_are_a_whole`
 - Joining two meshes keeps both, with the second's corners renumbered. — `mesh::tests::extending_a_mesh_keeps_both`
 - A missing normal is filled in from the faces around it. — `mesh::tests::a_missing_normal_is_borrowed`
 - A corner no triangle uses keeps its missing normal. — `mesh::tests::a_normal_with_nothing_to_borrow_from_stays_missing`

@@ -99,7 +99,7 @@ impl Teapot {
 
 impl Game for Teapot {
     fn load(&mut self, renderer: &mut Renderer) {
-        self.pot = Some(renderer.add_mesh(&MeshData::teapot(STEPS)));
+        self.pot = Some(renderer.add_mesh(&blitzkit_shapes::teapot::teapot(STEPS)));
         self.floor = Some(renderer.add_mesh(&MeshData::plane()));
 
         renderer.set_scene_bounds(blitzkit::collision::Aabb::from_center_size(

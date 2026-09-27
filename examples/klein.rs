@@ -15,7 +15,8 @@
 use blitzkit::camera::Camera;
 use blitzkit::geometry::Geometry;
 use blitzkit::keyboard::{KeyboardInput, KeyboardKey, KeyboardKeyState};
-use blitzkit::mesh::{klein_bottle_point, MeshData, Transform};
+use blitzkit_shapes::klein::klein_bottle_point;
+use blitzkit::mesh::{MeshData, Transform};
 use blitzkit::mouse::{MouseButton, MouseInput};
 use blitzkit::renderer::render_text::{RenderText, TextRenderer};
 use blitzkit::renderer::scene::{MeshId, Scene};

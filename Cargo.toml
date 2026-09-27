@@ -16,9 +16,12 @@ categories = ["game-engines", "graphics"]
 # site is the product site at blitzkit.jva.lol, a Hugo project with a vendored
 # theme: 225 files and most of ten megabytes that nobody depending on this
 # crate has any use for.
-exclude = ["farewell", "media", "site"]
+exclude = ["farewell", "media", "site", "shapes"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[workspace]
+members = ["shapes"]
 
 [dependencies]
 winit = "0.30"
@@ -34,4 +37,8 @@ bytemuck = "1.4"
 rodio = { version = "0.22", default-features = false, features = ["playback"] }
 
 [dev-dependencies]
+# The named shapes two examples draw. A dev-dependency, so it is not in the
+# published dependency graph, which is what makes the cycle legal: it depends
+# on this crate in turn.
+blitzkit-shapes = { path = "shapes" }
 glam = "0.33"

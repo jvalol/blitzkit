@@ -9,7 +9,7 @@
 //! The teapot has been public domain since it was published, and is the oldest
 //! test model in computer graphics still in use.
 
-use crate::mesh::MeshData;
+use blitzkit::mesh::MeshData;
 use glam::Vec3;
 
 /// Newell's control points, z up, in the units he measured in.
@@ -388,40 +388,38 @@ fn to_engine(point: Vec3) -> Vec3 {
     Vec3::new(point.x, point.z, -point.y)
 }
 
-impl MeshData {
-    /// The Utah teapot, tessellated `steps` by `steps` for each of its 32
-    /// patches, centered on the origin and scaled to fit a unit box like the
-    /// cube and the sphere.
-    ///
-    /// Built on `surface` from spec 0016: each patch is a formula, and the 32
-    /// of them are joined. See spec 0017.
-    pub fn teapot(steps: u32) -> Self {
-        let mut data = Self::default();
+/// The Utah teapot, tessellated `steps` by `steps` for each of its 32
+/// patches, centered on the origin and scaled to fit a unit box like the
+/// cube and the sphere.
+///
+/// Built on `surface` from spec 0016: each patch is a formula, and the 32
+/// of them are joined. See spec 0017.
+pub fn teapot(steps: u32) -> MeshData {
+    let mut data = MeshData::default();
 
-        for patch in PATCHES.iter() {
-            let points: [Vec3; 16] =
-                std::array::from_fn(|i| Vec3::from(CONTROL_POINTS[patch[i] as usize]));
+    for patch in PATCHES.iter() {
+        let points: [Vec3; 16] =
+            std::array::from_fn(|i| Vec3::from(CONTROL_POINTS[patch[i] as usize]));
 
-            // u and v the other way round, because Newell wound his patches so
-            // that u crossed into v points into the pot rather than out of it
-            data.extend(&Self::surface(steps, steps, |u, v| {
-                to_engine(patch_point(&points, v, u))
-            }));
-        }
-
-        let bounds = data.bounds();
-        let center = bounds.center();
-        let scale = 1.0 / bounds.size().max_element().max(f32::EPSILON);
-
-        for vertex in data.vertices.iter_mut() {
-            vertex.position = ((Vec3::from(vertex.position) - center) * scale).to_array();
-        }
-
-        // the lid and the bottom each close on a row of four identical control
-        // points, and a patch has no surface direction to cross at a point
-        data.fill_missing_normals();
-        data
+        // u and v the other way round, because Newell wound his patches so
+        // that u crossed into v points into the pot rather than out of it
+        data.extend(&MeshData::surface(steps, steps, |u, v| {
+            to_engine(patch_point(&points, v, u))
+        }));
     }
+
+    let bounds = data.bounds();
+    let center = bounds.center();
+    let scale = 1.0 / bounds.size().max_element().max(f32::EPSILON);
+
+    for vertex in data.vertices.iter_mut() {
+        vertex.position = ((Vec3::from(vertex.position) - center) * scale).to_array();
+    }
+
+    // the lid and the bottom each close on a row of four identical control
+    // points, and a patch has no surface direction to cross at a point
+    data.fill_missing_normals();
+    data
 }
 
 #[cfg(test)]
@@ -451,7 +449,7 @@ mod tests {
 
     #[test]
     fn the_teapot_faces_outwards() {
-        let pot = MeshData::teapot(8);
+        let pot = teapot(8);
 
         // the volume a closed mesh encloses, signed: positive when its faces
         // wind the way they do when seen from outside, negative when the whole
@@ -473,7 +471,7 @@ mod tests {
 
     #[test]
     fn the_teapot_fits_the_unit_box() {
-        let bounds = MeshData::teapot(10).bounds();
+        let bounds = teapot(10).bounds();
 
         assert!(
             bounds.center().length() < 1e-5,
@@ -498,7 +496,7 @@ mod tests {
         // other way, and 3.15 tall. A wrong axis anywhere in the conversion
         // shuffles those three, and the shortest of them has to be the one
         // standing up.
-        let size = MeshData::teapot(10).bounds().size();
+        let size = teapot(10).bounds().size();
         let scale = 1.0 / 6.525;
 
         assert!((size.x - 6.525 * scale).abs() < 0.01, "{} across", size.x);
@@ -508,7 +506,7 @@ mod tests {
 
     #[test]
     fn every_corner_of_the_teapot_is_lit() {
-        let pot = MeshData::teapot(8);
+        let pot = teapot(8);
 
         for vertex in pot.vertices.iter() {
             assert!(
