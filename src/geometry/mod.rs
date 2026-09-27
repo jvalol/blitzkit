@@ -1,3 +1,8 @@
+//! The 2D half: coloured quads a game pushes each frame, and their vertices.
+//!
+//! Positions are in physical pixels with the origin at the top left and y going
+//! down. See `specs/0001-pixel-coordinates.md` and `0006-quad-color.md`.
+
 pub mod quad;
 pub mod vertex;
 use quad::Quad;

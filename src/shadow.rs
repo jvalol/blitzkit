@@ -1,8 +1,14 @@
-//! Shadow mapping from the one directional light.
+//! Shadow mapping, for all three kinds of light.
 //!
-//! See `specs/0015-shadows.md`. The matrix, the bias and the comparison rule
-//! live here as plain maths so they can be checked without a GPU. The same
-//! comparison runs in `mesh.wgsl`, and the two are kept in step by hand.
+//! The sun gets one map and each spot gets one. A lamp that asks to cast gets
+//! six, because it shines every way at once and one projection cannot hold
+//! that, and two lamps at most may ask. See
+//! `specs/0015-shadows.md`, `0021-spot-lights.md` and
+//! `0022-point-light-shadows.md`.
+//!
+//! The matrices, the bias and the comparison rules live here as plain maths so
+//! they can be checked without a GPU. The same comparisons run in `mesh.wgsl`,
+//! and the two are kept in step by hand.
 
 use crate::collision::Aabb;
 use glam::{Mat4, Vec3, Vec4Swizzles};

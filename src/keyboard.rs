@@ -1,3 +1,8 @@
+//! winit's keys and key states, in the engine's own terms.
+//!
+//! A game never sees a winit type, so every key it can ask about is named
+//! here. See `specs/0003-keyboard-input.md`.
+
 use winit::event::ElementState;
 use winit::keyboard::KeyCode;
 

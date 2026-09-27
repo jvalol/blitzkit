@@ -1,8 +1,12 @@
-//! The sun, the lamps, and the shading they produce.
+//! The sun, the lamps, the spots, and the shading they produce.
 //!
-//! See `specs/0012-lighting.md`. The maths here also runs in `mesh.wgsl`, on the
-//! GPU. This copy exists so it can be checked without one; the two are kept in
-//! step by hand, which is the gap the spec's hand checks cover.
+//! One sun with a direction and no place, up to eight lamps with a place and a
+//! reach, and up to four spots, which are lamps with a direction. See
+//! `specs/0012-lighting.md`, `0020-point-lights.md` and `0021-spot-lights.md`.
+//!
+//! The maths here also runs in `mesh.wgsl`, on the GPU. This copy exists so it
+//! can be checked without one; the two are kept in step by hand, which is the
+//! gap the spec's hand checks cover.
 
 use glam::Vec3;
 

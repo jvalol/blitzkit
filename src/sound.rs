@@ -1,3 +1,9 @@
+//! Sound, through rodio, and the listener it is heard from.
+//!
+//! A missing audio device disables playback rather than panicking, so a machine
+//! with no output still runs the game in silence. See
+//! `specs/0004-sound-output.md` and `0019-listener.md`.
+
 use glam::Vec3;
 
 /// How far each ear sits from the middle of the head. One unit, which is what

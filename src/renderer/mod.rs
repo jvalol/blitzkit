@@ -1,3 +1,12 @@
+//! wgpu: the device, the pipelines, and everything drawn through them.
+//!
+//! Two of them do the drawing, one for quads and one for meshes, with shadow
+//! passes ahead of both. What a game pushes to be drawn in 3D is `scene`, the
+//! depth buffer and its settings are `depth`, and text goes through
+//! `render_text`.
+//!
+//! A game never sees a wgpu type. Anything uploaded comes back as a handle.
+
 pub mod depth;
 pub mod render_text;
 pub mod scene;

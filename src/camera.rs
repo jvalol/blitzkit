@@ -1,3 +1,8 @@
+//! Where the scene is looked at from, and the matrices that follow.
+//!
+//! Right-handed with y up, and the projection is where that becomes the
+//! screen's coordinates. See `specs/0008-camera.md`.
+
 use glam::{Mat4, Vec3};
 
 /// Where the scene is looked at from.
