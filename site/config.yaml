@@ -22,5 +22,3 @@ params:
   BookTheme: dark
   BookToC: true
   BookSection: docs
-  BookRepo: https://github.com/jvalol/blitzkit
-  BookEditPath: edit/main/site/content

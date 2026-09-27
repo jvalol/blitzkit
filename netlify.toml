@@ -24,11 +24,22 @@
   # Keep aligned with the Hugo that jva.lol pins and that is installed locally.
   HUGO_VERSION = "0.166.0"
 
-# /docs/promises/ was this page's name for about two hours on 2026-09-26. The
-# word was wrong: a promise is a commitment about the future, and this engine
-# is pre-1.0 with no stability policy. It is at /docs/how-its-built/ now, which
-# claims nothing and says what a reader gets.
+# /docs/promises/ and /docs/how-its-built/ were the same page under two names
+# on 2026-09-26, and it is gone.
+#
+# It described the engine's behaviour as written down in specs, which is true,
+# and the spec-first sequence, which is true only since 2026-09-20. The engine
+# was started on 2020-11-01 and ran for 23 commits before any spec existed, so
+# the older specs describe what was already built rather than having designed
+# it. Corrected, the page shrank to one sentence and an anecdote about values
+# transcribed wrong, which is a thin thing to give a page and the wrong face
+# for a project six years older than its specs.
 [[redirects]]
   from = "/docs/promises/"
-  to = "/docs/how-its-built/"
+  to = "/"
+  status = 301
+
+[[redirects]]
+  from = "/docs/how-its-built/"
+  to = "/"
   status = 301
