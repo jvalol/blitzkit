@@ -4,7 +4,7 @@ type: docs
 ---
 
 # blitzkit
-A small 2D and 3D game engine in Rust, over wgpu with nothing in between.
+A small 2D and 3D game engine in Rust, over wgpu.
 
 Implement one trait and call `start()`.
 
