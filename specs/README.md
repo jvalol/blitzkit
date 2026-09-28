@@ -29,6 +29,9 @@ not a priority, and it never changes once a spec exists.
 | [0019](0019-listener.md) | Ears that can be put somewhere and pointed |
 | [0020](0020-point-lights.md) | Lamps with a place, a reach, and no shadow |
 | [0021](0021-spot-lights.md) | Cones that cast, one shadow map each |
+| [0022](0022-point-light-shadows.md) | Lamps that cast, six projections each |
+| [0023](0023-menu-text.md) | Which lines can be chosen, and which one is |
+| [0024](0024-textured-quads.md) | An image on a 2D quad (draft) |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.
