@@ -8,6 +8,46 @@ weight: 2
 Five examples are in the repo. Each one's an incremental example of the
 improvements made to the engine.
 
+## rolling
+
+The collision. A ball rolled round a walled room, sliding along the walls,
+settling into corners, never going through anything.
+
+```
+cargo run --release --example rolling
+```
+
+WASD or the arrows roll the ball, and the camera follows it.
+
+- drag or move the mouse to swing the camera round
+- scroll to zoom
+
+![A ball on the floor of a walled room, three blocks standing on it, each
+casting a shadow](/media/rolling.png)
+
+## cubes
+
+This one's about the lighting. There's a sun, two spots going round, and a lamp between them. Press L to cycle through the permutations.
+
+The sun is a direction with no position, so there's nothing to draw for it and
+turning it off is the only way to _see_ what it was doing. The spots cast down
+their cones. The lamp casts every way at once, which takes six projections
+instead of one.
+
+```
+cargo run --release --example cubes
+```
+
+The camera orbits on its own, or drag to turn it yourself.
+
+- left and right turn it, up and down raise and lower it
+- scroll moves closer
+- space locks the cursor
+- L switches which lights are on
+
+![Four cubes on a dark checkered floor lit by one lamp, each throwing its
+shadow off in a different direction](/media/cubes.png)
+
 ## teapot
 
 Here's the classic Utah teapot, from the points Newell measured off a real one in 1975. 32
@@ -63,40 +103,3 @@ brushing the wall costs you speed.
 
 ![Looking down a tunnel of dark and light checks receding to a vanishing point,
 with a gold ring hanging off centre](/media/tunnel.png)
-
-## cubes
-
-This one's about the lighting. There's a sun, two spots going round, and a lamp between them. Press L to cycle through the permutations.
-
-The sun is a direction with no position, so there's nothing to draw for it and
-turning it off is the only way to _see_ what it was doing. The spots cast down
-their cones. The lamp casts every way at once, which takes six projections
-instead of one.
-
-```
-cargo run --release --example cubes
-```
-
-The camera orbits on its own, or drag to turn it yourself.
-
-- left and right turn it, up and down raise and lower it
-- scroll moves closer
-- space locks the cursor
-- L switches which lights are on
-
-![Four cubes on a dark checkered floor lit by one lamp, each throwing its
-shadow off in a different direction](/media/cubes.png)
-
-## rolling
-
-The collision. A ball rolled round a walled room, sliding along the walls,
-settling into corners, never going through anything.
-
-```
-cargo run --release --example rolling
-```
-
-WASD or the arrows roll the ball, and the camera follows it.
-
-- drag or move the mouse to swing the camera round
-- scroll to zoom
