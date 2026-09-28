@@ -5,7 +5,8 @@ weight: 2
 
 # What it does
 
-Five examples ship with the engine. Each one's an incremental example of the improvements I made.
+Five examples are in the repo. Each one's an incremental example of the
+improvements made to the engine.
 
 ## teapot
 
