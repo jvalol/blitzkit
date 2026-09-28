@@ -11,14 +11,13 @@ another level and show how to actually use the engine.
 
 ## rolling
 
-The collision. A ball rolled round a walled room, sliding along the walls,
-settling into corners, never going through anything.
+Collisions. A ball can roll around a walled room and slide along the walls.
 
 ```
 cargo run --release --example rolling
 ```
 
-WASD or the arrows roll the ball, and the camera follows it.
+WASD or the arrows to roll the ball. The camera follows it.
 
 - drag or move the mouse to swing the camera round
 - scroll to zoom
@@ -28,10 +27,10 @@ casting a shadow](/media/rolling.png)
 
 ## cubes
 
-This one's about the lighting. There's a sun, two spots going round, and a lamp between them. Press L to cycle through the permutations.
+This one's about the lighting. There's a sun, two spotlights moving around, and a lamp. Press L to cycle through the permutations.
 
 The sun is a direction with no position, so there's nothing to draw for it and
-turning it off is the only way to _see_ what it was doing. The spots cast down
+turning it off is the only way to _see_ what it was doing. The spotlights cast down
 their cones. The lamp casts every way at once, which takes six projections
 instead of one.
 
@@ -73,7 +72,7 @@ Drag to turn it, or use the arrows.
 ## klein
 
 A Klein bottle. It's drawn as a wire mesh so you can see the neck where it passes
-through the wall, but you can also make it solid or translucent. Parametric surfaces, and two-sided geometry because kind of the point of the thing is that it has no outside.
+through the wall, but you can also make it solid or translucent. Parametric surfaces, and two-sided geometry because kind of the point of the thing is that it has no outer surface. It's a 3D Möbius strip.
 
 ```
 cargo run --release --example klein
@@ -89,8 +88,7 @@ passes through the wall](/media/klein-glass.png)
 
 ## tunnel
 
-Fly down the inside of a tunnel that meanders. It's a game that demonstrates a surface
-with no visible outside, and it's about the hardest thing you can ask of mipmaps: a checker running away to a vanishing point.
+Fly down the inside of a tunnel that meanders. It's a game that demonstrates about the hardest thing you can ask of mipmaps: a checker running away to a vanishing point.
 
 ```
 cargo run --release --example tunnel
