@@ -16,7 +16,22 @@ categories = ["game-engines", "graphics"]
 # site is the product site at blitzkit.jva.lol, a Hugo project with a vendored
 # theme: 225 files and most of ten megabytes that nobody depending on this
 # crate has any use for.
-exclude = ["farewell", "media", "site", "shapes"]
+# tests/getting_started.rs reads the site's markdown, which is excluded above,
+# so it cannot compile from the package. cargo publish would not catch that: it
+# builds the packaged crate but never its tests.
+# examples/klein.rs and examples/teapot.rs draw shapes from blitzkit-shapes,
+# a path dev-dependency that publishing strips, so they cannot build from the
+# package either. cargo publish misses both cases: it builds the packaged lib
+# and never its tests or examples.
+exclude = [
+    "farewell",
+    "media",
+    "site",
+    "shapes",
+    "tests/getting_started.rs",
+    "examples/klein.rs",
+    "examples/teapot.rs",
+]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
