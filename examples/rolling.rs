@@ -42,10 +42,15 @@ impl Rolling {
     fn new() -> Self {
         let mut colliders = Vec::new();
 
-        // four walls around the room
+        // Four walls around the room. The two facing along z run the full width
+        // plus a wall's thickness, so they reach the outer corners; at ROOM * 2
+        // each wall stopped at the centre line of the next and left a square
+        // notch at all four corners. Cosmetic, since the inner faces sit at
+        // ROOM - 0.5 and the ball's radius keeps it a further 0.5 inside, but
+        // these boxes are what gets drawn.
         for (center, size) in [
-            (vec3(0.0, 1.0, -ROOM), vec3(ROOM * 2.0, 2.0, 1.0)),
-            (vec3(0.0, 1.0, ROOM), vec3(ROOM * 2.0, 2.0, 1.0)),
+            (vec3(0.0, 1.0, -ROOM), vec3(ROOM * 2.0 + 1.0, 2.0, 1.0)),
+            (vec3(0.0, 1.0, ROOM), vec3(ROOM * 2.0 + 1.0, 2.0, 1.0)),
             (vec3(-ROOM, 1.0, 0.0), vec3(1.0, 2.0, ROOM * 2.0)),
             (vec3(ROOM, 1.0, 0.0), vec3(1.0, 2.0, ROOM * 2.0)),
         ] {
