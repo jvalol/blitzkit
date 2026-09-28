@@ -15,7 +15,9 @@ See the [examples]({{< relref "docs/examples" >}}) or the
 cargo add blitzkit
 ```
 
-- [Getting started]({{< relref "docs/getting-started" >}}) is the smallest
-  program that opens a window.
-- [Examples]({{< relref "docs/examples" >}}) is the five in the engine repo.
-- [Games]({{< relref "docs/games" >}}) is the five that run on it.
+- [Getting started]({{< relref "docs/getting-started" >}})
+  smallest steps to building an app that opens a window.
+- [Examples]({{< relref "docs/examples" >}}) single-file demonstrations that
+  live in the engine repo.
+- [Games]({{< relref "docs/games" >}}) fully fledged implementations
+  that use the engine as a dependency.
