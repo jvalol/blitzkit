@@ -17,6 +17,5 @@ cargo add blitzkit
 
 - [Getting started]({{< relref "docs/getting-started" >}}) is the smallest
   program that opens a window.
-- [What it does]({{< relref "docs/examples" >}}) is the five examples that ship
-  with it.
+- [Examples]({{< relref "docs/examples" >}}) is the five in the engine repo.
 - [Games]({{< relref "docs/games" >}}) is the five that run on it.

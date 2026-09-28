@@ -5,9 +5,14 @@ weight: 3
 
 # Games
 
-Five games run on it. Each one's its own repo and each takes
+I built five games on it. Each one is its own repo and each takes
 blitzkit from crates.io rather than a local checkout, so I'm using the engine
 the same way you would.
+
+That's what separates these from the
+[examples]({{< relref "docs/examples" >}}), which live in the engine's own repo
+and are one file each. A game is a full example of implementation, not just a
+demonstration. They prove it as an engine you can use.
 
 ## pong
 

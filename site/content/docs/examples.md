@@ -1,12 +1,13 @@
 ---
-title: What it does
+title: Examples
 weight: 2
 ---
 
-# What it does
+# Examples
 
-Five examples are in the repo. Each one's an incremental example of the
-improvements made to the engine.
+Five examples (so far). They live in the engine repo, each to show off an
+improvement as it lands. The [games]({{< relref "docs/games" >}}) take it to
+another level and show how to actually use the engine.
 
 ## rolling
 
