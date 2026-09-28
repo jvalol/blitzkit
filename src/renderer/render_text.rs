@@ -7,6 +7,9 @@ pub struct RenderText {
     pub color: glam::Vec4,
     pub text: String,
     pub size: f32,
+    /// Whether this line is one the player can choose. A title, a score and a
+    /// label leave it false and are drawn untouched. See spec 0023.
+    pub selectable: bool,
     pub focused: bool,
     pub centered: bool,
 }
@@ -19,6 +22,7 @@ impl Default for RenderText {
             color: (1.0, 1.0, 1.0, 1.0).into(),
             text: String::new(),
             size: 16.0,
+            selectable: false,
             focused: false,
             centered: false,
         }

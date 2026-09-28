@@ -1488,6 +1488,17 @@ fn create_render_pipeline(
     })
 }
 
+/// What the focused item carries, and what every other selectable item is
+/// indented by to match it. The same width either way, so a word keeps its
+/// left edge as focus moves. See spec 0023.
+const FOCUS_CARET: &str = "> ";
+const FOCUS_INDENT: &str = "  ";
+
+/// How much of its colour a selectable item keeps while it is not the focused
+/// one. Colour rather than alpha, so it recedes against a light background
+/// instead of disappearing.
+const DIMMED: f32 = 0.6;
+
 fn text_section(text: &RenderText) -> Section<'_> {
     let layout = Layout::default().h_align(if text.centered {
         HorizontalAlign::Center
@@ -1495,19 +1506,149 @@ fn text_section(text: &RenderText) -> Section<'_> {
         HorizontalAlign::Left
     });
 
-    Section::default()
+    let color = if text.selectable && !text.focused {
+        glam::vec4(
+            text.color.x * DIMMED,
+            text.color.y * DIMMED,
+            text.color.z * DIMMED,
+            text.color.w,
+        )
+    } else {
+        text.color
+    };
+
+    let mut section = Section::default()
         .with_screen_position((text.position.x, text.position.y))
         .with_bounds((text.bounds.x, text.bounds.y))
-        .with_layout(layout)
-        .add_text(
-            Text::new(&text.text)
-                .with_color(text.color)
-                .with_scale(if text.focused {
-                    text.size + 8.0
-                } else {
-                    text.size
-                }),
-        )
+        .with_layout(layout);
+
+    if text.selectable {
+        let prefix = if text.focused {
+            FOCUS_CARET
+        } else {
+            FOCUS_INDENT
+        };
+        section = section.add_text(Text::new(prefix).with_color(color).with_scale(text.size));
+    }
+
+    section.add_text(
+        Text::new(&text.text)
+            .with_color(color)
+            .with_scale(text.size),
+    )
+}
+
+#[cfg(test)]
+mod text_tests {
+    use super::*;
+
+    fn item(selectable: bool, focused: bool) -> RenderText {
+        RenderText {
+            text: String::from("Play"),
+            size: 32.0,
+            color: glam::vec4(1.0, 1.0, 1.0, 1.0),
+            selectable,
+            focused,
+            ..Default::default()
+        }
+    }
+
+    fn colors(section: &Section<'_>) -> Vec<[f32; 4]> {
+        section.text.iter().map(|t| t.extra.color).collect()
+    }
+
+    fn words<'a>(section: &Section<'a>) -> Vec<&'a str> {
+        section.text.iter().map(|t| t.text).collect()
+    }
+
+    #[test]
+    fn plain_text_is_left_alone() {
+        let title = item(false, false);
+        let section = text_section(&title);
+
+        assert_eq!(words(&section), vec!["Play"]);
+        assert_eq!(colors(&section), vec![[1.0, 1.0, 1.0, 1.0]]);
+    }
+
+    #[test]
+    fn plain_text_gets_no_prefix() {
+        // a title has nothing to line up with, so it is not indented either
+        let mut title = item(false, false);
+        title.focused = true;
+
+        assert_eq!(words(&text_section(&title)), vec!["Play"]);
+    }
+
+    #[test]
+    fn a_selectable_item_is_dimmed() {
+        let dim = item(true, false);
+        let section = text_section(&dim);
+
+        for color in colors(&section) {
+            assert_eq!(color[0], DIMMED, "red");
+            assert_eq!(color[1], DIMMED, "green");
+            assert_eq!(color[2], DIMMED, "blue");
+        }
+    }
+
+    #[test]
+    fn the_focused_item_is_not_dimmed() {
+        let focused = item(true, true);
+        let section = text_section(&focused);
+
+        for color in colors(&section) {
+            assert_eq!(color[..3], [1.0, 1.0, 1.0], "full colour");
+        }
+    }
+
+    #[test]
+    fn dimming_leaves_alpha_alone() {
+        let mut half = item(true, false);
+        half.color = glam::vec4(1.0, 1.0, 1.0, 0.5);
+
+        for color in colors(&text_section(&half)) {
+            assert_eq!(color[3], 0.5, "alpha is untouched");
+        }
+    }
+
+    #[test]
+    fn the_focused_item_carries_a_caret() {
+        let focused = item(true, true);
+        let section = text_section(&focused);
+
+        assert_eq!(words(&section), vec![FOCUS_CARET, "Play"]);
+    }
+
+    #[test]
+    fn an_unfocused_item_is_indented_to_match() {
+        let unfocused = item(true, false);
+        let section = text_section(&unfocused);
+
+        assert_eq!(words(&section), vec![FOCUS_INDENT, "Play"]);
+    }
+
+    #[test]
+    fn the_two_prefixes_are_the_same_width() {
+        // the caret is drawn in the same monospaced font as the word, so equal
+        // character counts is equal width, and nothing shifts as focus moves
+        assert_eq!(FOCUS_CARET.chars().count(), FOCUS_INDENT.chars().count());
+    }
+
+    #[test]
+    fn focus_does_not_change_the_size() {
+        let sizes: Vec<f32> = [item(true, true), item(true, false), item(false, false)]
+            .iter()
+            .flat_map(|t| {
+                text_section(t)
+                    .text
+                    .iter()
+                    .map(|p| p.scale.x)
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
+        assert!(sizes.iter().all(|s| *s == 32.0), "sizes were {:?}", sizes);
+    }
 }
 
 #[cfg(test)]
