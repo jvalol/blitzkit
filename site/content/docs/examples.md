@@ -11,7 +11,7 @@ another level and show how to actually use the engine.
 
 ## rolling
 
-Collisions. A ball can roll around a walled room and slide along the walls.
+In which collision detection is demonstrated. Roll a ball around a walled room and watch it slide along said walls.
 
 ```
 cargo run --release --example rolling
@@ -27,7 +27,8 @@ casting a shadow](/media/rolling.png)
 
 ## cubes
 
-This one's about the lighting. There's a sun, two spotlights moving around, and a lamp. Press L to cycle through the permutations.
+In which the lighting is shown off. There's a sun, two spotlights moving
+around, and a lamp. Press L to cycle through the permutations.
 
 The sun is a direction with no position, so there's nothing to draw for it and
 turning it off is the only way to _see_ what it was doing. The spotlights cast down
@@ -50,8 +51,8 @@ shadow off in a different direction](/media/cubes.png)
 
 ## teapot
 
-Here's the classic Utah teapot, from the points Newell measured off a real one in 1975. 32
-Bezier patches, and translucency so you can look inside it.
+In which the classic Utah teapot is rendered. Built from the points Newell measured off a
+real one in 1975. 32 Bezier patches, and translucency so you can look inside it.
 
 ```
 cargo run --release --example teapot
@@ -71,8 +72,8 @@ Drag to turn it, or use the arrows.
 
 ## klein
 
-A Klein bottle. It's drawn as a wire mesh so you can see the neck where it passes
-through the wall, but you can also make it solid or translucent. Parametric surfaces, and two-sided geometry because kind of the point of the thing is that it has no outer surface. It's a 3D Möbius strip.
+In which a Klein bottle is rendered as a wire mesh, so you can see the neck where it
+passes through the wall, but you can also make it solid or translucent. Parametric surfaces, and two-sided geometry because kind of the point of the thing is that it has no outer surface. It's a 3D Möbius strip.
 
 ```
 cargo run --release --example klein
@@ -88,7 +89,9 @@ passes through the wall](/media/klein-glass.png)
 
 ## tunnel
 
-Soar down the inside of a meandering tunnel and collect rings. This demonstrates one of the hardest things you can ask of mipmaps: a checkered field running away to a vanishing point.
+In which you soar down the inside of a meandering tunnel collecting rings. It
+demonstrates one of the hardest things you can ask of mipmaps: a checkered field
+running away to a vanishing point.
 
 ```
 cargo run --release --example tunnel

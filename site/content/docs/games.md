@@ -33,7 +33,7 @@ In which I develop a snake game using blitzkit.
 
 ## tetris
 
-The third game on the engine, after pong and snake.
+In which I build a game with color on the engine, after pong and snake. It's a little more sophisticated, but it works.
 
 [github.com/jvalol/tetris](https://github.com/jvalol/tetris)
 
@@ -41,8 +41,8 @@ The third game on the engine, after pong and snake.
 
 ## marble
 
-Roll a marble across a course of platforms to the goal, against a clock. The
-first 3D game built on blitzkit.
+In which I roll a marble across a course of platforms to a goal, against a clock.
+The first 3D game built on blitzkit.
 
 [github.com/jvalol/marble](https://github.com/jvalol/marble)
 
@@ -50,9 +50,9 @@ first 3D game built on blitzkit.
 
 ## slider
 
-Fly down a tunnel that wanders, through fourteen rings strung along it. You
-speed up the further you get, from 22 metres a second to 70. Scraping the wall
-costs you, missing a ring costs you, and both cost you the same way: time.
+In which you fly down a tunnel that wanders, through fourteen rings strung along
+it. You speed up the further you get, from 22 "meters" a second to 70. Scraping the wall
+slows you down, and so does missing a ring.
 
 [github.com/jvalol/slider](https://github.com/jvalol/slider)
 
