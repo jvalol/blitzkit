@@ -1,6 +1,6 @@
 [package]
 name = "blitzkit"
-version = "0.8.1"
+version = "0.8.2"
 authors = ["Jake Van Alstyne ☥ <j@jva.lol>"]
 edition = "2018"
 rust-version = "1.87"
@@ -16,21 +16,35 @@ categories = ["game-engines", "graphics"]
 # site is the product site at blitzkit.jva.lol, a Hugo project with a vendored
 # theme: 225 files and most of ten megabytes that nobody depending on this
 # crate has any use for.
-# tests/getting_started.rs reads the site's markdown, which is excluded above,
-# so it cannot compile from the package. cargo publish would not catch that: it
-# builds the packaged crate but never its tests.
-# examples/klein.rs and examples/teapot.rs draw shapes from blitzkit-shapes,
-# a path dev-dependency that publishing strips, so they cannot build from the
-# package either. cargo publish misses both cases: it builds the packaged lib
-# and never its tests or examples.
+# What the crate is: the engine. Everything else is the repository around it,
+# and a consumer has no use for any of it.
+#
+# farewell   the old name's final release, not part of this crate
+# media      readme screenshots, linked by absolute url so they need not ship
+# site       the Hugo site for blitzkit.jva.lol
+# netlify.toml  how that site is built, for a directory that does not ship
+# shapes     the teapot and the Klein bottle, objects the examples draw
+# examples   examples are not the engine, and a consumer cannot run a
+#            dependency's examples anyway
+# res/textures/checker.png  used by two examples and by nothing in src
+# specs      what the engine promises, kept for whoever works on it
+# scripts    the copy gate, which guards the readme and the site
+# tests      reads the site's markdown, which is excluded
+# CLAUDE.md  working notes
 exclude = [
     "farewell",
     "media",
     "site",
+    "netlify.toml",
     "shapes",
-    "tests/getting_started.rs",
-    "examples/klein.rs",
-    "examples/teapot.rs",
+    "examples",
+    "res/textures/checker.png",
+    "specs",
+    "scripts",
+    "tests",
+    "CLAUDE.md",
+    ".git-blame-ignore-revs",
+    ".gitignore",
 ]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
