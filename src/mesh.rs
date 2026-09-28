@@ -387,8 +387,10 @@ impl MeshData {
                 triangle[1] as usize,
                 triangle[2] as usize,
             ];
-            let edge1 = Vec3::from(self.vertices[b].position) - Vec3::from(self.vertices[a].position);
-            let edge2 = Vec3::from(self.vertices[c].position) - Vec3::from(self.vertices[a].position);
+            let edge1 =
+                Vec3::from(self.vertices[b].position) - Vec3::from(self.vertices[a].position);
+            let edge2 =
+                Vec3::from(self.vertices[c].position) - Vec3::from(self.vertices[a].position);
             let face = edge1.cross(edge2);
 
             for index in [a, b, c] {
@@ -555,7 +557,8 @@ mod tests {
     fn a_normal_with_nothing_to_borrow_from_stays_missing() {
         // a lone corner no triangle uses: nothing knows which way it faces
         let mut data = MeshData::plane();
-        data.vertices.push(Vertex::new([9.0, 9.0, 9.0], [0.0, 0.0, 0.0], [0.0, 0.0]));
+        data.vertices
+            .push(Vertex::new([9.0, 9.0, 9.0], [0.0, 0.0, 0.0], [0.0, 0.0]));
 
         data.fill_missing_normals();
 

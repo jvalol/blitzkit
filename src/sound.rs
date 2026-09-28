@@ -102,7 +102,9 @@ impl SoundSystem {
         };
 
         output.spatial_player.set_left_ear_position(left.to_array());
-        output.spatial_player.set_right_ear_position(right.to_array());
+        output
+            .spatial_player
+            .set_right_ear_position(right.to_array());
     }
 
     #[allow(dead_code)]
@@ -131,8 +133,16 @@ mod tests {
         // facing down negative z, the way a camera looks by default
         let (left, right) = ears(Vec3::ZERO, -Vec3::Z, Vec3::Y).expect("a listener has ears");
 
-        assert!((right - vec3(1.0, 0.0, 0.0)).length() < 1e-6, "right at {:?}", right);
-        assert!((left - vec3(-1.0, 0.0, 0.0)).length() < 1e-6, "left at {:?}", left);
+        assert!(
+            (right - vec3(1.0, 0.0, 0.0)).length() < 1e-6,
+            "right at {:?}",
+            right
+        );
+        assert!(
+            (left - vec3(-1.0, 0.0, 0.0)).length() < 1e-6,
+            "left at {:?}",
+            left
+        );
     }
 
     #[test]
@@ -140,8 +150,16 @@ mod tests {
         // a quarter turn to face negative x puts the right ear behind
         let (left, right) = ears(Vec3::ZERO, -Vec3::X, Vec3::Y).expect("a listener has ears");
 
-        assert!((right - vec3(0.0, 0.0, -1.0)).length() < 1e-6, "right at {:?}", right);
-        assert!((left - vec3(0.0, 0.0, 1.0)).length() < 1e-6, "left at {:?}", left);
+        assert!(
+            (right - vec3(0.0, 0.0, -1.0)).length() < 1e-6,
+            "right at {:?}",
+            right
+        );
+        assert!(
+            (left - vec3(0.0, 0.0, 1.0)).length() < 1e-6,
+            "left at {:?}",
+            left
+        );
     }
 
     #[test]

@@ -93,7 +93,8 @@ impl Teapot {
             return;
         }
 
-        self.rotation = (Quat::from_axis_angle(axis.normalize(), angle) * self.rotation).normalize();
+        self.rotation =
+            (Quat::from_axis_angle(axis.normalize(), angle) * self.rotation).normalize();
     }
 }
 

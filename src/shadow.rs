@@ -336,7 +336,10 @@ mod tests {
 
         // straight down the middle, partway along, lands in the map
         let middle = at - Vec3::Y * 6.0;
-        assert!(map_position(matrix, middle).is_some(), "its own axis is off the map");
+        assert!(
+            map_position(matrix, middle).is_some(),
+            "its own axis is off the map"
+        );
 
         // and so does the rim of the cone, which is what the widened field of
         // view is for: the soft edge has to be recorded, not clipped
@@ -373,7 +376,12 @@ mod tests {
 
         assert!(below.is_some(), "straight down produced nothing");
         let (u, v, _) = below.expect("straight down is on the map");
-        assert!((u - 0.5).abs() < 1e-3 && (v - 0.5).abs() < 1e-3, "off centre at {} {}", u, v);
+        assert!(
+            (u - 0.5).abs() < 1e-3 && (v - 0.5).abs() < 1e-3,
+            "off centre at {} {}",
+            u,
+            v
+        );
     }
 
     #[test]
@@ -598,7 +606,9 @@ mod tests {
         for direction in spread() {
             let world = at + direction * 4.0;
             let seen = (0..6)
-                .filter(|face| map_position(face_view_projection(at, *face, range), world).is_some())
+                .filter(|face| {
+                    map_position(face_view_projection(at, *face, range), world).is_some()
+                })
                 .count();
 
             assert!(seen >= 1, "nothing sees {:?}", direction);
@@ -626,7 +636,10 @@ mod tests {
         // the map says the nearest thing this way is four units off
         let recorded = point_distance_fraction(4.0, range);
 
-        assert!(point_is_lit(recorded, 4.0, range), "the thing recorded is not lit");
+        assert!(
+            point_is_lit(recorded, 4.0, range),
+            "the thing recorded is not lit"
+        );
         assert!(!point_is_lit(recorded, 7.0, range), "behind it is lit");
         // and the bias forgives a surface against its own reading
         assert!(point_is_lit(recorded, 4.0 + point_bias(range) * 0.5, range));

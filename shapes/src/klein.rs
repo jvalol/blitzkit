@@ -82,7 +82,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn the_klein_bottle_fits_the_unit_box() {
         // dense, because a coarse grid never lands on the extremes
@@ -101,7 +100,6 @@ mod tests {
         assert!(bounds.size().max_element() <= 1.0 + 1e-4, "outside the box");
         assert!(bounds.size().min_element() > 0.0, "flat on an axis");
     }
-
 
     #[test]
     fn the_klein_bottle_is_two_sided() {

@@ -11,8 +11,8 @@
 
 use blitzkit::camera::Camera;
 use blitzkit::geometry::Geometry;
-use blitzkit::lighting::{PointLight, SpotLight};
 use blitzkit::keyboard::{KeyboardInput, KeyboardKey, KeyboardKeyState};
+use blitzkit::lighting::{PointLight, SpotLight};
 use blitzkit::mesh::{MeshData, Transform};
 use blitzkit::mouse::{MouseButton, MouseInput};
 use blitzkit::renderer::render_text::{RenderText, TextRenderer};
@@ -260,8 +260,14 @@ impl Game for Cubes {
         let red = self.time * 0.9;
         let blue = self.time * 0.38 + std::f32::consts::PI;
         let lamps = [
-            (vec3(red.cos() * 3.0, 0.9, red.sin() * 3.0), vec3(1.0, 0.35, 0.2)),
-            (vec3(blue.cos() * 3.0, 0.9, blue.sin() * 3.0), vec3(0.2, 0.5, 1.0)),
+            (
+                vec3(red.cos() * 3.0, 0.9, red.sin() * 3.0),
+                vec3(1.0, 0.35, 0.2),
+            ),
+            (
+                vec3(blue.cos() * 3.0, 0.9, blue.sin() * 3.0),
+                vec3(0.2, 0.5, 1.0),
+            ),
         ];
 
         for (at, color) in lamps {

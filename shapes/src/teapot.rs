@@ -324,6 +324,9 @@ pub const CONTROL_POINTS: [[f32; 3]; 306] = [
 
 /// Which sixteen control points shape each patch. Newell numbered them from
 /// one; these count from zero.
+// one patch to a row, columns lined up, which is the only form this is
+// readable in. rustfmt would break each row into three lines.
+#[rustfmt::skip]
 pub const PATCHES: [[u16; 16]; 32] = [
     [  0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15],
     [  3,  16,  17,  18,   7,  19,  20,  21,  11,  22,  23,  24,  15,  25,  26,  27],
@@ -460,7 +463,11 @@ mod tests {
             .chunks_exact(3)
             .map(|triangle| {
                 let corner = |index: u32| Vec3::from(pot.vertices[index as usize].position);
-                let (a, b, c) = (corner(triangle[0]), corner(triangle[1]), corner(triangle[2]));
+                let (a, b, c) = (
+                    corner(triangle[0]),
+                    corner(triangle[1]),
+                    corner(triangle[2]),
+                );
 
                 a.dot(b.cross(c)) / 6.0
             })

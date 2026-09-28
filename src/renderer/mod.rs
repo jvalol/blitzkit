@@ -755,7 +755,10 @@ impl Renderer {
             // spot's map is cleared whether or not it is in use, so a spot that
             // was switched off this frame cannot leave last frame's shadow
             // behind on its layer.
-            let spots = scene.spot_lights().len().min(crate::lighting::MAX_SPOT_LIGHTS);
+            let spots = scene
+                .spot_lights()
+                .len()
+                .min(crate::lighting::MAX_SPOT_LIGHTS);
             let sun = crate::lighting::MAX_SPOT_LIGHTS as u32;
 
             let mut maps: Vec<(u32, &wgpu::TextureView)> = vec![(sun, &self.shadow_view)];
@@ -797,8 +800,7 @@ impl Renderer {
                         continue;
                     }
                     shadow_pass.set_vertex_buffer(0, mesh.vertices.slice(..));
-                    shadow_pass
-                        .set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    shadow_pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                     shadow_pass.draw_indexed(0..mesh.index_count, 0, *first..(*first + *count));
                 }
             }
@@ -842,8 +844,7 @@ impl Renderer {
                         continue;
                     }
                     shadow_pass.set_vertex_buffer(0, mesh.vertices.slice(..));
-                    shadow_pass
-                        .set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    shadow_pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                     shadow_pass.draw_indexed(0..mesh.index_count, 0, *first..(*first + *count));
                 }
             }
@@ -1145,7 +1146,10 @@ unsafe impl bytemuck::Zeroable for GpuPointFace {}
 fn point_faces(lamps: &[crate::lighting::PointLight]) -> [GpuPointFace; POINT_SHADOW_LAYERS] {
     let mut faces = [GpuPointFace::default(); POINT_SHADOW_LAYERS];
 
-    for (slot, index) in crate::lighting::casting_lamps(lamps).into_iter().enumerate() {
+    for (slot, index) in crate::lighting::casting_lamps(lamps)
+        .into_iter()
+        .enumerate()
+    {
         let lamp = &lamps[index];
         let range = lamp.range.max(0.0);
         for face in 0..6 {
@@ -1552,7 +1556,8 @@ mod uniform_tests {
     fn the_uniform_carries_the_light() {
         let mut light = Light::new();
         light.intensity = 0.5;
-        let uniform = SceneUniform::new(&Camera::new(), &light, &[], &[], &shadow::default_bounds());
+        let uniform =
+            SceneUniform::new(&Camera::new(), &light, &[], &[], &shadow::default_bounds());
 
         assert_eq!(uniform.light_color[3], 0.5);
         // pointing down, as the default light comes from above
@@ -1577,24 +1582,50 @@ mod uniform_tests {
     #[test]
     fn the_uniform_carries_the_lamps_it_is_given() {
         let lamps = [
-            PointLight::new(glam::vec3(1.0, 2.0, 3.0), glam::vec3(1.0, 0.0, 0.0), 2.0, 5.0),
-            PointLight::new(glam::vec3(-4.0, 0.0, 0.0), glam::vec3(0.0, 1.0, 0.0), 0.5, 9.0),
+            PointLight::new(
+                glam::vec3(1.0, 2.0, 3.0),
+                glam::vec3(1.0, 0.0, 0.0),
+                2.0,
+                5.0,
+            ),
+            PointLight::new(
+                glam::vec3(-4.0, 0.0, 0.0),
+                glam::vec3(0.0, 1.0, 0.0),
+                0.5,
+                9.0,
+            ),
         ];
-        let uniform =
-            SceneUniform::new(&Camera::new(), &Light::new(), &lamps, &[], &shadow::default_bounds());
+        let uniform = SceneUniform::new(
+            &Camera::new(),
+            &Light::new(),
+            &lamps,
+            &[],
+            &shadow::default_bounds(),
+        );
 
         assert_eq!(uniform.point_light_count[0], 2);
         assert_eq!(uniform.point_lights[0].position_range, [1.0, 2.0, 3.0, 5.0]);
-        assert_eq!(uniform.point_lights[0].color_intensity, [1.0, 0.0, 0.0, 2.0]);
-        assert_eq!(uniform.point_lights[1].position_range, [-4.0, 0.0, 0.0, 9.0]);
+        assert_eq!(
+            uniform.point_lights[0].color_intensity,
+            [1.0, 0.0, 0.0, 2.0]
+        );
+        assert_eq!(
+            uniform.point_lights[1].position_range,
+            [-4.0, 0.0, 0.0, 9.0]
+        );
         // the rest stay at nothing, so a lamp from a past frame cannot light
         assert_eq!(uniform.point_lights[2].color_intensity, [0.0; 4]);
     }
 
     #[test]
     fn no_lamps_is_a_count_of_none() {
-        let uniform =
-            SceneUniform::new(&Camera::new(), &Light::new(), &[], &[], &shadow::default_bounds());
+        let uniform = SceneUniform::new(
+            &Camera::new(),
+            &Light::new(),
+            &[],
+            &[],
+            &shadow::default_bounds(),
+        );
 
         assert_eq!(uniform.point_light_count[0], 0);
         for lamp in uniform.point_lights.iter() {
@@ -1609,8 +1640,13 @@ mod uniform_tests {
                 PointLight::new(glam::Vec3::splat(index as f32), glam::Vec3::ONE, 1.0, 1.0)
             })
             .collect();
-        let uniform =
-            SceneUniform::new(&Camera::new(), &Light::new(), &many, &[], &shadow::default_bounds());
+        let uniform = SceneUniform::new(
+            &Camera::new(),
+            &Light::new(),
+            &many,
+            &[],
+            &shadow::default_bounds(),
+        );
 
         assert_eq!(uniform.point_light_count[0] as usize, MAX_POINT_LIGHTS);
     }
@@ -1643,8 +1679,13 @@ mod uniform_tests {
             0.2,
             0.5,
         )];
-        let uniform =
-            SceneUniform::new(&Camera::new(), &Light::new(), &[], &spots, &shadow::default_bounds());
+        let uniform = SceneUniform::new(
+            &Camera::new(),
+            &Light::new(),
+            &[],
+            &spots,
+            &shadow::default_bounds(),
+        );
 
         assert_eq!(uniform.spot_light_count[0], 1);
         assert_eq!(uniform.spot_lights[0].position_range, [0.0, 3.0, 0.0, 9.0]);
@@ -1654,8 +1695,14 @@ mod uniform_tests {
         let cos_inner = uniform.spot_lights[0].cos_inner[0];
         assert!(cos_outer < cos_inner, "the cone is inside out");
         // and its matrix is real rather than left at zero
-        assert!(uniform.spot_lights[0].view_projection.iter().any(|v| *v != 0.0));
-        assert!(uniform.spot_lights[0].view_projection.iter().all(|v| v.is_finite()));
+        assert!(uniform.spot_lights[0]
+            .view_projection
+            .iter()
+            .any(|v| *v != 0.0));
+        assert!(uniform.spot_lights[0]
+            .view_projection
+            .iter()
+            .all(|v| v.is_finite()));
 
         // the rest stay dark
         assert_eq!(uniform.spot_lights[1].color_intensity, [0.0; 4]);
@@ -1664,8 +1711,13 @@ mod uniform_tests {
     #[test]
     fn a_negative_range_reaches_nothing_rather_than_wrapping() {
         let bad = PointLight::new(glam::Vec3::ZERO, glam::Vec3::ONE, 1.0, -3.0);
-        let uniform =
-            SceneUniform::new(&Camera::new(), &Light::new(), &[bad], &[], &shadow::default_bounds());
+        let uniform = SceneUniform::new(
+            &Camera::new(),
+            &Light::new(),
+            &[bad],
+            &[],
+            &shadow::default_bounds(),
+        );
 
         assert_eq!(uniform.point_lights[0].position_range[3], 0.0);
     }
@@ -1690,8 +1742,13 @@ mod uniform_tests {
             PointLight::new(glam::Vec3::Y, glam::Vec3::ONE, 1.0, 5.0),
             PointLight::new(glam::Vec3::Z, glam::Vec3::ONE, 1.0, 5.0).casting(),
         ];
-        let uniform =
-            SceneUniform::new(&Camera::new(), &Light::new(), &lamps, &[], &shadow::default_bounds());
+        let uniform = SceneUniform::new(
+            &Camera::new(),
+            &Light::new(),
+            &lamps,
+            &[],
+            &shadow::default_bounds(),
+        );
 
         assert_eq!(uniform.point_shadow[0], 2, "the count is wrong");
         // the lamps that cast, by their place in the array the shader loops over
@@ -1705,17 +1762,21 @@ mod uniform_tests {
     #[test]
     fn no_lamp_casting_is_a_count_of_none() {
         let lamps = [PointLight::new(glam::Vec3::ZERO, glam::Vec3::ONE, 1.0, 5.0)];
-        let uniform =
-            SceneUniform::new(&Camera::new(), &Light::new(), &lamps, &[], &shadow::default_bounds());
+        let uniform = SceneUniform::new(
+            &Camera::new(),
+            &Light::new(),
+            &lamps,
+            &[],
+            &shadow::default_bounds(),
+        );
 
         assert_eq!(uniform.point_shadow, [0; 4]);
     }
 
     #[test]
     fn a_casting_lamp_gets_six_layers_and_the_rest_get_none() {
-        let lamps = [
-            PointLight::new(glam::vec3(0.0, 3.0, 0.0), glam::Vec3::ONE, 1.0, 8.0).casting(),
-        ];
+        let lamps =
+            [PointLight::new(glam::vec3(0.0, 3.0, 0.0), glam::Vec3::ONE, 1.0, 8.0).casting()];
         let faces = point_faces(&lamps);
 
         for (layer, face) in faces.iter().take(6).enumerate() {
@@ -1728,8 +1789,7 @@ mod uniform_tests {
             // and the matrix is the one that face's pass will use
             assert_eq!(
                 face.view_projection,
-                shadow::face_view_projection(glam::vec3(0.0, 3.0, 0.0), layer, 8.0)
-                    .to_cols_array()
+                shadow::face_view_projection(glam::vec3(0.0, 3.0, 0.0), layer, 8.0).to_cols_array()
             );
         }
 
@@ -1750,8 +1810,13 @@ mod uniform_tests {
             PointLight::new(glam::Vec3::Y * 2.0, glam::Vec3::ONE, 1.0, 4.0).casting(),
             PointLight::new(glam::Vec3::Z * 2.0, glam::Vec3::ONE, 1.0, 4.0).casting(),
         ];
-        let uniform =
-            SceneUniform::new(&Camera::new(), &Light::new(), &lamps, &[], &shadow::default_bounds());
+        let uniform = SceneUniform::new(
+            &Camera::new(),
+            &Light::new(),
+            &lamps,
+            &[],
+            &shadow::default_bounds(),
+        );
         let faces = point_faces(&lamps);
 
         for slot in 0..uniform.point_shadow[0] as usize {

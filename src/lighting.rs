@@ -342,16 +342,18 @@ mod tests {
     #[test]
     fn a_spot_edge_is_soft() {
         let spot = spot();
-        let at = |degrees: f32| {
-            spot.cone(glam::vec3(degrees.to_radians().tan(), -1.0, 0.0))
-        };
+        let at = |degrees: f32| spot.cone(glam::vec3(degrees.to_radians().tan(), -1.0, 0.0));
 
         let mut last = 1.0;
         for step in 0..=30 {
             let degrees = 20.0 + step as f32 * 0.5;
             let now = at(degrees);
 
-            assert!(now <= last + 1e-6, "it brightened at {:.1} degrees", degrees);
+            assert!(
+                now <= last + 1e-6,
+                "it brightened at {:.1} degrees",
+                degrees
+            );
             assert!((0.0..=1.0).contains(&now));
             last = now;
         }
@@ -359,7 +361,11 @@ mod tests {
         // partway across the soft edge it is neither on nor off, which is the
         // whole point of having one
         let middle = at(27.5);
-        assert!((0.05..0.95).contains(&middle), "the edge is a step, at {}", middle);
+        assert!(
+            (0.05..0.95).contains(&middle),
+            "the edge is a step, at {}",
+            middle
+        );
     }
 
     #[test]
@@ -376,7 +382,10 @@ mod tests {
         );
 
         let (cos_outer, cos_inner) = backwards.cone_cosines();
-        assert!(cos_outer <= cos_inner, "a wider angle has the smaller cosine");
+        assert!(
+            cos_outer <= cos_inner,
+            "a wider angle has the smaller cosine"
+        );
     }
 
     #[test]
@@ -406,7 +415,11 @@ mod tests {
         let lit = green.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0);
 
         assert!(lit.y > 0.0);
-        assert!(lit.x.abs() < 1e-6 && lit.z.abs() < 1e-6, "green turned up {:?}", lit);
+        assert!(
+            lit.x.abs() < 1e-6 && lit.z.abs() < 1e-6,
+            "green turned up {:?}",
+            lit
+        );
     }
 
     #[test]
@@ -415,7 +428,10 @@ mod tests {
         broken.direction = Vec3::ZERO;
 
         assert_eq!(broken.cone(-Vec3::Y), 0.0);
-        assert_eq!(broken.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0), Vec3::ZERO);
+        assert_eq!(
+            broken.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0),
+            Vec3::ZERO
+        );
     }
 
     const WHITE: Vec3 = Vec3::ONE;
@@ -462,7 +478,10 @@ mod tests {
         let dead = PointLight::new(Vec3::ZERO, Vec3::ONE, 1.0, 0.0);
 
         assert_eq!(dead.falloff(0.0), 0.0);
-        assert_eq!(dead.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0), Vec3::ZERO);
+        assert_eq!(
+            dead.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0),
+            Vec3::ZERO
+        );
     }
 
     #[test]
