@@ -1,6 +1,6 @@
 [package]
 name = "blitzkit"
-version = "0.8.2"
+version = "0.8.3"
 authors = ["Jake Van Alstyne ☥ <j@jva.lol>"]
 edition = "2018"
 rust-version = "1.87"
