@@ -88,7 +88,7 @@ passes through the wall](/media/klein-glass.png)
 
 ## tunnel
 
-Fly down the inside of a tunnel that meanders. It's a game that demonstrates about the hardest thing you can ask of mipmaps: a checker running away to a vanishing point.
+Soar down the inside of a meandering tunnel and collect rings. This demonstrates one of the hardest things you can ask of mipmaps: a checkered field running away to a vanishing point.
 
 ```
 cargo run --release --example tunnel
