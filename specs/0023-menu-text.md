@@ -1,6 +1,6 @@
 # 0023 Menu text
 
-**Status:** draft
+**Status:** implemented
 **Date:** 2026-09-28
 
 ## Goal
@@ -52,10 +52,12 @@ selectable item vanish instead of recede.
 
 ### Verified by hand
 
-- Run any of the five games. The first screen shows the title plain, Play with
-  a caret at full white, and Quit dimmed beneath it.
+- Run pong, snake or tessera, which are the three with a menu. Marble and
+  slider go straight into play and have no selectable text at all. The first
+  screen shows the title plain, Play with a caret at full white, and Quit
+  dimmed beneath it.
 - Move between Play and Quit. The caret moves, the brightness swaps, and
-  neither word shifts left, right, up or down.
+  neither word shifts left, right, up or down. Confirmed 2026-09-28.
 
 ## Out of scope
 
