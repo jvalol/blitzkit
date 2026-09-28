@@ -9,6 +9,18 @@
 //! Steer with the mouse. It flies itself, faster the further you get, and
 //! brushing the wall costs you speed. Space locks the cursor, R starts over,
 //! escape quits.
+//!
+//! # How it's made in plain words
+//!
+//! Think of it like this:
+//!
+//! The `spine` is a garden hose with one person wiggling it side to side and
+//! another wiggling it up and down. Six swings one way over its length, nine
+//! the other. They never line up, so the shape never repeats.
+//!
+//! The rings are all offset from the middle by the same distance and differ only in
+//! which direction. That's deecided like hours on a clock. The hand steps round by the golden angle, or golden ratio,
+//! `RING_TURN`, so it never ends up in the same place twice.
 
 use blitzkit::camera::Camera;
 use blitzkit::geometry::Geometry;
