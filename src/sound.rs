@@ -28,6 +28,25 @@ pub fn ears(position: Vec3, forward: Vec3, up: Vec3) -> Option<(Vec3, Vec3)> {
     Some((position - right, position + right))
 }
 
+/// A tenth of a second of silence, appended before anything a game asks for.
+///
+/// The first sound through the output is pitched sharp when it has to be
+/// resampled: a 44100 sample on a device running at 48000 came out about a
+/// tone and a half high, and everything after it was right. The silence takes
+/// that for itself.
+///
+/// 44100 because it is what the games' samples are, so on a device already
+/// running at it there is nothing to resample and nothing to get wrong.
+const PRIMING_CHANNELS: rodio::ChannelCount = match std::num::NonZeroU16::new(1) {
+    Some(n) => n,
+    None => unreachable!(),
+};
+const PRIMING_RATE: rodio::SampleRate = match std::num::NonZeroU32::new(44_100) {
+    Some(n) => n,
+    None => unreachable!(),
+};
+const PRIMING_SAMPLES: usize = 4_410;
+
 /// Plays sounds on the default output device. When no output device can be
 /// opened, every sound is silently dropped instead.
 pub struct SoundSystem {
@@ -55,6 +74,17 @@ impl SoundSystem {
 
                 let player = rodio::Player::connect_new(sink.mixer());
                 player.set_volume(0.5);
+
+                // The first sound through the output comes out sharp when it
+                // has to be resampled, so a tenth of a second of silence goes
+                // first and takes that for itself. 44100 because that is what
+                // the games' samples are, and a device already running at it
+                // has nothing to resample and nothing to get wrong.
+                player.append(rodio::source::Zero::new_samples(
+                    PRIMING_CHANNELS,
+                    PRIMING_RATE,
+                    PRIMING_SAMPLES,
+                ));
 
                 let spatial_player = rodio::SpatialPlayer::connect_new(
                     sink.mixer(),
@@ -124,6 +154,21 @@ impl SoundSystem {
 mod tests {
     use super::*;
     use glam::vec3;
+
+    #[test]
+    fn the_priming_silence_is_a_tenth_of_a_second() {
+        // long enough to take the first sound's resampling, short enough that
+        // a sound played on the first frame is not audibly late
+        let seconds = PRIMING_SAMPLES as f32 / PRIMING_RATE.get() as f32;
+
+        assert!((seconds - 0.1).abs() < 1e-6, "was {} seconds", seconds);
+        assert_eq!(
+            PRIMING_RATE.get(),
+            44_100,
+            "the rate the games' samples are, so that rate resamples nothing"
+        );
+        assert_eq!(PRIMING_CHANNELS.get(), 1, "silence needs only the one");
+    }
 
     /// What the spatial output is opened with, before any listener is set.
     const OPENING_EARS: ([f32; 3], [f32; 3]) = ([-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
