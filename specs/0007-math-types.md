@@ -53,7 +53,7 @@ a test asks the compiler for the real offsets rather than trusting the layout.
 ### Verified by hand
 
 - The three games play the same after the migration. — run pong, snake and
-  tetris and compare.
+  tessera and compare.
 
 ## Out of scope
 

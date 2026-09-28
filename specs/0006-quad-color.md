@@ -28,7 +28,7 @@ Text carries its own color in `RenderText` and is unaffected by this.
 
 ### Verified by hand
 
-- Colors look right on screen. — run tetris, where every piece has its own color.
+- Colors look right on screen. — run tessera, where every piece has its own color.
 - A half transparent quad shows what is behind it. — draw one over another.
 
 ## Out of scope

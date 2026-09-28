@@ -10,7 +10,7 @@ Feel free to follow along!
 
 - [pong](https://github.com/jvalol/pong)
 - [snake](https://github.com/jvalol/snake)
-- [tetris](https://github.com/jvalol/tetris)
+- [tessera](https://github.com/jvalol/tessera)
 - [marble](https://github.com/jvalol/marble) first 3d game here
 - [slider](https://github.com/jvalol/slider) second. fly through a tunnel, try to thread through the rings
 

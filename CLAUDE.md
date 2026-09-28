@@ -5,7 +5,7 @@ calls `start()`, and the engine owns the window, the event loop, rendering,
 keyboard and mouse input, and sound. The 3D half adds a camera, meshes with
 instancing, textures, collision shapes, and three kinds of light that cast
 shadows: a sun, lamps, and spots. Five games in sibling directories exercise
-it: `pong`, `snake` and `tetris` in 2D, and `marble` and `slider` in 3D.
+it: `pong`, `snake` and `tessera` in 2D, and `marble` and `slider` in 3D.
 
 ## Build and test
 

@@ -79,7 +79,7 @@ checks are what cover the gap.
   every shadow go with it. It is also the check that a scene's lamps cast
   nothing, and that a scene with no lamps is lit as it was before spec 0020.
 - A game with no point lights looks the way it did before. Run pong, snake,
-  tetris, marble and slider.
+  tessera, marble and slider.
 
 ## Out of scope
 

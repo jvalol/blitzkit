@@ -16,8 +16,7 @@ cargo add blitzkit
 ```
 
 - [Getting started]({{< relref "docs/getting-started" >}})
-  smallest steps to building an app that opens a window.
-- [Examples]({{< relref "docs/examples" >}}) single-file demonstrations that
-  live in the engine repo.
-- [Games]({{< relref "docs/games" >}}) fully fledged implementations
-  that use the engine as a dependency.
+  smallest steps to "Hello world" in a window
+- [Examples]({{< relref "docs/examples" >}}) single-file demonstrations
+- [Games]({{< relref "docs/games" >}}) fully fledged and open-source implementations
+  using the engine

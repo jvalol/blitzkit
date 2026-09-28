@@ -31,13 +31,13 @@ In which I develop a snake game using blitzkit.
 
 ![Snake: a nine segment snake winding through two turns in the lower left of the board, with a pellet away to the upper right](https://raw.githubusercontent.com/jvalol/snake/main/media/screenshot.png)
 
-## tetris
+## tessera
 
 In which I build a game with color on the engine, after pong and snake. It's a little more sophisticated, but it works.
 
-[github.com/jvalol/tetris](https://github.com/jvalol/tetris)
+[github.com/jvalol/tessera](https://github.com/jvalol/tessera)
 
-![Tetris: a piece falling, the next one queued beside the well, and the score, level and rows cleared](https://raw.githubusercontent.com/jvalol/tetris/main/media/screenshot.png)
+![Tessera: a piece falling, the next one queued beside the well, and the score, level and rows cleared](https://raw.githubusercontent.com/jvalol/tessera/main/media/screenshot.png)
 
 ## marble
 
