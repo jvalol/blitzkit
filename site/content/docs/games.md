@@ -5,7 +5,7 @@ weight: 3
 
 # Games
 
-I built five games on it. Each one is its own repo and each takes
+I built these on it. Each one is its own repo and each takes
 blitzkit from crates.io rather than a local checkout, so I'm using the engine
 the same way you would.
 
