@@ -32,6 +32,7 @@ not a priority, and it never changes once a spec exists.
 | [0022](0022-point-light-shadows.md) | Lamps that cast, six projections each |
 | [0023](0023-menu-text.md) | Which lines can be chosen, and which one is |
 | [0024](0024-textured-quads.md) | An image on a 2D quad (draft) |
+| [0025](0025-cursor-rays.md) | A cursor position as a ray into the world (draft) |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.
