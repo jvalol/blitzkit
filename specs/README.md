@@ -34,6 +34,7 @@ not a priority, and it never changes once a spec exists.
 | [0024](0024-textured-quads.md) | An image on a 2D quad (draft) |
 | [0025](0025-cursor-rays.md) | A cursor position as a ray into the world (draft) |
 | [0026](0026-sierpinski-tetrahedron.md) | Four copies of itself, each half the size (draft) |
+| [0027](0027-menger-sponge.md) | Twenty copies of itself, each a third the size (draft) |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.

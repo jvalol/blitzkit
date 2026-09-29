@@ -1,5 +1,5 @@
-//! Named shapes the examples draw: the Utah teapot, a Klein bottle, and a
-//! Sierpinski tetrahedron.
+//! Named shapes the examples draw: the Utah teapot, a Klein bottle, and two
+//! recursive solids, a Sierpinski tetrahedron and a Menger sponge.
 //!
 //! Not part of the engine. `blitzkit` ships the primitives a game builds things
 //! out of, the cube and the sphere and the plane, plus the machinery for making
@@ -11,5 +11,6 @@
 //! rule puts an inherent impl out of reach from here.
 
 pub mod klein;
+pub mod menger;
 pub mod sierpinski;
 pub mod teapot;
