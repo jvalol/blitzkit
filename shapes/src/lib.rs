@@ -10,6 +10,7 @@
 //! They are free functions rather than `MeshData` methods because the orphan
 //! rule puts an inherent impl out of reach from here.
 
+pub mod hilbert;
 pub mod klein;
 pub mod menger;
 pub mod sierpinski;
