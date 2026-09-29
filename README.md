@@ -101,3 +101,33 @@ and that license travels with it in `res/fonts/OFL.txt`.
 ---
 
 I asked AI to draft this for me. I've edited it. Any surviving AI smells are my oversight.
+
+**sierpinski**, If you know, you know.
+
+```
+cargo run --release --example sierpinski
+```
+
+
+
+![A Sierpinski tetrahedron at depth four, its shadow on the floor carrying the same holes](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/sierpinski.png)
+
+**menger**, Another fractal example.
+
+```
+cargo run --release --example menger
+```
+
+
+
+![A Menger sponge at depth three, passages going right through it, a square hole in its shadow](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/menger.png)
+
+**hilbert**, I didn't know what this was until I got into this space of weird 3d geometries. I just think it's neat.
+
+```
+cargo run --release --example hilbert
+```
+
+
+
+![A Hilbert curve of order three drawn as a tube, winding through a cube without touching itself](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/hilbert.png)

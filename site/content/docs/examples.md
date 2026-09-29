@@ -5,9 +5,7 @@ weight: 2
 
 # Examples
 
-Five examples (so far). They live in the engine repo, each to show off an
-improvement as it lands. The [games]({{< relref "docs/games" >}}) take it to
-another level and show how to actually use the engine.
+Examples live in the engine to demonstrate improvements as they land.
 
 ## rolling
 
@@ -105,3 +103,39 @@ brushing the wall costs you speed.
 
 ![Looking down a tunnel of dark and light checks receding to a vanishing point,
 with a gold ring hanging off centre](/media/tunnel.png)
+
+## sierpinski
+
+In which a tetrahedron is made of four smaller copies of itself.
+
+```
+cargo run --release --example sierpinski
+```
+
+Up and down change how deep it goes. Drag to turn it, scroll to move closer, R puts it back.
+
+![A Sierpinski tetrahedron at depth four, its shadow on the floor carrying the same holes](/media/sierpinski.png)
+
+## menger
+
+In which a cube is made of twenty smaller copies of itself.
+
+```
+cargo run --release --example menger
+```
+
+Up and down change how deep it goes. Drag to turn it, scroll to move closer, R puts it back.
+
+![A Menger sponge at depth three, passages going right through it, a square hole in its shadow](/media/menger.png)
+
+## hilbert
+
+In which a single line winds through every cell of a cube without ever crossing itself.
+
+```
+cargo run --release --example hilbert
+```
+
+Up and down change how deep it goes. Drag to turn it, scroll to move closer, R puts it back.
+
+![A Hilbert curve of order three drawn as a tube, winding through a cube without touching itself](/media/hilbert.png)
