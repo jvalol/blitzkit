@@ -61,3 +61,9 @@ One has three lifts to take a tile out and set it down anywhere. If that's not e
 [github.com/jvalol/starry](https://github.com/jvalol/starry)
 
 ![Starry: the painting cut into sixteen thick tiles in a tray, one square empty, the cypress and the village broken across the wrong squares](https://raw.githubusercontent.com/jvalol/starry/main/media/screenshot.png)
+
+## lantern
+
+In which one walks a dark maze carrying two lamps. Put one down and it stays lit to mark your path. It's fun!
+
+[github.com/jvalol/lantern](https://github.com/jvalol/lantern)

@@ -14,6 +14,7 @@ Feel free to follow along!
 - [marble](https://github.com/jvalol/marble) first 3d game here
 - [slider](https://github.com/jvalol/slider) second. fly through a tunnel, try to thread through the rings
 - [starry](https://github.com/jvalol/starry) third. a sliding tile puzzle of starry night
+- [lantern](https://github.com/jvalol/lantern) fourth. a dark maze., you get two lamps
 
 The examples below live in this repo. The games are their own repos.
 
