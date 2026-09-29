@@ -36,6 +36,7 @@ not a priority, and it never changes once a spec exists.
 | [0026](0026-sierpinski-tetrahedron.md) | Four copies of itself, each half the size (draft) |
 | [0027](0027-menger-sponge.md) | Twenty copies of itself, each a third the size (draft) |
 | [0028](0028-hilbert-curve.md) | A line that fills a cube, swept as a tube |
+| [0029](0029-contact-shadows.md) | Shadows in the first fraction of a unit, where a map cannot reach |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.

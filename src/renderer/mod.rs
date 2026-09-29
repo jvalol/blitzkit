@@ -72,6 +72,14 @@ pub struct Renderer {
     /// arrives with meshes in spec 0010; quads and text never use it.
     depth: depth::DepthTexture,
     mesh_pipeline: wgpu::RenderPipeline,
+    /// Depth for the whole scene, settled before anything is shaded, so the
+    /// mesh pass can read it while it tests against it. See spec 0029.
+    prepass_pipeline: wgpu::RenderPipeline,
+    scene_depth_layout: wgpu::BindGroupLayout,
+    scene_depth_bind_group: wgpu::BindGroup,
+    /// Whether the march happens at all. A cost, and a game with nothing
+    /// resting on anything does not need it.
+    contact_shadows: bool,
     meshes: Vec<GpuMesh>,
     textures: Vec<wgpu::BindGroup>,
     shadow_pipeline: wgpu::RenderPipeline,
@@ -181,6 +189,7 @@ impl Renderer {
                 &[],
                 &[],
                 &shadow::default_bounds(),
+                true,
             )]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -457,14 +466,34 @@ impl Renderer {
             &which_layout,
             &point_faces_layout,
         );
+        let scene_depth_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Scene Depth Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                }],
+            });
+        let scene_depth_bind_group = scene_depth_group(&device, &scene_depth_layout, &depth);
+        let prepass_pipeline = create_prepass_pipeline(&device, &camera_bind_group_layout);
+
         let mesh_pipeline = create_mesh_pipeline(
             &device,
             config.format,
-            &camera_bind_group_layout,
-            &texture_bind_group_layout,
-            &shadow_bind_group_layout,
+            MeshLayouts {
+                camera: &camera_bind_group_layout,
+                texture: &texture_bind_group_layout,
+                shadow: &shadow_bind_group_layout,
+                scene_depth: &scene_depth_layout,
+            },
             depth::mesh_primitive_state(),
-            depth::state(),
+            depth::read_only_state(),
         );
         // the same shader twice more, for the far side of a translucent shape
         // and then its near side, per spec 0018
@@ -472,9 +501,12 @@ impl Renderer {
             create_mesh_pipeline(
                 &device,
                 config.format,
-                &camera_bind_group_layout,
-                &texture_bind_group_layout,
-                &shadow_bind_group_layout,
+                MeshLayouts {
+                    camera: &camera_bind_group_layout,
+                    texture: &texture_bind_group_layout,
+                    shadow: &shadow_bind_group_layout,
+                    scene_depth: &scene_depth_layout,
+                },
                 depth::translucent_primitive_state(cull),
                 depth::translucent_state(),
             )
@@ -500,6 +532,10 @@ impl Renderer {
             text_brush,
             depth,
             mesh_pipeline,
+            prepass_pipeline,
+            scene_depth_layout,
+            scene_depth_bind_group,
+            contact_shadows: true,
             translucent_pipelines,
             meshes: Vec::new(),
             textures: Vec::new(),
@@ -616,6 +652,16 @@ impl Renderer {
         self.scene_bounds = bounds;
     }
 
+    /// Whether the contact march runs. On by default; a game with nothing
+    /// resting on anything can save the work. See spec 0029.
+    pub fn set_contact_shadows(&mut self, on: bool) {
+        self.contact_shadows = on;
+    }
+
+    pub fn contact_shadows(&self) -> bool {
+        self.contact_shadows
+    }
+
     pub fn scene_bounds(&self) -> Aabb {
         self.scene_bounds
     }
@@ -683,6 +729,10 @@ impl Renderer {
             bytemuck::cast_slice(&screen_size(&self.config)),
         );
         self.depth = depth::DepthTexture::new(&self.device, self.config.width, self.config.height);
+        // the old view died with the old texture, and the march reads through
+        // this one
+        self.scene_depth_bind_group =
+            scene_depth_group(&self.device, &self.scene_depth_layout, &self.depth);
         self.camera.set_viewport(self.width(), self.height());
         self.text_brush
             .resize_view(self.width(), self.height(), &self.queue);
@@ -718,6 +768,7 @@ impl Renderer {
                 scene.point_lights(),
                 scene.spot_lights(),
                 &self.scene_bounds,
+                self.contact_shadows,
             )]),
         );
         self.queue.write_buffer(
@@ -850,6 +901,45 @@ impl Renderer {
             }
         }
 
+        // depth for the whole scene first. The mesh pass reads it while it is
+        // testing against it, which a pass may only do when it is not also
+        // writing it, so the writing happens here. See spec 0029.
+        {
+            let mut prepass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Depth Prepass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            // only the solid geometry: see-through things do not write depth in
+            // the mesh pass either, per spec 0018
+            if !opaque.is_empty() {
+                prepass.set_pipeline(&self.prepass_pipeline);
+                prepass.set_bind_group(0, &self.camera_bind_group, &[]);
+                prepass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+
+                for (mesh_id, _, first, count) in opaque.iter() {
+                    let mesh = &self.meshes[mesh_id.0];
+                    if mesh.index_count == 0 {
+                        continue;
+                    }
+                    prepass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                    prepass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    prepass.draw_indexed(0..mesh.index_count, 0, *first..(*first + *count));
+                }
+            }
+        }
+
         // the world next, depth tested, then the interface painted on top
         {
             let mut mesh_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -863,12 +953,11 @@ impl Renderer {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
+                // read only: the prepass settled it, and a pass that wrote it
+                // could not also be sampling it
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.depth.view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
+                    depth_ops: None,
                     stencil_ops: None,
                 }),
                 timestamp_writes: None,
@@ -904,6 +993,7 @@ impl Renderer {
                         }
                         mesh_pass.set_bind_group(1, &self.textures[texture_id.0], &[]);
                         mesh_pass.set_bind_group(2, &self.shadow_bind_group, &[]);
+                        mesh_pass.set_bind_group(3, &self.scene_depth_bind_group, &[]);
                         mesh_pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                         mesh_pass
                             .set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -1188,6 +1278,12 @@ struct SceneUniform {
     /// x is how many lamps cast, y and z are which of the lamps above those
     /// are. w is padding. See spec 0022.
     point_shadow: [u32; 4],
+    /// x is one when the contact march runs and zero when it does not, y and z
+    /// are the camera's near and far planes, and w is how far the march goes.
+    /// The planes are here because the depth buffer holds clip depth, and
+    /// nothing can be compared in world units until that is undone. See spec
+    /// 0029.
+    contact: [f32; 4],
 }
 
 unsafe impl bytemuck::Pod for SceneUniform {}
@@ -1200,6 +1296,7 @@ impl SceneUniform {
         lamps: &[crate::lighting::PointLight],
         spots: &[crate::lighting::SpotLight],
         bounds: &Aabb,
+        contact_shadows: bool,
     ) -> Self {
         // the scene caps this already, per spec 0020, but the array is fixed
         // and reading past it would be a different kind of bug
@@ -1237,6 +1334,12 @@ impl SceneUniform {
             spot_light_count: [lit as u32, 0, 0, 0],
             spot_lights,
             point_shadow,
+            contact: [
+                if contact_shadows { 1.0 } else { 0.0 },
+                camera.near,
+                camera.far,
+                crate::contact::CONTACT_REACH,
+            ],
         }
     }
 }
@@ -1345,12 +1448,69 @@ fn create_point_shadow_pipeline(
     })
 }
 
+/// The scene's depth, as something a shader can read. Rebuilt whenever the
+/// texture behind it is, which is every resize.
+fn scene_depth_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    depth: &depth::DepthTexture,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Scene Depth Bind Group"),
+        layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::TextureView(&depth.view),
+        }],
+    })
+}
+
+/// Depth and nothing else, so the mesh pass has the whole scene to read. The
+/// same vertex stage as the mesh pipeline, so the depths it writes are the
+/// depths that pass will test against. See spec 0029.
+fn create_prepass_pipeline(
+    device: &wgpu::Device,
+    camera_bind_group_layout: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::include_wgsl!("../../res/shaders/mesh.wgsl"));
+
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("Depth Prepass Pipeline Layout"),
+        bind_group_layouts: &[Some(camera_bind_group_layout)],
+        immediate_size: 0,
+    });
+
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Depth Prepass Pipeline"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[Some(crate::mesh::Vertex::DESC), Some(Instance::DESC)],
+            compilation_options: Default::default(),
+        },
+        fragment: None,
+        primitive: depth::mesh_primitive_state(),
+        depth_stencil: Some(depth::state()),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// What a mesh pipeline binds, in the order the shader declares them: the
+/// camera, the surface, the shadow maps, and spec 0029's scene depth.
+struct MeshLayouts<'a> {
+    camera: &'a wgpu::BindGroupLayout,
+    texture: &'a wgpu::BindGroupLayout,
+    shadow: &'a wgpu::BindGroupLayout,
+    scene_depth: &'a wgpu::BindGroupLayout,
+}
+
 fn create_mesh_pipeline(
     device: &wgpu::Device,
     color_format: wgpu::TextureFormat,
-    camera_bind_group_layout: &wgpu::BindGroupLayout,
-    texture_bind_group_layout: &wgpu::BindGroupLayout,
-    shadow_bind_group_layout: &wgpu::BindGroupLayout,
+    layouts: MeshLayouts,
     primitive: wgpu::PrimitiveState,
     depth_stencil: wgpu::DepthStencilState,
 ) -> wgpu::RenderPipeline {
@@ -1359,9 +1519,10 @@ fn create_mesh_pipeline(
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Mesh Pipeline Layout"),
         bind_group_layouts: &[
-            Some(camera_bind_group_layout),
-            Some(texture_bind_group_layout),
-            Some(shadow_bind_group_layout),
+            Some(layouts.camera),
+            Some(layouts.texture),
+            Some(layouts.shadow),
+            Some(layouts.scene_depth),
         ],
         immediate_size: 0,
     });
@@ -1672,7 +1833,7 @@ mod uniform_tests {
         // a uniform block wants each field on a 16 byte boundary
         assert_eq!(
             std::mem::size_of::<SceneUniform>(),
-            64 + 16 * 4 + 64 + 16 + 32 * MAX_POINT_LIGHTS + 16 + 128 * MAX_SPOT_LIGHTS + 16
+            64 + 16 * 4 + 64 + 16 + 32 * MAX_POINT_LIGHTS + 16 + 128 * MAX_SPOT_LIGHTS + 16 + 16
         );
         assert_eq!(
             std::mem::offset_of!(SceneUniform, light_view_projection),
@@ -1687,6 +1848,7 @@ mod uniform_tests {
         assert_eq!(std::mem::offset_of!(SceneUniform, spot_light_count), 464);
         assert_eq!(std::mem::offset_of!(SceneUniform, spot_lights), 480);
         assert_eq!(std::mem::offset_of!(SceneUniform, point_shadow), 992);
+        assert_eq!(std::mem::offset_of!(SceneUniform, contact), 1008);
 
         for offset in [0, 64, 80, 96, 112, 128, 192, 208, 464, 480, 992] {
             assert_eq!(offset % 16, 0, "{} is not on sixteen bytes", offset);
@@ -1697,8 +1859,14 @@ mod uniform_tests {
     fn the_uniform_carries_the_light() {
         let mut light = Light::new();
         light.intensity = 0.5;
-        let uniform =
-            SceneUniform::new(&Camera::new(), &light, &[], &[], &shadow::default_bounds());
+        let uniform = SceneUniform::new(
+            &Camera::new(),
+            &light,
+            &[],
+            &[],
+            &shadow::default_bounds(),
+            true,
+        );
 
         assert_eq!(uniform.light_color[3], 0.5);
         // pointing down, as the default light comes from above
@@ -1742,6 +1910,7 @@ mod uniform_tests {
             &lamps,
             &[],
             &shadow::default_bounds(),
+            true,
         );
 
         assert_eq!(uniform.point_light_count[0], 2);
@@ -1766,6 +1935,7 @@ mod uniform_tests {
             &[],
             &[],
             &shadow::default_bounds(),
+            true,
         );
 
         assert_eq!(uniform.point_light_count[0], 0);
@@ -1787,6 +1957,7 @@ mod uniform_tests {
             &many,
             &[],
             &shadow::default_bounds(),
+            true,
         );
 
         assert_eq!(uniform.point_light_count[0] as usize, MAX_POINT_LIGHTS);
@@ -1826,6 +1997,7 @@ mod uniform_tests {
             &[],
             &spots,
             &shadow::default_bounds(),
+            true,
         );
 
         assert_eq!(uniform.spot_light_count[0], 1);
@@ -1858,6 +2030,7 @@ mod uniform_tests {
             &[bad],
             &[],
             &shadow::default_bounds(),
+            true,
         );
 
         assert_eq!(uniform.point_lights[0].position_range[3], 0.0);
@@ -1889,6 +2062,7 @@ mod uniform_tests {
             &lamps,
             &[],
             &shadow::default_bounds(),
+            true,
         );
 
         assert_eq!(uniform.point_shadow[0], 2, "the count is wrong");
@@ -1909,6 +2083,7 @@ mod uniform_tests {
             &lamps,
             &[],
             &shadow::default_bounds(),
+            true,
         );
 
         assert_eq!(uniform.point_shadow, [0; 4]);
@@ -1957,6 +2132,7 @@ mod uniform_tests {
             &lamps,
             &[],
             &shadow::default_bounds(),
+            true,
         );
         let faces = point_faces(&lamps);
 

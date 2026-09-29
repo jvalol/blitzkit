@@ -19,10 +19,65 @@ pub const MAP_SIZE: u32 = 2048;
 pub const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 /// The shadow a surface facing the light gets, before its angle is considered.
-pub const MIN_BIAS: f32 = 0.0005;
+pub const MIN_BIAS: f32 = 0.00005;
 /// The most bias a surface turned edge-on to the light gets. Too little stripes
 /// lit surfaces, too much lifts a shadow off what casts it.
-pub const MAX_BIAS: f32 = 0.004;
+///
+/// This is depth in the light's clip space, not world units. It was 0.004, and
+/// the sun's box is forty across by default, so that came to about a fifth of a
+/// unit on the ground: a cube in the cubes example stood on a white strip of
+/// lit floor between itself and its own shadow. It can be a twentieth of that
+/// now because the surface is stepped along its normal instead.
+pub const MAX_BIAS: f32 = 0.0002;
+
+/// What a spot forgives. The numbers the sun used to have, kept where they
+/// were: the sun can afford small ones because it steps along the surface
+/// instead, and a spot does not do that yet.
+pub const SPOT_MIN_BIAS: f32 = 0.0005;
+pub const SPOT_MAX_BIAS: f32 = 0.004;
+
+/// How much to forgive a spot's comparison.
+pub fn spot_bias(normal: Vec3, to_light: Vec3) -> f32 {
+    let facing = normal.normalize_or_zero().dot(to_light.normalize_or_zero());
+
+    SPOT_MIN_BIAS + SPOT_MAX_BIAS * (1.0 - facing.clamp(0.0, 1.0))
+}
+
+/// How far along its own normal a surface is stepped before the sun's map is
+/// asked about it, in texels of that map.
+///
+/// The same move the lamps make, and for the same reason: slack in depth is
+/// what lifts a shadow off its own wall, and stepping along the surface moves
+/// where the question is asked without moving the answer. It is what pays for
+/// the slack above being small enough not to show.
+pub const NORMAL_STEP: f32 = 1.0;
+
+/// How wide a texel of the sun's map is, in world units.
+///
+/// Read off the matrix rather than the bounds, because a game can set its own
+/// and the shader only ever sees the matrix. The first row of it says how much
+/// clip space an axis of world space covers, clip space is two units across,
+/// and the map divides that into its own width.
+pub fn texel_width(light_view_projection: Mat4) -> f32 {
+    let m = light_view_projection;
+    let across = Vec3::new(m.x_axis.x, m.y_axis.x, m.z_axis.x).length();
+
+    if across <= f32::EPSILON {
+        return 0.0;
+    }
+
+    2.0 / (across * MAP_SIZE as f32)
+}
+
+/// Where to ask the sun's map about a surface: along its own normal, and
+/// further the more the light only grazes it.
+///
+/// Matches `shadow_factor` in `mesh.wgsl`. Keep the two in step.
+pub fn sample_at(at: Vec3, normal: Vec3, light_view_projection: Mat4, facing: f32) -> Vec3 {
+    let grazing = 1.0 - facing.clamp(0.0, 1.0);
+
+    at + normal * texel_width(light_view_projection) * NORMAL_STEP * grazing
+}
 
 /// What the light's view covers when a game has not said otherwise.
 pub fn default_bounds() -> Aabb {
@@ -189,13 +244,46 @@ pub const POINT_NEAR: f32 = 0.05;
 /// further than that, so a face nothing was drawn into shadows nothing.
 pub const POINT_CLEAR: f32 = 1.0;
 
-/// The tolerance a lamp gets at no distance at all.
-pub const POINT_MIN_BIAS: f32 = 0.02;
+/// The tolerance a lamp gets on a surface square to it.
+///
+/// This used to be 0.02 with no regard for which way a surface faced, and it
+/// had to cover the worst case, so every shadow was pushed that far back from
+/// whatever cast it. At a lamp reaching nine units the slack came to 0.11 and
+/// walls a third of a unit thick stood on a bright rim of floor.
+pub const POINT_MIN_BIAS: f32 = 0.006;
 
-/// How much more tolerance each unit of range buys. A texel of a lamp reaching
-/// thirty units covers six times the ground of one reaching five, and a
-/// comparison against it has to forgive that much more.
-pub const POINT_BIAS_PER_UNIT: f32 = 0.01;
+/// How much more each unit of range buys a surface the light only grazes. A
+/// texel of a lamp reaching thirty units covers six times the ground of one
+/// reaching five, and a comparison against it has to forgive that much more.
+///
+/// Only the grazing part of it: a surface square to the lamp needs none.
+pub const POINT_BIAS_PER_UNIT: f32 = 0.002;
+
+/// How far along its own normal a surface is stepped before the map is asked
+/// about it, in texels of that map.
+///
+/// Slack in depth moves a shadow off the foot of the thing casting it, because
+/// it says the surface is nearer the lamp than it is. Stepping along the
+/// surface instead moves where the question is asked without moving the
+/// answer, so the shadow stays where the wall meets the floor. It is what pays
+/// for the slack above being small enough not to show.
+pub const POINT_NORMAL_STEP: f32 = 2.5;
+
+/// How wide a texel of a lamp's map is, in world units, at this distance from
+/// it. A face is a right angle across, so it spans twice its own distance.
+pub fn point_texel_width(distance: f32) -> f32 {
+    2.0 * distance.max(0.0) / POINT_MAP_SIZE as f32
+}
+
+/// Where to ask the map about a surface: along its own normal, and further the
+/// more the light only grazes it.
+///
+/// Matches `point_shadow` in `mesh.wgsl`. Keep the two in step.
+pub fn point_sample_at(at: Vec3, normal: Vec3, distance: f32, facing: f32) -> Vec3 {
+    let grazing = 1.0 - facing.clamp(0.0, 1.0);
+
+    at + normal * point_texel_width(distance) * POINT_NORMAL_STEP * grazing
+}
 
 /// The six ways out of a lamp, in the order their layers are stored: +x, -x,
 /// +y, -y, +z, -z.
@@ -304,8 +392,16 @@ pub fn point_distance_fraction(distance: f32, range: f32) -> f32 {
 }
 
 /// How much to forgive a lamp's distance comparison, in world units.
-pub fn point_bias(range: f32) -> f32 {
-    POINT_MIN_BIAS + POINT_BIAS_PER_UNIT * range.max(0.0)
+///
+/// `facing` is how square the surface is to the lamp, one when it looks
+/// straight at it and zero when the light only grazes it. A surface square to
+/// the lamp needs almost nothing; what needed the old flat number was the
+/// grazing case, and charging every surface for it is what detached the
+/// shadows. The sun has worked this way since spec 0015.
+pub fn point_bias(range: f32, facing: f32) -> f32 {
+    let grazing = 1.0 - facing.clamp(0.0, 1.0);
+
+    POINT_MIN_BIAS + POINT_BIAS_PER_UNIT * range.max(0.0) * grazing
 }
 
 /// The comparison: is this surface the nearest thing the lamp can see this way?
@@ -315,17 +411,141 @@ pub fn point_bias(range: f32) -> f32 {
 /// does not reach a surface is not shadowing it either.
 ///
 /// Matches `point_shadow` in `mesh.wgsl`. Keep the two in step.
-pub fn point_is_lit(recorded: f32, distance: f32, range: f32) -> bool {
+pub fn point_is_lit(recorded: f32, distance: f32, range: f32, facing: f32) -> bool {
     if range <= 0.0 || distance > range {
         return true;
     }
 
-    distance - point_bias(range) <= recorded * range
+    distance - point_bias(range, facing) <= recorded * range
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_spots_keep_the_slack_the_sun_gave_up() {
+        // the sun traded slack for a step along the surface; the spots have no
+        // step yet, so taking their slack away would stripe them
+        assert!(spot_bias(Vec3::Y, Vec3::X) > bias(Vec3::Y, Vec3::X));
+        assert_eq!(SPOT_MAX_BIAS, 0.004);
+    }
+
+    #[test]
+    fn the_sun_steps_along_the_surface_too() {
+        let matrix = light_view_projection(Vec3::NEG_Y, &default_bounds());
+        let moved = sample_at(Vec3::ZERO, Vec3::Y, matrix, 0.0);
+
+        assert!(
+            (moved.normalize() - Vec3::Y).length() < 1e-5,
+            "it stepped {:?}",
+            moved
+        );
+        assert_eq!(sample_at(Vec3::ZERO, Vec3::Y, matrix, 1.0), Vec3::ZERO);
+    }
+
+    #[test]
+    fn the_suns_step_is_a_texel_or_two() {
+        // enough to clear the map's own coarseness, and no more: stepping a
+        // surface towards the light shrinks its shadow, so a step of several
+        // texels pulls a shadow off the foot of what casts it, which is the
+        // thing this was meant to stop
+        let matrix = light_view_projection(Vec3::NEG_Y, &default_bounds());
+        let texel = texel_width(matrix);
+        let step = sample_at(Vec3::ZERO, Vec3::Y, matrix, 0.0).length();
+
+        assert!(step >= texel * 0.99, "only stepped {} of {}", step, texel);
+        assert!(
+            step <= texel * 2.0,
+            "stepped {}, which is {} texels",
+            step,
+            step / texel
+        );
+    }
+
+    #[test]
+    fn a_texel_of_the_sun_follows_the_bounds_it_was_given() {
+        // a game that narrows the sun's box gets a finer map over less ground
+        let wide = light_view_projection(Vec3::NEG_Y, &default_bounds());
+        let tight = light_view_projection(
+            Vec3::NEG_Y,
+            &Aabb::from_center_size(Vec3::ZERO, Vec3::splat(8.0)),
+        );
+
+        assert!(
+            texel_width(tight) < texel_width(wide),
+            "tight {} against wide {}",
+            texel_width(tight),
+            texel_width(wide)
+        );
+    }
+
+    #[test]
+    fn the_suns_shadow_no_longer_lifts_off_what_casts_it() {
+        // 0.004 was depth in the light's clip space, and the sun's box is forty
+        // across by default, so it came to about a fifth of a unit on the floor
+        let was = 0.004;
+
+        assert!(MAX_BIAS < was * 0.25, "grazing still forgives {}", MAX_BIAS);
+    }
+
+    #[test]
+    fn a_grazing_surface_is_forgiven_more_than_a_square_one() {
+        assert!(point_bias(9.0, 0.0) > point_bias(9.0, 1.0));
+        assert!((point_bias(9.0, 1.0) - POINT_MIN_BIAS).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_shadow_no_longer_lifts_far_off_its_wall() {
+        // it was a flat 0.02 + 0.01 * range whichever way a surface faced, so a
+        // lamp reaching nine units lit a strip 0.11 wide along the foot of
+        // everything, and lantern's walls are a third of a unit thick
+        let was = 0.02 + 0.01 * 9.0;
+
+        assert!(
+            point_bias(9.0, 0.0) < was * 0.35,
+            "grazing is still {}",
+            point_bias(9.0, 0.0)
+        );
+        assert!(
+            point_bias(9.0, 1.0) < was * 0.1,
+            "square on is still {}",
+            point_bias(9.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn the_step_is_along_the_surface_not_towards_the_lamp() {
+        let normal = Vec3::Y;
+        let moved = point_sample_at(Vec3::ZERO, normal, 3.0, 0.0);
+
+        assert!(
+            (moved.normalize() - normal).length() < 1e-5,
+            "it stepped {:?}",
+            moved
+        );
+    }
+
+    #[test]
+    fn a_surface_square_to_a_lamp_is_not_stepped_at_all() {
+        assert_eq!(point_sample_at(Vec3::ZERO, Vec3::Y, 3.0, 1.0), Vec3::ZERO);
+    }
+
+    #[test]
+    fn the_step_is_a_texel_or_two_and_not_a_wall() {
+        // far enough to clear the map's own coarseness, near enough that it
+        // never lifts a surface off what it is standing on
+        let step = point_sample_at(Vec3::ZERO, Vec3::Y, 3.0, 0.0).length();
+
+        assert!(step > point_texel_width(3.0), "only stepped {}", step);
+        assert!(step < 0.1, "stepped {}, which is most of a wall", step);
+    }
+
+    #[test]
+    fn a_texel_grows_with_distance() {
+        assert!(point_texel_width(8.0) > point_texel_width(2.0));
+        assert_eq!(point_texel_width(0.0), 0.0);
+    }
 
     #[test]
     fn a_spot_projection_covers_its_cone() {
@@ -626,8 +846,8 @@ mod tests {
 
     #[test]
     fn the_bias_grows_with_the_range() {
-        assert!(point_bias(30.0) > point_bias(3.0));
-        assert!((point_bias(0.0) - POINT_MIN_BIAS).abs() < 1e-6);
+        assert!(point_bias(30.0, 0.0) > point_bias(3.0, 0.0));
+        assert!((point_bias(0.0, 0.0) - POINT_MIN_BIAS).abs() < 1e-6);
     }
 
     #[test]
@@ -637,21 +857,26 @@ mod tests {
         let recorded = point_distance_fraction(4.0, range);
 
         assert!(
-            point_is_lit(recorded, 4.0, range),
+            point_is_lit(recorded, 4.0, range, 0.0),
             "the thing recorded is not lit"
         );
-        assert!(!point_is_lit(recorded, 7.0, range), "behind it is lit");
+        assert!(!point_is_lit(recorded, 7.0, range, 0.0), "behind it is lit");
         // and the bias forgives a surface against its own reading
-        assert!(point_is_lit(recorded, 4.0 + point_bias(range) * 0.5, range));
+        assert!(point_is_lit(
+            recorded,
+            4.0 + point_bias(range, 0.0) * 0.5,
+            range,
+            0.0
+        ));
     }
 
     #[test]
     fn past_a_lamps_range_is_lit() {
         // an empty map reads as further than any range, so nothing is shadowed
-        assert!(point_is_lit(POINT_CLEAR, 5.0, 10.0));
+        assert!(point_is_lit(POINT_CLEAR, 5.0, 10.0, 1.0));
         // and a surface the lamp cannot reach is not its business either
-        assert!(point_is_lit(0.1, 11.0, 10.0));
-        assert!(point_is_lit(0.1, 1.0, 0.0));
+        assert!(point_is_lit(0.1, 11.0, 10.0, 1.0));
+        assert!(point_is_lit(0.1, 1.0, 0.0, 1.0));
     }
     /// The shader's table of face directions, read out of the shader itself.
     ///

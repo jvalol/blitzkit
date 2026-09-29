@@ -21,8 +21,19 @@ pub fn descriptor(width: u32, height: u32) -> wgpu::TextureDescriptor<'static> {
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        // sampled as well as attached, because spec 0029 marches through it
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT.union(wgpu::TextureUsages::TEXTURE_BINDING),
         view_formats: &[],
+    }
+}
+
+/// What the mesh pipeline declares once spec 0029's prepass has settled depth
+/// for it: nearer fragments still win, but nothing writes, because the buffer
+/// is being read at the same time and a pass cannot do both.
+pub fn read_only_state() -> wgpu::DepthStencilState {
+    wgpu::DepthStencilState {
+        depth_write_enabled: Some(false),
+        ..state()
     }
 }
 
@@ -93,6 +104,23 @@ impl DepthTexture {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_prepass_writes_what_the_mesh_pass_tests() {
+        // the prepass settles depth and the mesh pass reads it, so they have to
+        // agree on the format and on which fragment wins. See spec 0029.
+        assert_eq!(state().depth_write_enabled, Some(true));
+        assert_eq!(state().format, read_only_state().format);
+        assert_eq!(state().depth_compare, read_only_state().depth_compare);
+    }
+
+    #[test]
+    fn the_mesh_pass_does_not_write_depth() {
+        // a pass cannot write the buffer it is sampling, and spec 0029 has it
+        // sampling this one
+        assert_eq!(read_only_state().depth_write_enabled, Some(false));
+        assert_eq!(translucent_state().depth_write_enabled, Some(false));
+    }
 
     #[test]
     fn translucent_geometry_tests_depth_without_writing_it() {

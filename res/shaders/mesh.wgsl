@@ -49,6 +49,11 @@ struct Uniforms {
     // indices rather than a flag on each lamp, because the slot in this table is
     // what says which six layers a lamp owns. See spec 0022.
     point_shadow: vec4<u32>,
+    // x is one when the contact march runs, y and z are the camera's near and
+    // far planes, w is how far the march goes. The planes are here because the
+    // depth buffer holds clip depth and nothing can be compared in world units
+    // until that is undone. See spec 0029.
+    contact: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -65,12 +70,120 @@ struct Uniforms {
 // six layers per casting lamp, per spec 0022
 @group(2) @binding(3) var point_shadow_maps: texture_depth_2d_array;
 
-const MIN_BIAS: f32 = 0.0005;
-const MAX_BIAS: f32 = 0.004;
+// The whole scene's depth, written by spec 0029's prepass. Read, never sampled
+// with a comparison: the march wants the number, not a verdict.
+@group(3) @binding(0) var scene_depth: texture_depth_2d;
 
-// Matches shadow::is_lit and shadow::bias in Rust. Keep the two in step.
+// Matches contact::CONTACT_STEPS, ::CONTACT_THICKNESS and ::CONTACT_START in
+// Rust. Keep the two in step.
+const CONTACT_STEPS: i32 = 20;
+const CONTACT_THICKNESS: f32 = 0.35;
+const CONTACT_THICKNESS_PER_UNIT: f32 = 0.06;
+const CONTACT_START: f32 = 0.01;
+
+// What the depth buffer holds, as a distance from the camera. Matches
+// contact::linear_depth in Rust.
+fn linear_depth(clip_depth: f32, near: f32, far: f32) -> f32 {
+    let span = far - near;
+    if abs(span) < 1e-9 {
+        return near;
+    }
+
+    return near * far / (far - clip_depth * span);
+}
+
+// A short march towards the light through the depth buffer, for the range the
+// shadow maps cannot resolve. One lit, zero shadowed. See spec 0029.
+// A different number for every pixel, the same one every frame: interleaved
+// gradient noise. Nudging each pixel's march by a fraction of a step spreads
+// the edge of what it finds over the step, instead of leaving every pixel to
+// find it at the same few distances and the boundary to come out as a stipple.
+fn march_nudge(pixel: vec2<f32>) -> f32 {
+    return fract(52.9829189 * fract(dot(pixel, vec2<f32>(0.06711056, 0.00583715))));
+}
+
+fn contact_shadow(
+    world_position: vec3<f32>,
+    normal: vec3<f32>,
+    to_light: vec3<f32>,
+    pixel: vec2<f32>,
+) -> f32 {
+    if uniforms.contact.x < 0.5 {
+        return 1.0;
+    }
+
+    let near = uniforms.contact.y;
+    let far = uniforms.contact.z;
+    let reach = uniforms.contact.w;
+    let size = vec2<f32>(textureDimensions(scene_depth));
+
+    // off the surface, or it finds itself: the buffer holds this very fragment
+    let start = world_position + normal * CONTACT_START;
+    let nudge = max(march_nudge(pixel), 0.05);
+
+    for (var n = 1; n <= CONTACT_STEPS; n++) {
+        let along = reach * (f32(n) - 1.0 + nudge) / f32(CONTACT_STEPS);
+        let clip = uniforms.view_projection * vec4<f32>(start + to_light * along, 1.0);
+        if clip.w <= 0.0 {
+            continue;
+        }
+
+        let ndc = clip.xyz / clip.w;
+        // off the buffer is lit, the same forgiving direction spec 0015 takes
+        if abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0 || ndc.z < 0.0 || ndc.z > 1.0 {
+            continue;
+        }
+
+        let uv = vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
+        let at = vec2<i32>(clamp(uv * size, vec2<f32>(0.0), size - 1.0));
+
+        let recorded = linear_depth(textureLoad(scene_depth, at, 0), near, far);
+        let marched = linear_depth(ndc.z, near, far);
+        let behind = marched - recorded;
+
+        // behind what is there, but not so far behind that it has come out the
+        // back of it and is looking at something else entirely. How thick a
+        // thing is reckoned grows with distance: at a silhouette the march
+        // lands on the near face, and the gap to what is behind it grows with
+        // how far off and how oblique that pair is.
+        let thickness = max(CONTACT_THICKNESS, marched * CONTACT_THICKNESS_PER_UNIT);
+        if behind > 0.0 && behind < thickness {
+            return 0.0;
+        }
+    }
+
+    return 1.0;
+}
+
+const MIN_BIAS: f32 = 0.00005;
+const MAX_BIAS: f32 = 0.0002;
+const NORMAL_STEP: f32 = 1.0;
+
+// The spots keep the numbers the sun used to have. The sun can afford small
+// ones because it steps along the surface instead; a spot does not do that yet,
+// so it still needs the slack.
+const SPOT_MIN_BIAS: f32 = 0.0005;
+const SPOT_MAX_BIAS: f32 = 0.004;
+
+// Matches shadow::is_lit, shadow::bias and shadow::sample_at in Rust. Keep the
+// two in step.
 fn shadow_factor(world_position: vec3<f32>, normal: vec3<f32>, to_light: vec3<f32>) -> f32 {
-    let clip = uniforms.light_view_projection * vec4<f32>(world_position, 1.0);
+    let facing = clamp(dot(normal, to_light), 0.0, 1.0);
+    let grazing = 1.0 - facing;
+
+    // a texel of the sun's map in world units, read off the matrix because a
+    // game can set its own bounds and this is all the shader ever sees. The
+    // first row says how much clip space an axis of world space covers, clip
+    // space is two across, and the map divides that into its own width.
+    let m = uniforms.light_view_projection;
+    let across = length(vec3<f32>(m[0][0], m[1][0], m[2][0]));
+    let texel_width = select(0.0, 2.0 / (across * f32(textureDimensions(shadow_map).x)), across > 0.0);
+
+    // step along the surface rather than pushing depth, which is what lifts a
+    // shadow off the thing casting it
+    let stepped = world_position + normal * texel_width * NORMAL_STEP * grazing;
+
+    let clip = m * vec4<f32>(stepped, 1.0);
     if clip.w <= 0.0 {
         return 1.0;
     }
@@ -82,8 +195,7 @@ fn shadow_factor(world_position: vec3<f32>, normal: vec3<f32>, to_light: vec3<f3
     }
 
     let uv = vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
-    let facing = clamp(dot(normal, to_light), 0.0, 1.0);
-    let bias = MIN_BIAS + MAX_BIAS * (1.0 - facing);
+    let bias = MIN_BIAS + MAX_BIAS * grazing;
 
     // nine samples in a small square, so edges are soft rather than stepped
     let texel = 1.0 / f32(textureDimensions(shadow_map).x);
@@ -160,7 +272,7 @@ fn spot_shadow(
 
     let uv = vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
     let facing = clamp(dot(normal, to_light), 0.0, 1.0);
-    let bias = MIN_BIAS + MAX_BIAS * (1.0 - facing);
+    let bias = SPOT_MIN_BIAS + SPOT_MAX_BIAS * (1.0 - facing);
 
     let texel = 1.0 / f32(textureDimensions(spot_shadow_maps).x);
     var lit = 0.0;
@@ -242,11 +354,12 @@ fn spot_light(
 }
 
 // How many lamps may cast, and how much a lamp's distance comparison forgives.
-// Matches lighting::MAX_SHADOWING_POINT_LIGHTS, shadow::POINT_MIN_BIAS and
-// shadow::POINT_BIAS_PER_UNIT. Keep them in step.
+// Matches lighting::MAX_SHADOWING_POINT_LIGHTS, shadow::POINT_MIN_BIAS,
+// shadow::POINT_BIAS_PER_UNIT and shadow::POINT_NORMAL_STEP. Keep them in step.
 const MAX_SHADOWING_POINT_LIGHTS: u32 = 2u;
-const POINT_MIN_BIAS: f32 = 0.02;
-const POINT_BIAS_PER_UNIT: f32 = 0.01;
+const POINT_MIN_BIAS: f32 = 0.006;
+const POINT_BIAS_PER_UNIT: f32 = 0.002;
+const POINT_NORMAL_STEP: f32 = 2.5;
 
 // A face's three directions, written out rather than derived, because a shader
 // has no business doing cross products for a constant. Across, up, and the way
@@ -316,21 +429,44 @@ fn point_face_and_uv(direction: vec3<f32>) -> vec3<f32> {
 //
 // Matches shadow::point_is_lit and shadow::point_bias in Rust. Keep them in
 // step.
-fn point_shadow(lamp: PointLight, slot: u32, world_position: vec3<f32>) -> f32 {
+fn point_shadow(
+    lamp: PointLight,
+    slot: u32,
+    world_position: vec3<f32>,
+    normal: vec3<f32>,
+) -> f32 {
     let range = lamp.position_range.w;
-    let away = world_position - lamp.position_range.xyz;
-    let distance = length(away);
+    let straight = world_position - lamp.position_range.xyz;
+    let distance = length(straight);
     // a lamp that does not reach this far is not shadowing it either
     if range <= 0.0 || distance > range || distance <= 0.0 {
         return 1.0;
     }
 
+    // how square the surface is to the lamp. Grazing is the hard case and it
+    // used to be charged to every surface, which pushed every shadow off the
+    // foot of whatever cast it.
+    let to_light = -straight / distance;
+    let facing = clamp(dot(normal, to_light), 0.0, 1.0);
+    let grazing = 1.0 - facing;
+
+    // a texel of this lamp's map where the surface is, in world units: a face
+    // is a right angle across, so it spans twice its own distance
+    let texel_width = 2.0 * distance / f32(textureDimensions(point_shadow_maps).x);
+
+    // step along the surface rather than along the ray. Slack in depth says a
+    // surface is nearer the lamp than it is, and a shadow lifts off its own
+    // wall; stepping sideways moves where the question is asked without moving
+    // the answer.
+    let stepped = world_position + normal * texel_width * POINT_NORMAL_STEP * grazing;
+    let away = stepped - lamp.position_range.xyz;
+
     let found = point_face_and_uv(away);
     let layer = slot * 6u + u32(found.x);
     let uv = found.yz;
 
-    let bias = (POINT_MIN_BIAS + POINT_BIAS_PER_UNIT * range) / range;
-    let fraction = distance / range;
+    let bias = (POINT_MIN_BIAS + POINT_BIAS_PER_UNIT * range * grazing) / range;
+    let fraction = length(away) / range;
 
     // nine samples, the same soft edge the sun and the spots get. Across a face
     // edge the sampler clamps rather than carrying on into the next face, which
@@ -429,8 +565,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         specular = light * pow(max(dot(normal, half_vector), 0.0), max(in.shininess, 1.0));
     }
 
-    // shadow dims what the light contributes, never the ambient fill
-    let lit = shadow_factor(in.world_position, normal, to_light);
+    // shadow dims what the light contributes, never the ambient fill. The map
+    // knows about distance and is wrong about contact; the march is the other
+    // way round, so the darker of the two is the answer. See spec 0029.
+    let lit = min(
+        shadow_factor(in.world_position, normal, to_light),
+        contact_shadow(in.world_position, normal, to_light, in.clip_position.xy),
+    );
 
     // the instance color tints what is sampled rather than replacing it
     let sampled = textureSample(surface_texture, surface_sampler, in.uv);
@@ -447,7 +588,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let slot = point_shadow_slot(index);
         var reaching = 1.0;
         if slot >= 0 {
-            reaching = point_shadow(lamp, u32(slot), in.world_position);
+            let towards = normalize(lamp.position_range.xyz - in.world_position);
+            reaching = min(
+                point_shadow(lamp, u32(slot), in.world_position, normal),
+                contact_shadow(in.world_position, normal, towards, in.clip_position.xy),
+            );
         }
 
         shaded += point_light(

@@ -50,7 +50,40 @@ tolerance of one reaching three.
 take. A surface further from the lamp than the lamp reaches is not lit by it
 anyway, so nothing turns on the answer there.
 
+**The slack is for grazing light, not for everything.** A depth comparison has
+to forgive something, or a surface shadows itself in stripes. It used to forgive
+a flat `0.02 + 0.01 * range` whichever way the surface faced, which had to cover
+the worst case: light arriving almost along a surface, where a texel of the map
+spans a long way across it. Every other surface was charged the same, and
+forgiving depth says a surface is nearer the lamp than it is, so every shadow
+lifted off the foot of the thing casting it.
+
+At a lamp reaching nine units that came to 0.11, and lantern's walls are a third
+of a unit thick, so each one stood on a bright rim of floor a third of its own
+thickness wide.
+
+The sun has done this properly since spec 0015: its slack is scaled by how
+square the surface is to the light. The lamps do the same now, and what is left
+is small.
+
+**And the surface is stepped, not the depth.** The grazing case still needs
+something, and pushing depth is the wrong lever because that is what detaches
+the shadow. The surface is moved along its own normal instead, by a texel or two
+of the lamp's map at that distance, before the map is asked about it. That moves
+where the question is asked without moving the answer, so the shadow stays where
+the wall meets the floor.
+
+A texel is worth two of these rather than twenty: it has to clear the map's own
+coarseness and never lift a surface off what it is standing on.
+
 ## Acceptance criteria
+
+- A grazing surface is forgiven more than a square one. — `shadow::tests::a_grazing_surface_is_forgiven_more_than_a_square_one`
+- And what a shadow lifts off its wall is a fraction of what it was. — `shadow::tests::a_shadow_no_longer_lifts_far_off_its_wall`
+- The step is along the surface, not towards the lamp. — `shadow::tests::the_step_is_along_the_surface_not_towards_the_lamp`
+- A surface square to a lamp is not stepped at all. — `shadow::tests::a_surface_square_to_a_lamp_is_not_stepped_at_all`
+- It is a texel or two, not a wall. — `shadow::tests::the_step_is_a_texel_or_two_and_not_a_wall`
+- A texel grows with distance from the lamp. — `shadow::tests::a_texel_grows_with_distance`
 
 - Each of the six directions picks its own face. — `shadow::tests::each_direction_picks_its_face`
 - A direction on an edge picks one face rather than neither. — `shadow::tests::a_direction_on_an_edge_still_picks_a_face`
