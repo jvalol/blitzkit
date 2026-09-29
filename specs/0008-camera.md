@@ -52,3 +52,11 @@ separate pipelines and always have been.
 
 Orthographic projection, several cameras at once, frustum culling, and any
 built-in camera controller.
+
+Orthographic was tried rather than merely assumed: starry is a flat board seen
+from above, which is the case that wants it most, and its spec 0002 records the
+answer on 2026-09-28. From far enough back at a narrow field of view the splay
+is still visible and reads as a board tilted away from the viewer, which helps
+the thickness rather than hurting it. Nothing has wanted orthographic since.
+Written down because this line sat here for a week with no reason attached and
+nobody could remember why.
