@@ -33,7 +33,7 @@ In which I develop a snake game using blitzkit.
 
 ## tessera
 
-In which I build a game with color on the engine, after pong and snake. It's a little more sophisticated, but it works.
+In which I build a game with color on the engine. It's a little more sophisticated, but it works.
 
 [github.com/jvalol/tessera](https://github.com/jvalol/tessera)
 
@@ -41,7 +41,7 @@ In which I build a game with color on the engine, after pong and snake. It's a l
 
 ## marble
 
-In which I roll a marble across a course of platforms to a goal, against a clock.
+In which one rolls a marble across a course of platforms to a goal, against a clock.
 The first 3D game built on blitzkit.
 
 [github.com/jvalol/marble](https://github.com/jvalol/marble)
@@ -50,10 +50,19 @@ The first 3D game built on blitzkit.
 
 ## slider
 
-In which you fly down a tunnel that wanders, through fourteen rings strung along
+In which one flies down a tunnel that wanders, through fourteen rings strung along
 it. You speed up the further you get, from 22 "meters" a second to 70. Scraping the wall
 slows you down, and so does missing a ring.
 
 [github.com/jvalol/slider](https://github.com/jvalol/slider)
 
 ![Looking down a checkered tunnel bending hard to the right, with a gold ring hanging in the middle distance](https://raw.githubusercontent.com/jvalol/slider/main/media/screenshot.png)
+
+## starry
+
+In which one slides fifteen tiles of Van Gogh's Starry Night back into one picture.
+One has three lifts to take a tile out and set it down anywhere. If that's not enough, there are hints.
+
+[github.com/jvalol/starry](https://github.com/jvalol/starry)
+
+![Starry: the painting cut into sixteen thick tiles in a tray, one square empty, the cypress and the village broken across the wrong squares](https://raw.githubusercontent.com/jvalol/starry/main/media/screenshot.png)
