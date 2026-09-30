@@ -67,3 +67,9 @@ One has three lifts to take a tile out and set it down anywhere. If that's not e
 In which one walks a dark maze carrying two lamps. Put one down and it stays lit to mark your path. It's fun!
 
 [github.com/jvalol/lantern](https://github.com/jvalol/lantern)
+
+## securitysweep
+
+In which one crosses an open yard while four security lights sweep it.
+
+[github.com/jvalol/securitysweep](https://github.com/jvalol/securitysweep)
