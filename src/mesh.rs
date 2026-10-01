@@ -124,7 +124,13 @@ impl MeshData {
                 vertices.push(Vertex::new(
                     (normal * 0.5).to_array(),
                     normal.to_array(),
-                    [segment as f32 / segments as f32, ring as f32 / rings as f32],
+                    // 1 - the segment, not the segment. Longitude runs the other
+                    // way round from the outside, and a texture laid on with
+                    // the segment reads mirrored: see the uv test below.
+                    [
+                        1.0 - segment as f32 / segments as f32,
+                        ring as f32 / rings as f32,
+                    ],
                 ));
             }
         }
@@ -135,8 +141,12 @@ impl MeshData {
                 let a = ring * stride + segment;
                 let b = a + stride;
 
-                // counter-clockwise from outside, per spec 0009
-                indices.extend_from_slice(&[a, b, b + 1, a, b + 1, a + 1]);
+                // counter-clockwise from outside, per spec 0009. It was not:
+                // these two ran the other way, so every outward face was culled
+                // as a back face and what you saw was the inside of the far
+                // side. A still sphere looks the same either way, and a turning
+                // one does not: the far surface moves against the near one.
+                indices.extend_from_slice(&[a, b + 1, b, a, a + 1, b + 1]);
             }
         }
 
@@ -718,6 +728,88 @@ mod tests {
 
         assert_eq!(wire.triangle_count(), 0);
         assert!(wire.vertices.is_empty());
+    }
+
+    /// A triangle's position and uv together, as the two directions the
+    /// texture runs in on the surface, plus the way the winding says it faces.
+    ///
+    /// Returns nothing for a triangle with no area or no uv area, which is
+    /// what the sphere's poles are.
+    fn surface(mesh: &MeshData, triangle: &[u32]) -> Option<(Vec3, Vec3, Vec3, Vec3)> {
+        let at: Vec<&Vertex> = triangle
+            .iter()
+            .map(|index| &mesh.vertices[*index as usize])
+            .collect();
+        let point: Vec<Vec3> = at.iter().map(|v| Vec3::from(v.position)).collect();
+        let uv: Vec<[f32; 2]> = at.iter().map(|v| v.uv).collect();
+
+        let one = point[1] - point[0];
+        let other = point[2] - point[0];
+        let wound = one.cross(other);
+        if wound.length() < 1e-6 {
+            return None;
+        }
+
+        let du = [uv[1][0] - uv[0][0], uv[1][1] - uv[0][1]];
+        let dv = [uv[2][0] - uv[0][0], uv[2][1] - uv[0][1]];
+        let det = du[0] * dv[1] - dv[0] * du[1];
+        if det.abs() < 1e-9 {
+            return None;
+        }
+
+        let along_u = (one * dv[1] - other * du[1]) / det;
+        let along_v = (other * du[0] - one * dv[0]) / det;
+        let out: Vec3 = at.iter().map(|v| Vec3::from(v.normal)).sum::<Vec3>() / 3.0;
+
+        Some((along_u, along_v, wound.normalize(), out.normalize()))
+    }
+
+    #[test]
+    fn every_mesh_is_wound_the_way_it_faces() {
+        // The sphere was not. Its two triangles ran clockwise seen from
+        // outside, so the renderer culled every outward face and drew the
+        // inside of the far side instead. Still, that looks like a sphere.
+        // Turning, the far surface moves against the near one, so a rolling
+        // ball rolled backwards.
+        for (name, mesh) in [
+            ("cube", MeshData::cube()),
+            ("plane", MeshData::plane()),
+            ("sphere", MeshData::sphere(16, 8)),
+        ] {
+            for triangle in mesh.indices.chunks(3) {
+                let Some((_, _, wound, out)) = surface(&mesh, triangle) else {
+                    continue;
+                };
+                assert!(
+                    wound.dot(out) > 0.5,
+                    "{} is wound inside out: {}",
+                    name,
+                    wound
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn no_mesh_wears_its_texture_mirrored() {
+        // u across and v down is how an image is read, and laying it on a
+        // surface that way puts u cross v into the surface. Coming out means
+        // the image is on backwards, which is what the sphere's longitude did:
+        // letters would have read in a mirror, and the checker on marble's
+        // ball turned the wrong way.
+        for (name, mesh) in [
+            ("cube", MeshData::cube()),
+            ("plane", MeshData::plane()),
+            ("sphere", MeshData::sphere(16, 8)),
+        ] {
+            for triangle in mesh.indices.chunks(3) {
+                let Some((along_u, along_v, _, out)) = surface(&mesh, triangle) else {
+                    continue;
+                };
+                let into = along_u.cross(along_v).dot(out);
+                assert!(into < 0.0, "{} wears its texture mirrored: {}", name, into);
+            }
+        }
     }
 
     #[test]

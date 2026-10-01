@@ -30,6 +30,24 @@ an instance buffer.
 Normals are transformed by the inverse transpose of the model matrix, so
 non-uniform scaling does not bend the lighting.
 
+**Every built-in mesh is wound counter-clockwise seen from outside**, which is
+what spec 0009's culling keeps, and wears its texture the right way round. Those
+are two things a mesh can get wrong on its own and both are invisible on a still
+shape, so each has a test that reads every triangle of every built-in.
+
+The sphere had both wrong, and they hid each other. Its triangles ran clockwise
+from outside, so the renderer culled every outward face and drew the inside of
+the far side; its longitude ran the other way, so the texture was mirrored to
+match. A still ball looked right. A turning one did not: the far surface moves
+against the near one, so marble's ball rolled backwards when it rolled towards
+or away from the camera, and correctly when it rolled across. That is the shape
+of the bug, and it is why the tests check the invariants rather than the
+pictures.
+
+The texture test is the handedness: an image is read with u across and v down,
+so laying it on a surface puts u cross v into that surface. Coming out means the
+image is on backwards, and letters on it would read in a mirror.
+
 **Loading from a file** is `Mesh::from_obj`, using `tobj`. Wavefront OBJ is
 enough to get real models on screen, and it is one dependency rather than the
 several glTF wants.
@@ -47,6 +65,8 @@ several glTF wants.
 - A mesh loaded without normals gets them computed. — `mesh::tests::computes_missing_normals`
 - The built-in plane faces up. — `mesh::tests::the_plane_faces_up`
 - The built-in sphere is round, with normals pointing out. — `mesh::tests::the_sphere_is_round`
+- Every built-in mesh is wound the way its normals face. — `mesh::tests::every_mesh_is_wound_the_way_it_faces`
+- No built-in mesh wears its texture mirrored. — `mesh::tests::no_mesh_wears_its_texture_mirrored`
 - An OBJ file loads into vertices and indices. — `mesh::tests::loads_an_obj_file`
 
 ### Verified by hand
