@@ -78,6 +78,23 @@ so three in the worst frame.
 **A game can turn it off.** It is a cost, and a game with nothing resting on
 anything does not need it.
 
+**What the march finds has to be near the surface doing the marching.** A thing
+in contact with a surface is within a march of it, so it cannot be much further
+towards the camera than that. Without that the march only asks whether something
+is in front of the step, which in a scene with anything floating in it is a
+different question.
+
+marble's gems float 0.3 above their platform. Each one laid a second shadow on
+the platform, hard edged and offset, beside the soft one the map casts: the
+march found the gem in front of itself and called it contact. How thick a thing
+is reckoned also grew without limit, and twenty units out that was 1.2, which is
+four whole marches.
+
+Both are fixed here. The thickness stops growing at `CONTACT_THICKEST`, and a
+step only counts when what the buffer holds is within a march and a thickness of
+the surface. The second is the one that matters; the cap is tidying up a number
+that had no business being unbounded.
+
 ## Acceptance criteria
 
 - A march that meets nothing reports no shadow. — `contact::tests::an_empty_march_is_lit`
@@ -86,6 +103,8 @@ anything does not need it.
 - A step past the edge of the buffer is lit. — `contact::tests::off_the_buffer_is_lit`
 - A step far behind what was recorded is through the back of it, not inside it. — `contact::tests::behind_the_back_of_a_thing_is_not_inside_it`
 - And a thing is reckoned thicker the further off it is. — `contact::tests::a_thing_is_reckoned_thicker_the_further_off_it_is`
+- But not without limit. — `contact::tests::how_thick_a_thing_is_reckoned_stops_growing`
+- Something in the foreground is not something in contact. — `contact::tests::a_thing_in_the_foreground_is_not_contact`
 - A step is never longer than the thinnest thing the march can see. — `contact::tests::the_steps_leave_no_gap`
 - A nudged march covers the same ground, whatever the nudge. — `contact::tests::a_nudged_march_covers_the_same_ground`
 - And a nudge moves the whole march, not one step of it. — `contact::tests::a_nudge_moves_the_whole_march`

@@ -38,9 +38,21 @@ pub const CONTACT_THICKNESS: f32 = 0.35;
 /// a cube from some angles and not others.
 pub const CONTACT_THICKNESS_PER_UNIT: f32 = 0.06;
 
+/// And where that growth stops.
+///
+/// Unbounded, it stops being about thickness. Twenty units out it reckons
+/// everything within 1.2 units in front of the march as something the march is
+/// inside, and marble's gems float 0.3 above their platform: each one laid a
+/// second, hard edged shadow beside the one the map casts. Nothing in contact
+/// is further in front of the surface than the march is long, so past a point
+/// more tolerance only buys false hits.
+pub const CONTACT_THICKEST: f32 = 0.6;
+
 /// How thick a thing has to be reckoned at this distance from the camera.
 pub fn thickness_at(distance: f32) -> f32 {
-    CONTACT_THICKNESS.max(distance.max(0.0) * CONTACT_THICKNESS_PER_UNIT)
+    CONTACT_THICKNESS
+        .max(distance.max(0.0) * CONTACT_THICKNESS_PER_UNIT)
+        .min(CONTACT_THICKEST)
 }
 
 /// How far off the surface the march starts, in world units.
@@ -99,10 +111,23 @@ pub fn step_at_jittered(n: u32, jitter: f32) -> f32 {
 /// `marched` is how far away the step itself is, both as distances from the
 /// camera. In front of what was recorded means nothing is in the way; behind it
 /// by more than a thing is thick means it came out the far side.
-pub fn step_is_shadow(recorded: f32, marched: f32) -> bool {
+pub fn step_is_shadow(here: f32, recorded: f32, marched: f32) -> bool {
     let behind = marched - recorded;
 
-    behind > 0.0 && behind < thickness_at(marched)
+    close_enough(here, recorded) && behind > 0.0 && behind < thickness_at(marched)
+}
+
+/// Whether what the buffer holds is near enough this surface to be touching it.
+///
+/// `here` is how far off the camera the surface doing the marching is. A thing
+/// in contact with it is within a march of it, so it cannot be much further
+/// towards the camera than that. Anything that is, is in the foreground and has
+/// no business shadowing what is behind it: marble's gems float 0.3 above their
+/// platform and each laid a second, hard edged shadow next to the one the map
+/// casts, because the march found the gem in front of itself and called it
+/// contact.
+pub fn close_enough(here: f32, recorded: f32) -> bool {
+    here - recorded <= CONTACT_REACH + CONTACT_THICKNESS
 }
 
 /// One march, as a light factor: one lit, zero shadowed.
@@ -111,13 +136,13 @@ pub fn step_is_shadow(recorded: f32, marched: f32) -> bool {
 /// the depth buffer holds there and how far off that step is, or nothing at all
 /// when the step lands outside the buffer. Outside is lit, the same forgiving
 /// direction spec 0015 takes for a fragment outside the sun's map.
-pub fn march(look_up: impl Fn(f32) -> Option<(f32, f32)>) -> f32 {
+pub fn march(here: f32, look_up: impl Fn(f32) -> Option<(f32, f32)>) -> f32 {
     for n in 1..=CONTACT_STEPS {
         let Some((recorded, marched)) = look_up(step_at(n)) else {
             continue;
         };
 
-        if step_is_shadow(recorded, marched) {
+        if step_is_shadow(here, recorded, marched) {
             return 0.0;
         }
     }
@@ -126,12 +151,12 @@ pub fn march(look_up: impl Fn(f32) -> Option<(f32, f32)>) -> f32 {
 }
 
 /// The march, or nothing at all when a game has turned it off.
-pub fn factor(on: bool, look_up: impl Fn(f32) -> Option<(f32, f32)>) -> f32 {
+pub fn factor(on: bool, here: f32, look_up: impl Fn(f32) -> Option<(f32, f32)>) -> f32 {
     if !on {
         return 1.0;
     }
 
-    march(look_up)
+    march(here, look_up)
 }
 
 /// The darker of what the map says and what the march says.
@@ -154,13 +179,13 @@ mod tests {
 
     #[test]
     fn an_empty_march_is_lit() {
-        assert_eq!(march(empty), 1.0);
+        assert_eq!(march(5.0, empty), 1.0);
     }
 
     #[test]
     fn a_step_behind_the_depth_buffer_is_shadow() {
         // the buffer holds something at 5, and the march is at 5.05: inside it
-        assert_eq!(march(|_| Some((5.0, 5.05))), 0.0);
+        assert_eq!(march(5.0, |_| Some((5.0, 5.05))), 0.0);
     }
 
     #[test]
@@ -169,8 +194,8 @@ mod tests {
         // and whatever that was is not between this surface and the light
         let far = 5.0 + thickness_at(5.0) + 0.01;
 
-        assert!(!step_is_shadow(5.0, far));
-        assert_eq!(march(|_| Some((5.0, far))), 1.0);
+        assert!(!step_is_shadow(5.0, 5.0, far));
+        assert_eq!(march(5.0, |_| Some((5.0, far))), 1.0);
     }
 
     #[test]
@@ -181,14 +206,46 @@ mod tests {
         assert!(thickness_at(30.0) > thickness_at(3.0));
         assert_eq!(thickness_at(0.0), CONTACT_THICKNESS);
         assert!(
-            step_is_shadow(20.0, 20.5),
+            step_is_shadow(20.0, 20.0, 20.5),
             "a gap of half a unit at twenty out"
         );
     }
 
     #[test]
+    fn a_thing_in_the_foreground_is_not_contact() {
+        // the same step against the same buffer, from two surfaces. Near it,
+        // that is contact. Well behind it, the thing is in the foreground and
+        // shadowing for it is marble's gems growing a second shadow each.
+        assert!(
+            step_is_shadow(10.3, 10.0, 10.3),
+            "a surface at the step should take the shadow"
+        );
+        assert!(
+            !step_is_shadow(10.8, 10.0, 10.3),
+            "a surface half a unit behind it should not"
+        );
+    }
+
+    #[test]
+    fn how_thick_a_thing_is_reckoned_stops_growing() {
+        // unbounded it stops being thickness: 20 units out it was reckoning
+        // 1.2, which is four marches, and everything within that of the camera
+        // counted as something the march was inside.
+        assert_eq!(thickness_at(1000.0), CONTACT_THICKEST);
+        assert!(
+            thickness_at(0.0) < thickness_at(1000.0),
+            "the cap is below the floor"
+        );
+        assert!(
+            thickness_at(20.0) < 20.0 * CONTACT_THICKNESS_PER_UNIT,
+            "{}",
+            thickness_at(20.0)
+        );
+    }
+
+    #[test]
     fn off_the_buffer_is_lit() {
-        assert_eq!(march(|_| None), 1.0);
+        assert_eq!(march(5.0, |_| None), 1.0);
     }
 
     #[test]
@@ -196,7 +253,7 @@ mod tests {
         let furthest = RefCell::new(0.0f32);
         let counted = RefCell::new(0u32);
 
-        march(|along| {
+        march(5.0, |along| {
             let mut so_far = furthest.borrow_mut();
             *so_far = so_far.max(along);
             *counted.borrow_mut() += 1;
@@ -259,8 +316,8 @@ mod tests {
 
     #[test]
     fn a_game_can_turn_it_off() {
-        assert_eq!(factor(false, |_| Some((5.0, 5.05))), 1.0);
-        assert_eq!(factor(true, |_| Some((5.0, 5.05))), 0.0);
+        assert_eq!(factor(false, 5.0, |_| Some((5.0, 5.05))), 1.0);
+        assert_eq!(factor(true, 5.0, |_| Some((5.0, 5.05))), 0.0);
     }
 
     #[test]
@@ -293,7 +350,7 @@ mod tests {
             step_length()
         );
         assert!(
-            !step_is_shadow(5.0, 5.0),
+            !step_is_shadow(5.0, 5.0, 5.0),
             "a surface exactly where the buffer holds it shadowed itself"
         );
     }

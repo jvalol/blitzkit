@@ -79,6 +79,7 @@ struct Uniforms {
 const CONTACT_STEPS: i32 = 20;
 const CONTACT_THICKNESS: f32 = 0.35;
 const CONTACT_THICKNESS_PER_UNIT: f32 = 0.06;
+const CONTACT_THICKEST: f32 = 0.6;
 const CONTACT_START: f32 = 0.01;
 
 // What the depth buffer holds, as a distance from the camera. Matches
@@ -121,6 +122,11 @@ fn contact_shadow(
     let start = world_position + normal * CONTACT_START;
     let nudge = max(march_nudge(pixel), 0.05);
 
+    // how far off the camera this surface itself is, to measure what the march
+    // finds against
+    let from_here = uniforms.view_projection * vec4<f32>(start, 1.0);
+    let here = linear_depth(from_here.z / max(from_here.w, 1e-6), near, far);
+
     for (var n = 1; n <= CONTACT_STEPS; n++) {
         let along = reach * (f32(n) - 1.0 + nudge) / f32(CONTACT_STEPS);
         let clip = uniforms.view_projection * vec4<f32>(start + to_light * along, 1.0);
@@ -146,7 +152,19 @@ fn contact_shadow(
         // thing is reckoned grows with distance: at a silhouette the march
         // lands on the near face, and the gap to what is behind it grows with
         // how far off and how oblique that pair is.
-        let thickness = max(CONTACT_THICKNESS, marched * CONTACT_THICKNESS_PER_UNIT);
+        let thickness = min(
+            max(CONTACT_THICKNESS, marched * CONTACT_THICKNESS_PER_UNIT),
+            CONTACT_THICKEST,
+        );
+        // and near enough this surface to be touching it. A thing in contact
+        // is within a march of it; anything further towards the camera than
+        // that is in the foreground, and shadowing for it is how marble's
+        // floating gems each grew a second shadow.
+        let in_front = here - recorded;
+        if in_front > reach + CONTACT_THICKNESS {
+            continue;
+        }
+
         if behind > 0.0 && behind < thickness {
             return 0.0;
         }
