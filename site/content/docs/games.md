@@ -77,3 +77,11 @@ In which one crosses an open yard while four security lights sweep it.
 [github.com/jvalol/securitysweep](https://github.com/jvalol/securitysweep)
 
 ![The yard from above: crates scattered across it, two red tripwires strung the whole way over, a green line at the far end, and two pools of light where the beams fall](https://raw.githubusercontent.com/jvalol/securitysweep/main/media/screenshot.png)
+
+## carom
+
+In which one shoots a marble at thirteen others to knock them out of a ring.
+
+[github.com/jvalol/carom](https://github.com/jvalol/carom)
+
+![A ring drawn on a green table with thirteen pale marbles racked in a cross inside it, an amber shooter against the near arm, and one grey marble come to rest outside the ring](https://raw.githubusercontent.com/jvalol/carom/main/media/screenshot.png)

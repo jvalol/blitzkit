@@ -16,6 +16,7 @@ Feel free to follow along!
 - [starry](https://github.com/jvalol/starry) third. a sliding tile puzzle of starry night
 - [lantern](https://github.com/jvalol/lantern) fourth. a dark maze
 - [securitysweep](https://github.com/jvalol/securitysweep) fifth, a searchlight game
+- [carom](https://github.com/jvalol/carom) sixth, one player game of marbles
 
 The examples below live in this repo. The games are their own repos.
 
