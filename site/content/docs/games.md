@@ -85,3 +85,11 @@ In which one shoots a marble at thirteen others to knock them out of a ring.
 [github.com/jvalol/carom](https://github.com/jvalol/carom)
 
 ![A ring drawn on a green table with thirteen pale marbles racked in a cross inside it, an amber shooter against the near arm, and one grey marble come to rest outside the ring](https://raw.githubusercontent.com/jvalol/carom/main/media/screenshot.png)
+
+## diamond
+
+In which one breaks a rack of nine. Llke pool.
+
+[github.com/jvalol/diamond](https://github.com/jvalol/diamond)
+
+![A pool table seen from above the head rail, nine coloured balls scattered across the far half after a break, the white cue ball among them, and six dark pockets around the cushions](https://raw.githubusercontent.com/jvalol/diamond/main/media/screenshot.png)
