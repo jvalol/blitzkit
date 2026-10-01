@@ -68,8 +68,12 @@ In which one walks a dark maze carrying two lamps. Put one down and it stays lit
 
 [github.com/jvalol/lantern](https://github.com/jvalol/lantern)
 
+![A candle standing in a corridor, lighting the walls and casting its own shadow, a second candle carried in the foreground, and a dark side passage to the left](https://raw.githubusercontent.com/jvalol/lantern/main/media/screenshot.png)
+
 ## securitysweep
 
 In which one crosses an open yard while four security lights sweep it.
 
 [github.com/jvalol/securitysweep](https://github.com/jvalol/securitysweep)
+
+![The yard from above: crates scattered across it, two red tripwires strung the whole way over, a green line at the far end, and two pools of light where the beams fall](https://raw.githubusercontent.com/jvalol/securitysweep/main/media/screenshot.png)
