@@ -6,6 +6,7 @@ pub mod keyboard;
 pub mod lighting;
 pub mod mesh;
 pub mod mouse;
+pub mod physics;
 pub mod renderer;
 pub mod shadow;
 pub mod sound;
