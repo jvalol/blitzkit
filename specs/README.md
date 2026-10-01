@@ -39,6 +39,7 @@ not a priority, and it never changes once a spec exists.
 | [0029](0029-contact-shadows.md) | Shadows in the first fraction of a unit, where a map cannot reach |
 | [0030](0030-sphere-bodies.md) | Spheres with mass, bounce, friction and spin |
 | [0031](0031-rolling-resistance.md) | A rolling ball slowing down, which 0030 left out |
+| [0032](0032-striking-off-centre.md) | Hitting a body somewhere other than its middle |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.
