@@ -38,7 +38,7 @@ separate pipelines and always have been.
 
 - The view matrix puts the camera where it says it is. — `camera::tests::view_matrix_places_the_camera`
 - A point at the near plane lands at depth 0, at the far plane at 1. — `camera::tests::projection_matches_wgpu_clip_space`
-- Aspect ratio follows the window. — `camera::tests::aspect_follows_the_window`
+- Aspect ratio follows the window. — `camera::tests::the_viewport_is_kept_and_aspect_still_follows_it`
 - The default camera can see the origin. — `camera::tests::the_default_camera_sees_the_origin`
 - Panning the camera slides the world across the screen. — `camera::tests::moving_the_camera_changes_the_view`
 - Moving the position alone keeps the target centered, since the camera looks at it. — `camera::tests::the_target_stays_centered_when_the_camera_orbits`

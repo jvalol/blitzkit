@@ -1,6 +1,6 @@
 # 0025 Cursor rays
 
-**Status:** draft
+**Status:** implemented
 **Date:** 2026-09-28
 
 ## Goal
@@ -68,29 +68,25 @@ does not.
 
 ### Verified by hand
 
-None of the five games point at anything, so there is nothing to check this
-against until one does. `rolling` already has a mouse-driven camera and a room
-with boxes in it, so it grows the smallest thing that exercises a ray: the box
-under the pointer is drawn lighter than the rest, and nothing is lit when the
-pointer is not over one.
+carom points at the table with this: the shot goes where the cursor is, so every
+shot in that game is a check of this arithmetic. It is a better one than the
+example this spec first called for, because a sign error does not merely light
+the wrong box, it sends the marble somewhere the player did not point.
 
-Highlighting on hover rather than on a click is deliberate. Rolling turns its
-camera by dragging with the left button and never locks the cursor, so the
-pointer is always live and always visible, and a hover costs the example no
-button it is already using.
+This spec said "none of the five games point at anything, so there is nothing to
+check this against until one does", and planned a hover highlight in the
+`rolling` example instead. One does now, and it is the game this was written for.
 
-Run `cargo run --release --example rolling`.
+Run `cargo run --release` in carom.
 
-- The box that lights up is the one under the pointer, at the corners and edges
-  of the window as well as in the middle. This is the check the round trip test
-  cannot make, because a sign error that survives the arithmetic still shows
-  here as the wrong box.
-- Nothing lights up with the pointer on bare floor or on the wall.
-- Turn the camera and point at the same box from the other side. It still lights
-  up, which is the ray following the camera rather than a view matrix from
-  whenever it was last built.
-- Resize the window and point at a box near an edge. Still the right one, which
-  is the camera keeping the viewport rather than a stale one.
+- The shot points at the cursor, at the corners and edges of the window as well
+  as in the middle. This is the check the round trip test cannot make, because a
+  sign error that survives the arithmetic still shows here as the wrong
+  direction.
+- Move the cursor off the window and the shot stops following it, rather than
+  carrying on turning.
+- Resize the window and point at the far side of the ring. Still right, which is
+  the camera keeping the viewport rather than a stale one.
 
 ## Out of scope
 
