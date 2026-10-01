@@ -37,6 +37,13 @@ const SLIDES: usize = 4;
 /// How far off a surface a body is left, so the next sweep starts outside it.
 const SKIN: f32 = 1e-3;
 
+/// Below this much spin a roll is over, per spec 0031.
+///
+/// The same reason as `SETTLES_AT`: a resistance that only ever takes a share
+/// of what is left never arrives, and a ball that has stopped should compare
+/// equal to one that never moved.
+pub const SPIN_SETTLES_AT: f32 = 0.05;
+
 /// A sphere with weight.
 #[derive(Debug, Clone, Copy)]
 pub struct Body {
@@ -51,6 +58,9 @@ pub struct Body {
     /// How much speed comes back along the normal, from none to all of it.
     pub restitution: f32,
     pub friction: f32,
+    /// How much a roll costs, per spec 0031. Zero and a rolling ball rolls for
+    /// ever, which is what spec 0030 alone does.
+    pub rolling: f32,
 }
 
 impl Body {
@@ -63,6 +73,7 @@ impl Body {
             inverse_mass: if mass > 0.0 { 1.0 / mass } else { 0.0 },
             restitution: 0.4,
             friction: 0.5,
+            rolling: 0.0,
         }
     }
 
@@ -81,6 +92,11 @@ impl Body {
 
     pub fn with_friction(mut self, friction: f32) -> Self {
         self.friction = friction.max(0.0);
+        self
+    }
+
+    pub fn with_rolling(mut self, rolling: f32) -> Self {
+        self.rolling = rolling.max(0.0);
         self
     }
 
@@ -181,10 +197,41 @@ fn resolve(
 
     let impulse = push + rub;
     body.apply(impulse, here);
+    slow_the_roll(body, along_normal);
 
     if let (Some(other), Some(there)) = (other, there) {
         other.apply(-impulse, there);
+        slow_the_roll(other, along_normal);
     }
+}
+
+/// Takes a share of a body's spin away for rolling on something, per spec 0031.
+///
+/// A couple against the spin rather than a drag on the velocity. A drag would
+/// slow a ball that is sliding and a ball that is rolling by the same amount,
+/// and a ball in mid air too. This only touches something that is turning, and
+/// friction at the contact already trades spin and velocity for each other, so
+/// slowing the spin slows the ball through the thing that was already joining
+/// them.
+///
+/// `along_normal` is the impulse into the surface, so a heavy ball pays more
+/// than a light one and one barely touching pays almost nothing.
+fn slow_the_roll(body: &mut Body, along_normal: f32) {
+    if body.rolling <= 0.0 || along_normal <= 0.0 {
+        return;
+    }
+
+    let spinning = body.spin.length();
+    if spinning < SPIN_SETTLES_AT {
+        body.spin = Vec3::ZERO;
+        return;
+    }
+
+    // clamped to what brings it to a stop, or a large coefficient and a small
+    // spin make a ball that rolls backwards
+    let taken = (body.rolling * along_normal * body.radius * body.inverse_inertia()).min(spinning);
+
+    body.spin -= body.spin / spinning * taken;
 }
 
 /// Moves one body through the static world, swept so a fast one cannot pass
@@ -472,6 +519,132 @@ mod tests {
             speed,
             bodies[0].velocity.x
         );
+    }
+
+    /// A ball already rolling at `speed`, with the spin that goes with it.
+    fn rolling(speed: f32, rolling: f32) -> Body {
+        let mut body = ball(vec3(0.0, 0.5, 0.0))
+            .with_velocity(vec3(speed, 0.0, 0.0))
+            .with_friction(0.9)
+            .with_rolling(rolling);
+        body.spin = vec3(0.0, 0.0, -speed / body.radius);
+
+        body
+    }
+
+    #[test]
+    fn rolling_resistance_slows_a_roll() {
+        let speed = 3.0;
+        let mut bodies = [rolling(speed, 0.05)];
+
+        run(&mut bodies, &[floor()], DOWN, 240);
+
+        assert!(
+            bodies[0].velocity.x < speed - 0.5,
+            "it barely slowed, {} to {}",
+            speed,
+            bodies[0].velocity.x
+        );
+        assert!(bodies[0].velocity.x >= 0.0, "it went backwards");
+    }
+
+    #[test]
+    fn the_air_does_not_slow_a_spin() {
+        // nothing is rolling on nothing
+        let mut bodies = [ball(vec3(0.0, 50.0, 0.0)).with_rolling(0.5)];
+        bodies[0].spin = vec3(0.0, 0.0, -6.0);
+        let was = bodies[0].spin;
+
+        run(&mut bodies, &[floor()], DOWN, 30);
+
+        assert_eq!(bodies[0].spin, was);
+    }
+
+    #[test]
+    fn a_harder_push_costs_more() {
+        // the cost is a share of the push into the surface, so the same ball
+        // pressed harder pays more of it
+        let speed = 3.0;
+        let mut gently = [rolling(speed, 0.05)];
+        let mut hard = [rolling(speed, 0.05)];
+
+        run(&mut gently, &[floor()], DOWN, 180);
+        run(&mut hard, &[floor()], DOWN * 3.0, 180);
+
+        assert!(
+            hard[0].velocity.x < gently[0].velocity.x,
+            "hard {} gently {}",
+            hard[0].velocity.x,
+            gently[0].velocity.x
+        );
+    }
+
+    #[test]
+    fn weight_alone_changes_nothing() {
+        // the torque grows with the push and so does the inertia it is turning,
+        // and on a flat floor those are the same factor. A heavy ball and a
+        // light one roll to a stop together, the way they slide to one.
+        let speed = 3.0;
+        let mut light = [rolling(speed, 0.05)];
+        let mut heavy = [rolling(speed, 0.05)];
+        heavy[0].inverse_mass = light[0].inverse_mass / 8.0;
+
+        run(&mut light, &[floor()], DOWN, 180);
+        run(&mut heavy, &[floor()], DOWN, 180);
+
+        assert!(
+            (heavy[0].velocity.x - light[0].velocity.x).abs() < 1e-3,
+            "heavy {} light {}",
+            heavy[0].velocity.x,
+            light[0].velocity.x
+        );
+    }
+
+    #[test]
+    fn resistance_does_not_reverse_a_spin() {
+        // a coefficient far past anything sane, against a spin that is nearly
+        // nothing: the clamp is the only thing between this and a ball that
+        // rolls backwards
+        let mut bodies = [rolling(0.2, 50.0)];
+        let way = bodies[0].spin.normalize();
+
+        for _ in 0..240 {
+            step(&mut bodies, &[floor()], DOWN, 1.0 / 60.0);
+            let spin = bodies[0].spin;
+            assert!(
+                spin == Vec3::ZERO || spin.dot(way) >= 0.0,
+                "the spin turned round to {:?}",
+                spin
+            );
+        }
+    }
+
+    #[test]
+    fn a_roll_ends() {
+        let mut bodies = [rolling(4.0, 0.08)];
+
+        run(&mut bodies, &[floor()], DOWN, 1200);
+
+        assert_eq!(bodies[0].spin, Vec3::ZERO);
+        assert!(
+            bodies[0].velocity.x.abs() < 0.1,
+            "still going at {}",
+            bodies[0].velocity.x
+        );
+    }
+
+    #[test]
+    fn a_stopped_ball_is_stopped() {
+        // a resistance that only ever takes a share of what is left never
+        // arrives, and a ball that has stopped should compare equal to one
+        // that never moved
+        let mut stopped = [rolling(4.0, 0.08)];
+        run(&mut stopped, &[floor()], DOWN, 1200);
+
+        let mut longer = stopped;
+        run(&mut longer, &[floor()], DOWN, 600);
+
+        assert_eq!(stopped[0].spin, longer[0].spin);
     }
 
     #[test]
