@@ -99,8 +99,13 @@ and get it back, and a test can assert on a number rather than a range.
 
 - A ball dropped from a height bounces lower each time and comes to rest,
   without a last visible twitch.
-- A ball rolled across a floor keeps rolling and slows gently rather than
-  sliding to a stop like a puck.
+- A ball rolled across a floor keeps rolling rather than sliding to a stop like
+  a puck. It does not slow down, and nothing here makes it: friction acts on the
+  velocity at the point of contact and a ball rolling without slipping has none
+  there, which is `physics::tests::rolling_costs_nothing`. This line used to say
+  it slowed gently as well, and that half was never true. Spec 0031 is the half
+  that makes it so, off by default, so a body that asks for none of it still
+  rolls for ever here.
 - A ball rolled into a slope rolls back down.
 - Several balls in a box knock each other about and settle.
 
