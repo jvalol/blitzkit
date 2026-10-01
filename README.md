@@ -17,7 +17,7 @@ Feel free to follow along!
 - [lantern](https://github.com/jvalol/lantern) fourth. a dark maze
 - [securitysweep](https://github.com/jvalol/securitysweep) fifth, a searchlight game
 - [carom](https://github.com/jvalol/carom) sixth, one player game of marbles
-- [diamond](https://github.com/jvalol/diamond) seventh, nine ball pool
+- [diamond](https://github.com/jvalol/diamond) seventh, pool
 
 The examples below live in this repo. The games are their own repos.
 
