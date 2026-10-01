@@ -1,6 +1,6 @@
 # 0032 Striking off centre
 
-**Status:** draft
+**Status:** implemented
 **Date:** 2026-10-01
 
 ## Goal
@@ -64,6 +64,19 @@ the spin is eaten, and with enough of it the ball comes back. Striking high does
 the opposite and the ball runs on after a collision. Both come out of the model
 that is already there, with nothing added.
 
+Measured, striking one ball into another four away at the same speed and reading
+where the striker ended up. They touch when it has gone 3.0. Struck at the
+bottom it ends at 2.9, behind where they met, which is the real thing rather
+than merely stopping short. Dead centre it ends at 5.9 and at the top 8.3, and
+every height between those falls in order. That is the whole range a player
+has.
+
+**How much draw there is depends on the floor.** Friction is what turns backspin
+into forward roll, so a gripping surface eats it before the two balls meet: at a
+friction of 0.95 the same bottom strike ends at 3.7, past the contact rather
+than behind it. A game that wants a cue ball to come back wants a slippery
+cloth, and that is a number it chooses rather than one this spec sets.
+
 **Side off a cushion, yes.** A cushion's normal is horizontal, so a spin about
 the vertical is no longer about the contact normal, and it has somewhere to act.
 Measured against spec 0030 as it stands: a ball run into a wall at 6 with no
@@ -93,6 +106,8 @@ is out of its scope too.
 - Low and high turn it opposite ways. — `physics::tests::low_and_high_turn_it_opposite_ways`
 - A strike below the middle makes a ball that comes back. — `physics::tests::a_low_strike_draws_the_ball_back`
 - And one above makes a ball that runs on. — `physics::tests::a_high_strike_runs_the_ball_on`
+- And every height in between falls in order. — `physics::tests::the_lower_it_is_struck_the_further_it_comes_back`
+- A floor that grips eats the draw before the balls meet. — `physics::tests::a_gripping_floor_eats_the_draw`
 - The point is taken on the surface, however far out it was given. — `physics::tests::a_strike_lands_on_the_surface`
 - A strike at the middle is refused rather than guessed at. — `physics::tests::a_strike_at_the_middle_is_refused`
 - A body of no inverse mass takes nothing from it. — `physics::tests::the_immovable_takes_no_strike`
@@ -102,7 +117,8 @@ is out of its scope too.
 ### Verified by hand
 
 - A ball struck low comes back towards where it was hit from, and the distance it
-  comes back grows with how low it was struck.
+  comes back grows with how low it was struck. It needs a floor that does not
+  grip hard; the tests measure both.
 - A ball struck high carries on through the ball it hits rather than stopping
   dead on it.
 - A ball struck to one side runs straight. That is the limitation, and seeing it

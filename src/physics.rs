@@ -124,6 +124,30 @@ impl Body {
         self.velocity += impulse * self.inverse_mass;
         self.spin += at.cross(impulse) * self.inverse_inertia();
     }
+
+    /// Hits the body at a point on its surface, per spec 0032.
+    ///
+    /// `at` is a place in the world, not an offset: a game says where the cue
+    /// tip met the ball. Whatever is handed in is taken in the direction it
+    /// points, at exactly one radius out, because a cue can reach neither
+    /// inside a ball nor past its edge.
+    ///
+    /// Both halves fall out of one cross product. A strike straight through the
+    /// middle has its impulse parallel to the offset, so the turning part is
+    /// nothing and the body gains no spin. That is not a special case, it is
+    /// what the arithmetic says.
+    ///
+    /// A point at the middle is refused rather than guessed at: there is no
+    /// point on the surface it means, and a game asking for one has a bug this
+    /// will not paper over.
+    pub fn strike(&mut self, impulse: Vec3, at: Vec3) {
+        let out = at - self.position;
+        if out.length_squared() < 1e-12 {
+            return;
+        }
+
+        self.apply(impulse, out.normalize() * self.radius);
+    }
 }
 
 /// What a pair of bodies agree on, which is the lesser of what each brings.
@@ -739,6 +763,181 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A ball resting at the origin, and a point on it `out` from the middle.
+    fn struck(out: Vec3, impulse: Vec3) -> Body {
+        let mut body = ball(vec3(0.0, 0.5, 0.0));
+        body.strike(impulse, body.position + out);
+
+        body
+    }
+
+    #[test]
+    fn a_central_strike_does_not_turn_it() {
+        // the impulse is along the offset, so the cross product is nothing.
+        // Not a special case: it is what the arithmetic says.
+        let body = struck(vec3(-1.0, 0.0, 0.0), vec3(4.0, 0.0, 0.0));
+
+        assert!(body.velocity.x > 0.0, "it did not move");
+        assert_eq!(body.spin, Vec3::ZERO, "a middle hit turned it");
+    }
+
+    #[test]
+    fn an_off_centre_strike_turns_it() {
+        let body = struck(vec3(-1.0, -0.6, 0.0), vec3(4.0, 0.0, 0.0));
+
+        assert!(body.velocity.x > 0.0, "it did not move");
+        assert!(body.spin.length() > 0.1, "a low hit did not turn it");
+    }
+
+    #[test]
+    fn low_and_high_turn_it_opposite_ways() {
+        let low = struck(vec3(-1.0, -0.6, 0.0), vec3(4.0, 0.0, 0.0));
+        let high = struck(vec3(-1.0, 0.6, 0.0), vec3(4.0, 0.0, 0.0));
+
+        assert!(
+            low.spin.dot(high.spin) < 0.0,
+            "low {:?} and high {:?} turn the same way",
+            low.spin,
+            high.spin
+        );
+    }
+
+    #[test]
+    fn a_strike_lands_on_the_surface() {
+        // however far out it was given, a cue reaches neither inside a ball
+        // nor past its edge
+        let near = struck(vec3(-0.01, -0.006, 0.0), vec3(4.0, 0.0, 0.0));
+        let far = struck(vec3(-100.0, -60.0, 0.0), vec3(4.0, 0.0, 0.0));
+
+        assert!(
+            (near.spin - far.spin).length() < 1e-4,
+            "a point just off the middle and one far outside differ: {:?} against {:?}",
+            near.spin,
+            far.spin
+        );
+    }
+
+    #[test]
+    fn a_strike_at_the_middle_is_refused() {
+        let mut body = ball(vec3(0.0, 0.5, 0.0));
+        body.strike(vec3(4.0, 0.0, 0.0), body.position);
+
+        assert_eq!(body.velocity, Vec3::ZERO);
+        assert_eq!(body.spin, Vec3::ZERO);
+    }
+
+    #[test]
+    fn the_immovable_takes_no_strike() {
+        let mut wall = Body::immovable(Vec3::ZERO, 1.0);
+        wall.strike(vec3(0.0, 9.0, 0.0), vec3(0.5, 0.0, 0.3));
+
+        assert_eq!(wall.velocity, Vec3::ZERO);
+        assert_eq!(wall.spin, Vec3::ZERO);
+    }
+
+    #[test]
+    fn the_same_strike_twice_is_the_same_strike() {
+        let one = struck(vec3(-1.0, -0.4, 0.2), vec3(5.0, 0.0, 1.0));
+        let other = struck(vec3(-1.0, -0.4, 0.2), vec3(5.0, 0.0, 1.0));
+
+        assert_eq!(one.velocity, other.velocity);
+        assert_eq!(one.spin, other.spin);
+    }
+
+    /// Where the two of them touch, which is a ball's width short of the one
+    /// standing still. A striker that ends behind this came back.
+    const TOUCHED_AT: f32 = 3.0;
+
+    /// Strikes a ball at `height` up its face and runs it into another, and
+    /// says where the striker ended up along the way it was going.
+    fn after_the_hit(height: f32, grip: f32) -> f32 {
+        let mut bodies = [
+            ball(vec3(0.0, 0.5, 0.0)).with_friction(grip),
+            ball(vec3(4.0, 0.5, 0.0)).with_friction(grip),
+        ];
+        let at = bodies[0].position + vec3(-1.0, height, 0.0);
+        bodies[0].strike(vec3(7.0, 0.0, 0.0), at);
+
+        run(&mut bodies, &[floor()], DOWN, 240);
+
+        bodies[0].position.x
+    }
+
+    #[test]
+    fn a_low_strike_draws_the_ball_back() {
+        // struck low it is still spinning backwards when it arrives, and the
+        // floor pushes it back. Behind where they touched is the real thing
+        // rather than merely stopping shorter than a flat hit does.
+        let low = after_the_hit(-0.95, 0.3);
+
+        assert!(
+            low < TOUCHED_AT,
+            "it ended at {}, and they touched at {}",
+            low,
+            TOUCHED_AT
+        );
+    }
+
+    #[test]
+    fn the_lower_it_is_struck_the_further_it_comes_back() {
+        let heights = [-0.95f32, -0.7, -0.3, 0.0, 0.3, 0.7, 0.95];
+        let ends: Vec<f32> = heights.iter().map(|h| after_the_hit(*h, 0.6)).collect();
+
+        for pair in ends.windows(2) {
+            assert!(
+                pair[1] > pair[0],
+                "{:?} against the heights {:?}",
+                ends,
+                heights
+            );
+        }
+    }
+
+    #[test]
+    fn a_high_strike_runs_the_ball_on() {
+        // past where a flat hit stops it, which is what following through is
+        assert!(
+            after_the_hit(0.95, 0.6) > after_the_hit(0.0, 0.6) + 1.0,
+            "high {} flat {}",
+            after_the_hit(0.95, 0.6),
+            after_the_hit(0.0, 0.6)
+        );
+    }
+
+    #[test]
+    fn a_gripping_floor_eats_the_draw() {
+        // the floor turns backspin into forward roll, so the more it grips the
+        // less is left by the time the two meet
+        let slippy = after_the_hit(-0.95, 0.3);
+        let gripping = after_the_hit(-0.95, 0.95);
+
+        assert!(gripping > slippy, "slippy {} gripping {}", slippy, gripping);
+    }
+
+    #[test]
+    fn side_spin_does_not_swerve() {
+        // a sphere on a flat floor touches at one point, that point lies on the
+        // vertical axis, and a spin about an axis through the contact moves
+        // nothing there. Off a cushion it is another matter, because the normal
+        // is horizontal: see the spec.
+        let mut spinning = [ball(vec3(0.0, 0.5, 0.0))
+            .with_velocity(vec3(6.0, 0.0, 0.0))
+            .with_friction(0.6)];
+        spinning[0].spin = vec3(0.0, 30.0, 0.0);
+
+        let mut straight = [ball(vec3(0.0, 0.5, 0.0))
+            .with_velocity(vec3(6.0, 0.0, 0.0))
+            .with_friction(0.6)];
+
+        run(&mut spinning, &[floor()], DOWN, 120);
+        run(&mut straight, &[floor()], DOWN, 120);
+
+        assert_eq!(
+            spinning[0].position.z, straight[0].position.z,
+            "it swerved on flat ground"
+        );
     }
 
     #[test]
