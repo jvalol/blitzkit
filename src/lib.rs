@@ -81,6 +81,26 @@ pub trait Game {
     fn resized(&mut self, window_size: (f32, f32)) {}
 }
 
+/// Empties everything a frame fills, before the frame fills it.
+///
+/// The scene was the only one of the three the engine cleared, and the other two
+/// were left to each game to remember. Eight of them did. carom did not, and its
+/// readout grew by a line a frame until wgpu refused a text buffer of
+/// 2,726,288,968 bytes and killed the process, minutes into playing, long after
+/// anyone would still suspect the thing they had just written.
+///
+/// A game that clears them itself is still right; it is clearing what is already
+/// clear. See spec 0002.
+pub fn between_frames(
+    scene: &mut Scene,
+    geometry: &mut Geometry,
+    text_renderer: &mut TextRenderer,
+) {
+    scene.reset();
+    geometry.reset();
+    text_renderer.reset();
+}
+
 /// Longest frame time handed to `Game::update`. Below 20 fps the game slows down
 /// instead of taking one large step.
 pub const MAX_DELTA_TIME: f32 = 0.05;
@@ -177,13 +197,18 @@ impl ApplicationHandler for App {
                 let dt = clamp_delta_time((now - running.last_update).as_secs_f32());
                 running.last_update = now;
 
+                between_frames(
+                    &mut running.scene,
+                    &mut running.geometry,
+                    &mut running.text_renderer,
+                );
+
                 self.game.update(
                     dt,
                     &mut running.geometry,
                     &mut running.text_renderer,
                     &running.sound_system,
                 );
-                running.scene.reset();
                 let mut camera = *running.renderer.camera();
                 self.game.draw(&mut running.scene, &mut camera);
                 running.renderer.set_camera(camera);
@@ -306,5 +331,34 @@ mod tests {
     #[test]
     fn max_delta_time_is_a_twentieth_of_a_second() {
         assert_eq!(MAX_DELTA_TIME, 1.0 / 20.0);
+    }
+
+    #[test]
+    fn a_frame_starts_with_all_three_empty() {
+        // the scene was cleared for a game and the other two were not, and a
+        // game that forgot grew its text buffer until the device refused it
+        let mut scene = Scene::new();
+        let mut geometry = Geometry::new();
+        let mut text_renderer = TextRenderer::new();
+
+        geometry.push_quad(&crate::geometry::quad::Quad::colored(
+            glam::Vec2::ZERO,
+            glam::Vec2::ONE,
+            glam::Vec4::ONE,
+        ));
+        text_renderer.push_render_text(renderer::render_text::RenderText {
+            text: String::from("something"),
+            ..Default::default()
+        });
+        assert!(geometry.num_quads > 0);
+        assert!(!text_renderer.render_texts.is_empty());
+
+        between_frames(&mut scene, &mut geometry, &mut text_renderer);
+
+        assert_eq!(geometry.num_quads, 0, "the quads carried over");
+        assert!(
+            text_renderer.render_texts.is_empty(),
+            "the readout carried over"
+        );
     }
 }
