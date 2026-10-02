@@ -65,17 +65,24 @@ the opposite and the ball runs on after a collision. Both come out of the model
 that is already there, with nothing added.
 
 Measured, striking one ball into another four away at the same speed and reading
-where the striker ended up. They touch when it has gone 3.0. Struck at the
-bottom it ends at 2.9, behind where they met, which is the real thing rather
-than merely stopping short. Dead centre it ends at 5.9 and at the top 8.3, and
-every height between those falls in order. That is the whole range a player
-has.
+where the striker ended up. They touch when it has gone 3.0. Struck at the bottom
+it ends at 2.6, behind where they met, which is the real thing rather than merely
+stopping short. Dead centre it ends at 6.2 and at the top 9.3, and every height
+between those falls in order. That is the whole range a player has.
 
-**How much draw there is depends on the floor.** Friction is what turns backspin
-into forward roll, so a gripping surface eats it before the two balls meet: at a
-friction of 0.95 the same bottom strike ends at 3.7, past the contact rather
-than behind it. A game that wants a cue ball to come back wants a slippery
-cloth, and that is a number it chooses rather than one this spec sets.
+**The floor's grip and the balls' grip pull opposite ways**, and one number used
+to set both here. The floor is what turns backspin into coming back, so a
+slippery cloth gives less of it: at 0.9 the same bottom strike ends at 3.9, past
+the contact rather than behind it. The other ball is what scrubs the spin off at
+the moment they touch, so a grippy pair of balls gives less of it too. A ball
+that draws wants a gripping cloth and glassy balls, which is what a real table
+is, and both numbers belong to the game rather than to this spec.
+
+These were 2.9, 5.9 and 8.3 when this spec was written, against a solver that
+took one pass at each contact. Spec 0033 made the friction converge across
+several, so a ball keeps less of its backspin through a collision, and the one
+number setting both grips hid which way each was pulling. Remeasured rather than
+left to rot.
 
 **Side off a cushion, yes.** A cushion's normal is horizontal, so a spin about
 the vertical is no longer about the contact normal, and it has somewhere to act.

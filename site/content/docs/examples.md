@@ -23,6 +23,28 @@ WASD or the arrows to roll the ball. The camera follows it.
 ![A ball on the floor of a walled room, three blocks standing on it, each
 casting a shadow](/media/rolling.png)
 
+## stacking
+
+In which bodies hold each other up. A column of spheres five high and a pyramid
+of them four rows deep, standing there rather than sinking through each other,
+with a readout of how far the bottom sphere has drifted below where it should
+rest.
+
+```
+cargo run --release --example stacking
+```
+
+The pyramid has a kerb either side of its bottom row. Loose spheres will not hold
+one up on their own: each ball sitting in a valley shoves the two beneath it
+apart, and only the floor's grip resists.
+
+- drag or move the mouse to swing the camera round
+- scroll to zoom
+- space builds it again
+
+![A column of five spheres and a pyramid of ten between two low kerbs, standing
+on a grey floor](/media/stacking.png)
+
 ## cubes
 
 In which the lighting is shown off. There's a sun, two spotlights moving

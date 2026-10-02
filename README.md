@@ -37,6 +37,22 @@ swing the camera around, and scroll to zoom.
 ![A ball on the floor of a walled room, three blocks standing on it, each
 casting a shadow](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/rolling.png)
 
+**stacking**, bodies holding each other up. A column of spheres five high and a
+pyramid of them four rows deep, standing there instead of sinking through each
+other. The readout is how far the bottom sphere of the column has gone below
+where it should rest.
+
+```
+cargo run --release --example stacking
+```
+
+Drag or move the mouse to swing the camera around, scroll to zoom, and space
+builds it again. The pyramid has a kerb either side of its bottom row, because
+loose spheres shove each other apart and will not hold one up on their own.
+
+![A column of five spheres and a pyramid of ten between two low kerbs, standing
+on a grey floor](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/stacking.png)
+
 **cubes**, A demonstration of more sophisticated lighting.
 L takes you through the different modes one at a time. The sun is placed infinitely away so it has a direction with no
 defined position. There's nothing to draw for it, and turning it off is the only

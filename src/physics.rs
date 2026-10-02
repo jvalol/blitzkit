@@ -34,6 +34,19 @@ pub const PUSH_BACK: f32 = 0.8;
 /// How many walls one body may meet in a single step before it gives up.
 const SLIDES: usize = 4;
 
+/// How many times the contacts are worked over, per spec 0033.
+///
+/// Fixed, not "until it settles". An unbounded loop is unbounded work, a frame
+/// time that depends on the scene, and the end of the determinism this spec
+/// promises. A count that is written down is a cost that can be budgeted.
+pub const PASSES: usize = 8;
+
+/// How close counts as touching when the contacts are gathered.
+///
+/// A body swept against the world is left `SKIN` off it, so this has to be
+/// enough to find that again and little enough not to invent contacts.
+const TOUCHING: f32 = 1e-2;
+
 /// How far off a surface a body is left, so the next sweep starts outside it.
 const SKIN: f32 = 1e-3;
 
@@ -158,11 +171,216 @@ fn agreed(one: f32, other: f32) -> f32 {
     one.min(other)
 }
 
-/// Resolves one contact, between a body and either another body or the world.
+/// One place two things touch, kept for as long as a step lasts.
 ///
-/// `normal` points away from what was hit, towards the body. The static world
-/// is the same arithmetic with an inverse mass of zero, so there is one of
-/// these rather than two.
+/// Gathered before anything is solved, per spec 0033. Finding a contact and
+/// answering it in the same breath is what made the order matter: the first
+/// pair never saw the last, so the floor under a stack was decided before it
+/// knew what was standing on it, and the stack sank through it.
+#[derive(Debug, Clone, Copy)]
+struct Contact {
+    one: usize,
+    /// The other body, or nothing at all when it is the static world.
+    other: Option<usize>,
+    /// Away from what was hit, towards `one`.
+    normal: Vec3,
+    friction: f32,
+    /// How much of the bounce is still owed, worked out once from the speed the
+    /// two met at. Worked out every pass instead, it would be owed again every
+    /// pass and the contact would pump.
+    owed: f32,
+    /// What this contact has pushed with so far this step. Never negative: a
+    /// contact that has finished must not start pulling.
+    pushed: f32,
+    /// And what it has rubbed with along the surface, accumulated the same way
+    /// and for the same reason. Worked out afresh every pass and applied every
+    /// pass, it came to eight times the grip and scrubbed the spin clean off a
+    /// ball at the moment it was struck.
+    rubbed: f32,
+}
+
+/// Every place anything is touching anything, this step.
+fn contacts(bodies: &[Body], world: &[Aabb]) -> Vec<Contact> {
+    let mut found = Vec::new();
+
+    // the static world first, and it is a contact like any other. A wall is a
+    // body of no inverse mass, which spec 0030 already says, so the floor under
+    // a stack gets to answer what is standing on it rather than being decided
+    // before that is known.
+    for (n, body) in bodies.iter().enumerate() {
+        if body.inverse_mass <= 0.0 {
+            continue;
+        }
+
+        for wall in world {
+            let near = body.position.clamp(wall.min, wall.max);
+            let out = body.position - near;
+            let apart = out.length();
+
+            if apart > body.radius + TOUCHING || apart < 1e-6 {
+                continue;
+            }
+
+            // support only: no bounce and no grip. The sweep has already
+            // answered this contact for one body on its own, with the
+            // restitution, the friction and the rolling, and everything that
+            // behaves as it did depends on that staying where it is. What the
+            // sweep cannot do is hold up whatever is standing on the body,
+            // because it runs before any of the pairs are known, and that is
+            // this contact's whole job. Doing more charges the floor's grip
+            // twice, which is enough to eat the backspin off a struck ball
+            // before it reaches the one it was aimed at.
+            found.push(began(bodies, n, None, out / apart, 0.0, 0.0));
+        }
+    }
+
+    for first in 0..bodies.len() {
+        for second in (first + 1)..bodies.len() {
+            let (one, other) = (&bodies[first], &bodies[second]);
+            let between = other.position - one.position;
+            let apart = between.length();
+            let touching = one.radius + other.radius;
+
+            if apart >= touching || apart < 1e-6 {
+                continue;
+            }
+
+            found.push(began(
+                bodies,
+                first,
+                Some(second),
+                -between / apart,
+                agreed(one.restitution, other.restitution),
+                agreed(one.friction, other.friction),
+            ));
+        }
+    }
+
+    found
+}
+
+/// Opens a contact, working out the bounce it owes from the speed of meeting.
+fn began(
+    bodies: &[Body],
+    one: usize,
+    other: Option<usize>,
+    normal: Vec3,
+    restitution: f32,
+    friction: f32,
+) -> Contact {
+    let into = closing(bodies, one, other, normal).dot(normal);
+    let owed = if into < -SETTLES_AT {
+        -into * restitution
+    } else {
+        0.0
+    };
+
+    Contact {
+        one,
+        other,
+        normal,
+        friction,
+        owed,
+        pushed: 0.0,
+        rubbed: 0.0,
+    }
+}
+
+/// How fast the two surfaces are coming together at the contact.
+fn closing(bodies: &[Body], one: usize, other: Option<usize>, normal: Vec3) -> Vec3 {
+    let here = -normal * bodies[one].radius;
+
+    match other {
+        Some(other) => {
+            let there = normal * bodies[other].radius;
+
+            bodies[one].velocity_at(here) - bodies[other].velocity_at(there)
+        }
+        None => bodies[one].velocity_at(here),
+    }
+}
+
+/// Works the contacts over, several times, per spec 0033.
+fn work(bodies: &mut [Body], found: &mut [Contact]) {
+    for _ in 0..PASSES {
+        for contact in found.iter_mut() {
+            once(bodies, contact);
+        }
+    }
+}
+
+/// One pass at one contact.
+fn once(bodies: &mut [Body], contact: &mut Contact) {
+    let one = contact.one;
+    let other = contact.other;
+    let normal = contact.normal;
+
+    let (inverse_mass, inverse_inertia) = match other {
+        Some(other) => (
+            bodies[one].inverse_mass + bodies[other].inverse_mass,
+            bodies[one].inverse_inertia() + bodies[other].inverse_inertia(),
+        ),
+        None => (bodies[one].inverse_mass, bodies[one].inverse_inertia()),
+    };
+
+    if inverse_mass <= 0.0 {
+        return;
+    }
+
+    let meeting = closing(bodies, one, other, normal);
+    let into = meeting.dot(normal);
+
+    // the correction this pass wants, and then the running total is what is
+    // clamped rather than the correction. A contact that over-pushed early has
+    // to be allowed to take some back; one that is done must not start pulling.
+    // Clamping the correction instead is how a solver glues bodies together.
+    let wanted = (contact.owed - into) / inverse_mass;
+    let was = contact.pushed;
+    contact.pushed = (was + wanted).max(0.0);
+    let along_normal = contact.pushed - was;
+
+    // and the part across the surface, which is what turns it. Clamped against
+    // the running total rather than this pass's share, or a pass would see only
+    // part of the push and allow only part of the grip.
+    let across = meeting - normal * into;
+    let mut rub = Vec3::ZERO;
+    if across.length_squared() > 1e-12 && contact.pushed > 0.0 {
+        let way = across.normalize();
+        let spread = inverse_mass + inverse_inertia * bodies[one].radius * bodies[one].radius;
+        let most = contact.friction * contact.pushed;
+
+        let total = (contact.rubbed - across.length() / spread).clamp(-most, most);
+        let delta = total - contact.rubbed;
+        contact.rubbed = total;
+
+        rub = way * delta;
+    }
+
+    let impulse = normal * along_normal + rub;
+    let here = -normal * bodies[one].radius;
+
+    bodies[one].apply(impulse, here);
+
+    if let Some(other) = other {
+        let there = normal * bodies[other].radius;
+
+        bodies[other].apply(-impulse, there);
+    }
+}
+
+/// Answers one contact between a body and the static world, as the sweep finds
+/// it, so the sweep can slide the body along what it met.
+///
+/// `normal` points away from what was hit, towards the body. Only the sweep uses
+/// this now. The same contact is gathered and worked over again with everything
+/// else, per spec 0033, which is what lets the floor under a stack answer what
+/// is standing on it; this pass is what lets a body slide along a wall inside
+/// one step, which needs the velocity before the next sweep.
+///
+/// Rolling resistance is charged here and nowhere else. It is a cost of rolling
+/// on a surface, and spec 0031 puts rolling between two bodies out of its scope,
+/// so the gathered body pairs must not charge it. Charging it in both places
+/// came to double rent, and charging it once a pass came to eight times.
 fn resolve(
     body: &mut Body,
     other: Option<&mut Body>,
@@ -319,7 +537,41 @@ pub fn step(bodies: &mut [Body], world: &[Aabb], gravity: Vec3, dt: f32) {
         through_the_world(body, dt, world);
     }
 
-    // by index both ways round, so the same run twice is the same run
+    // gathered first and worked over several times, per spec 0033, by index
+    // both ways round so the same run twice is the same run
+    let mut found = contacts(bodies, world);
+    work(bodies, &mut found);
+
+    // and the overlap pushed apart afterwards, once, rather than inside the
+    // passes. The world first: a sweep keeps a body out of a wall it is moving
+    // towards and has nothing to say about one that is already inside, and a
+    // column that sank while the solver caught up stayed sunk. It settled a
+    // third of a unit into the floor and sat there however many passes it was
+    // given, because no amount of velocity undoes a position.
+    for body in bodies.iter_mut() {
+        if body.inverse_mass <= 0.0 {
+            continue;
+        }
+
+        for wall in world {
+            let near = body.position.clamp(wall.min, wall.max);
+            let out = body.position - near;
+            let apart = out.length();
+
+            if apart >= body.radius || apart < 1e-6 {
+                continue;
+            }
+
+            let over = body.radius - apart;
+            if over > SLOP {
+                body.position += out / apart * (over - SLOP) * PUSH_BACK;
+            }
+        }
+    }
+
+    // then the pairs. Either way it is after the passes rather than inside
+    // them: moving positions about in the loop adds energy the velocities
+    // never agreed to, and a stack built that way breathes.
     for first in 0..bodies.len() {
         for second in (first + 1)..bodies.len() {
             let (left, right) = bodies.split_at_mut(second);
@@ -333,12 +585,7 @@ pub fn step(bodies: &mut [Body], world: &[Aabb], gravity: Vec3, dt: f32) {
                 continue;
             }
 
-            let normal = -between / apart;
-            let restitution = agreed(one.restitution, other.restitution);
-            let friction = agreed(one.friction, other.friction);
-
-            resolve(one, Some(other), normal, restitution, friction);
-            unstick(one, other, normal, touching - apart);
+            unstick(one, other, -between / apart, touching - apart);
         }
     }
 }
@@ -444,6 +691,134 @@ mod tests {
             bodies[0].velocity.y.abs() < SETTLES_AT,
             "it is still moving at {}",
             bodies[0].velocity.y
+        );
+    }
+
+    /// A column of balls, each resting on the one below.
+    fn column(high: usize) -> Vec<Body> {
+        (0..high)
+            .map(|n| {
+                ball(vec3(0.0, 0.5 + n as f32, 0.0))
+                    .with_restitution(0.0)
+                    .with_friction(0.6)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_column_stands() {
+        // one pass could not hold this. The floor under the bottom ball was
+        // decided before anything was known to be standing on it, four pair
+        // contacts then pushed it down, and the whole column went through the
+        // floor at about a third of a unit a second.
+        let mut bodies = column(5);
+        let was: Vec<f32> = bodies.iter().map(|b| b.position.y).collect();
+
+        run(&mut bodies, &[floor()], DOWN, 600);
+
+        for (n, body) in bodies.iter().enumerate() {
+            assert!(
+                (body.position.y - was[n]).abs() < 0.1,
+                "ball {} started at {} and is at {}",
+                n,
+                was[n],
+                body.position.y
+            );
+        }
+    }
+
+    #[test]
+    fn a_column_does_not_sink() {
+        let mut bodies = column(5);
+
+        run(&mut bodies, &[floor()], DOWN, 600);
+
+        assert!(
+            bodies[0].position.y > 0.4,
+            "the bottom of the column is at {}",
+            bodies[0].position.y
+        );
+    }
+
+    #[test]
+    fn a_pile_settles() {
+        // Three along the bottom, two on them, one on top. It does not keep
+        // that shape: nothing wedges the bottom row, so each ball resting in a
+        // valley pushes the two under it apart and the pile slumps wider and
+        // lower than it was built. Measured, the top drops from 2.24 to 1.95
+        // and the base spreads from 1.0 to 1.37. That is what a pyramid of
+        // loose spheres does, and a real rack has a frame for exactly this
+        // reason. What the solver owes is that it stops, and that nothing ends
+        // up inside anything else.
+        let mut bodies = Vec::new();
+        for (row, count) in [3usize, 2, 1].iter().enumerate() {
+            for seat in 0..*count {
+                let across = (seat as f32 - (*count as f32 - 1.0) * 0.5) * 1.0;
+                bodies.push(
+                    ball(vec3(across, 0.5 + row as f32 * 0.87, 0.0))
+                        .with_restitution(0.0)
+                        .with_friction(0.9),
+                );
+            }
+        }
+
+        run(&mut bodies, &[floor()], DOWN, 900);
+
+        for (n, body) in bodies.iter().enumerate() {
+            assert!(
+                body.position.y > 0.4,
+                "ball {} sank to {}",
+                n,
+                body.position.y
+            );
+            assert!(
+                body.velocity.length() < 0.5,
+                "ball {} is still going at {}",
+                n,
+                body.velocity.length()
+            );
+        }
+
+        // Held each other up rather than passed through each other, which is
+        // the claim that does not depend on the shape it settles into.
+        for one in 0..bodies.len() {
+            for other in (one + 1)..bodies.len() {
+                let apart = bodies[one].position.distance(bodies[other].position);
+                let touching = bodies[one].radius + bodies[other].radius;
+                assert!(
+                    apart > touching - SLOP * 4.0,
+                    "balls {} and {} ended {} apart, and touch at {}",
+                    one,
+                    other,
+                    apart,
+                    touching
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_contact_never_pulls() {
+        // the running total is clamped at zero, not each pass's correction. A
+        // contact that over-pushed early has to be allowed to take some back;
+        // one that is done must not start pulling the two together.
+        let mut bodies = [
+            ball(vec3(-1.0, 0.5, 0.0)).with_velocity(vec3(2.0, 0.0, 0.0)),
+            ball(vec3(-0.2, 0.5, 0.0)),
+        ];
+
+        run(&mut bodies, &[floor()], DOWN, 240);
+
+        assert!(
+            bodies[1].position.x > bodies[0].position.x,
+            "they ended up the wrong way round: {} and {}",
+            bodies[0].position.x,
+            bodies[1].position.x
+        );
+        assert!(
+            bodies[0].position.distance(bodies[1].position) >= 1.0 - SLOP * 2.0,
+            "they were pulled into each other, {} apart",
+            bodies[0].position.distance(bodies[1].position)
         );
     }
 
@@ -853,9 +1228,14 @@ mod tests {
     /// Strikes a ball at `height` up its face and runs it into another, and
     /// says where the striker ended up along the way it was going.
     fn after_the_hit(height: f32, grip: f32) -> f32 {
+        // the floor's grip and the balls' grip are two different things and
+        // one number used to set both. The floor turns backspin into coming
+        // back; the other ball scrubs it off at the moment they touch. A ball
+        // that draws wants the first high and the second low, which is cloth
+        // and glass.
         let mut bodies = [
             ball(vec3(0.0, 0.5, 0.0)).with_friction(grip),
-            ball(vec3(4.0, 0.5, 0.0)).with_friction(grip),
+            ball(vec3(4.0, 0.5, 0.0)).with_friction(0.02),
         ];
         let at = bodies[0].position + vec3(-1.0, height, 0.0);
         bodies[0].strike(vec3(7.0, 0.0, 0.0), at);
