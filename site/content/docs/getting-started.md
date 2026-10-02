@@ -101,5 +101,5 @@ for the 2D half. Sound through `sound`, which falls back to silence on a
 machine with no audio device.
 
 Signatures are on [docs.rs](https://docs.rs/blitzkit). Whole working programs
-are in [what it does]({{< relref "docs/examples" >}}). There are five of them, each of which is
-small enough to actually read.
+are in [what it does]({{< relref "docs/examples" >}}), each of which is small
+enough to actually read.
