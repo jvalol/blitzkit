@@ -40,7 +40,7 @@ const GRAVITY: f32 = -9.81;
 /// across and the plane mesh is a unit square, so scaling it by 20 drew half the
 /// floor that was there and balls rolled ten units into the black before they
 /// fell.
-const FLOOR: f32 = 20.0;
+const FLOOR: f32 = 28.0;
 /// Below this a sphere has left for good. Without it the readout went on
 /// reporting a ball eight thousand units down and two minutes into a fall, and
 /// the solver went on paying for it.
@@ -67,21 +67,36 @@ const LOST: f32 = -20.0;
 /// crosses a good third of the floor and the loose pile still ends up a long way
 /// short of the column.
 const ROLLING: f32 = 0.1;
-/// How hard a click shoves a sphere. Not the speed it leaves at: the strike
-/// lands on the surface, so friction spends a good part of it turning slip into
-/// spin, and 4.0 left a sphere rolling at 2.5 and stopped inside four seconds.
-/// Measured on this floor, which is 20 across, shoving flat:
+/// What a shove is worth let go at once, and wound to the end. Neither is the
+/// speed a sphere leaves at: the strike lands on the surface, so friction spends
+/// a good part of it turning slip into spin.
+///
+/// Measured in place, shoving the column across a floor 28 wide, which leaves
+/// about 14 units of run in front of it:
 ///
 /// ```text
-/// 4.0   6.0 units in 4.0s
-/// 5.0   9.3          5.0
-/// 6.0  13.4          6.0
-/// 8.0  23.8          8.1
+/// 1.8   3.9 units, stops
+/// 3.0   7.7 units, stops
+/// 4.4   off the edge
 /// ```
 ///
-/// 6.0 crosses most of the floor and takes six seconds doing it. Harder than
-/// that and a shove usually ends over the edge.
-const NUDGE: f32 = 6.0;
+/// Where the wind puts you, on the curve below:
+///
+/// ```text
+/// 0.25s   2.0   a nudge
+/// 0.50s   3.3   a few units
+/// 0.75s   5.6   reaches the edge
+/// 1.00s   8.8   over it
+/// 1.50s  18.0   out of frame inside half a second
+/// ```
+///
+/// This was 4.0 to 10.0 on a straight ramp and every release looked the same,
+/// because 4.0 was already past the edge: there was no soft end to the range,
+/// only gone and more gone.
+const SOFTEST: f32 = 1.5;
+const HARDEST: f32 = 18.0;
+/// Held this long and it is wound as far as it goes.
+const WINDING: f32 = 1.5;
 /// The two piles sit at opposite ends of the floor rather than beside each
 /// other. A four row pyramid has its top sphere two and a half units up, and a
 /// pile that flat spreads with every bit of that: at seven apart it reached the
@@ -127,6 +142,14 @@ struct Stacking {
     picked: Option<(usize, Vec3)>,
     /// The ray the last pick was made along, to shove along.
     aim: Option<Ray>,
+    /// The sphere being wound up and where on it the click landed, kept as an
+    /// offset from its middle rather than a point, so it still means the same
+    /// place if the sphere moves while the button is down.
+    winding: Option<(usize, Vec3)>,
+    /// How far through the wind, from none to all of it. Power is read off this
+    /// rather than added to directly, so the curve lives in one place.
+    wound: f32,
+    power: f32,
     rails: bool,
     quitting: bool,
 }
@@ -223,10 +246,13 @@ impl Stacking {
             gone: 0,
             camera_angle: 0.0,
             turning: false,
-            distance: 14.0,
+            distance: 17.0,
             cursor: Vec2::ZERO,
             picked: None,
             aim: None,
+            winding: None,
+            wound: 0.0,
+            power: SOFTEST,
             rails: true,
             quitting: false,
         }
@@ -292,6 +318,20 @@ impl Game for Stacking {
             });
             self.gone += keeping.iter().filter(|k| !**k).count();
             self.picked = None;
+            // Every index past the one that left has shifted, so a sphere held
+            // down through it is let go rather than struck by its old number.
+            self.winding = None;
+        }
+
+        if self.winding.is_some() {
+            self.wound = (self.wound + dt / WINDING).min(1.0);
+            // Squared, not straight. A sphere leaves a floor this size at about
+            // 4, so a straight ramp spent its first fifth on everything that
+            // stays put and the rest on degrees of gone. Squared, half the wind
+            // covers 1.5 to 5.6, which is the whole range you can aim, and the
+            // back half goes to 18, which does not stay on the floor and is not
+            // meant to.
+            self.power = SOFTEST + (HARDEST - SOFTEST) * self.wound * self.wound;
         }
 
         // How tall each pile still is, counted in spheres rather than units,
@@ -320,7 +360,7 @@ impl Game for Stacking {
         // vec!, not an array: on edition 2018 an array's into_iter hands back
         // references, which is the whole trap this project keeps walking into.
         for (line, text) in vec![
-            String::from("click shoves, k pulls the rails, space rebuilds, right-drag turns"),
+            String::from("hold on a sphere to wind it up, k pulls the rails, space rebuilds"),
             format!(
                 "column {} high, pyramid {} row{}{}, sunk {:.2}{}",
                 high,
@@ -371,16 +411,23 @@ impl Game for Stacking {
 
         // The column warms through its height and the pyramid cools through
         // its own, so which sphere is which stays readable while they move.
+        // Which pile a sphere came from is read from the tag beside it and not
+        // from its index: one going over the edge shifts every index after it,
+        // and a pyramid sphere sliding down into the column's numbers was drawn
+        // orange where it stood.
         for (which, body) in self.bodies.iter().enumerate() {
             let up = (body.position.y / 5.0).clamp(0.0, 1.0);
-            let mut colour = if which < HIGH {
-                vec4(0.9, 0.35 + up * 0.5, 0.2, 1.0)
-            } else {
-                vec4(0.25, 0.45 + up * 0.35, 0.85, 1.0)
+            let mut colour = match self.piles[which] {
+                Pile::Column => vec4(0.9, 0.35 + up * 0.5, 0.2, 1.0),
+                Pile::Pyramid => vec4(0.25, 0.45 + up * 0.35, 0.85, 1.0),
             };
             // The one under the cursor goes pale, so a click is aimed rather
-            // than hopeful.
-            if self.picked.map(|(at, _)| at) == Some(which) {
+            // than hopeful, and the one being wound up runs to red, which is
+            // the only reading of how hard it is about to be hit.
+            if self.winding.map(|(at, _)| at) == Some(which) {
+                let wound = ((self.power - SOFTEST) / (HARDEST - SOFTEST)).clamp(0.0, 1.0);
+                colour = colour.lerp(vec4(1.0, 0.12, 0.08, 1.0), wound);
+            } else if self.picked.map(|(at, _)| at) == Some(which) {
                 colour = (colour + vec4(0.5, 0.5, 0.5, 0.0)).min(vec4(1.0, 1.0, 1.0, 1.0));
             }
             scene.push_material(
@@ -438,18 +485,28 @@ impl Game for Stacking {
         match input.button {
             MouseButton::Right => self.turning = input.is_pressed(),
             MouseButton::Left if input.is_pressed() => {
-                // Shove it the way the cursor is looking, at the point the ray
-                // met it, so a click off centre spins it as well as moves it.
-                if let (Some((which, at)), Some(ray)) = (self.picked, self.aim) {
+                self.winding = self
+                    .picked
+                    .map(|(which, at)| (which, at - self.bodies[which].position));
+                self.wound = 0.0;
+                self.power = SOFTEST;
+            }
+            MouseButton::Left => {
+                // Aimed on release rather than on the press, so a sphere can be
+                // wound up and then pointed somewhere.
+                if let (Some((which, off)), Some(ray)) = (self.winding.take(), self.aim) {
                     // Flattened, because the camera looks down at the floor at
                     // about 24 degrees and a shove straight down the ray put a
                     // quarter of itself into the ground: 4.6 units of travel
-                    // against 6.0 for the same force sent along the floor. The
-                    // point it was aimed at is kept, so a click high on a sphere
-                    // still rolls it forward and one low still drags it back.
+                    // against 6.0 for the same force sent along the floor. Where
+                    // on the sphere it landed is kept, so high on one still rolls
+                    // it forward and low still drags it back.
                     let way = vec3(ray.direction.x, 0.0, ray.direction.z).normalize_or_zero();
-                    self.bodies[which].strike(way * NUDGE, at);
+                    let at = self.bodies[which].position + off;
+                    self.bodies[which].strike(way * self.power, at);
                 }
+                self.wound = 0.0;
+                self.power = SOFTEST;
             }
             _ => (),
         }

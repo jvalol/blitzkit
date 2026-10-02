@@ -39,7 +39,8 @@ one up on their own: each ball sitting in a valley shoves the two beneath it
 apart, and only the floor's grip resists. Press K to pull the rails and watch
 four rows slump into two while the column at the far end stands there untouched.
 
-- click a sphere to shove it away from the camera
+- hold the left button on a sphere to wind it up, let go to shove it away from
+  the camera. It runs to red as it winds, and aim is taken when you let go
 - K pulls the rails and puts them back
 - space builds it again
 - drag with the right button to turn the camera
