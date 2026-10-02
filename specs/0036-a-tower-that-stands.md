@@ -48,11 +48,17 @@ something touches it, is struck, or has its velocity set by a game. Falling
 asleep takes the threshold held for a time rather than a single frame, so a block
 at the top of its bounce does not sleep in mid air.
 
-**What is being stood up.** The game this is for is called cairn, and its tower
-is an open lattice rather than a solid stack: two blocks a level, laid at the
-outer edges with the span between them empty, turned a quarter turn each level,
-twenty levels of them. A block is square in section and five long, so a level is
-five by five and the whole thing is hollow from top to bottom.
+**What is being stood up.** An open lattice rather than a solid stack: two
+blocks a level, laid at the outer edges with the span between them empty, turned
+a quarter turn each level, twenty levels of them. A block is square in section
+and five long, so a level is five by five and the whole thing is hollow from top
+to bottom.
+
+This spec said the game called cairn has this tower. It does not, and cairn's own
+spec 0001 is where that was found: a level of two holds each block above it at
+one end, so taking either one away drops the level above however carefully it is
+done, and a game about taking blocks out has no first move. The lattice is the
+engine's test, which is what it was good at all along.
 
 That is a harder test than a solid stack and a better one. Each block rests on
 the two below it only at its ends, so every contact is a small patch near a

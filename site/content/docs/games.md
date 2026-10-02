@@ -93,3 +93,12 @@ In which one breaks a rack of fifteen. Like pool.
 [github.com/jvalol/poolhall](https://github.com/jvalol/poolhall)
 
 ![A pool table seen from above the head rail, fifteen coloured balls scattered across the far half after a break, the white cue ball among them, and six dark pockets around the cushions](https://raw.githubusercontent.com/jvalol/poolhall/main/media/screenshot.png)
+
+## cairn
+
+In which one takes a tower of blocks apart, one at a time, putting each one
+pulled on top until it comes down.
+
+[github.com/jvalol/cairn](https://github.com/jvalol/cairn)
+
+![A tall tower of pale wooden blocks, four to a level and twelve levels high, each level turned a quarter turn across the one below it, standing on a grey floor](https://raw.githubusercontent.com/jvalol/cairn/main/media/screenshot.png)
