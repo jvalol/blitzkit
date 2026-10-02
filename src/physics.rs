@@ -9,7 +9,7 @@
 //! sphere that turns is still the same sphere, so turning costs the collision
 //! code nothing. Boxes are a different project wearing the same name.
 
-use glam::Vec3;
+use glam::{vec3, Mat3, Quat, Vec3};
 
 use crate::collision::{sweep_sphere, Aabb, Sphere};
 
@@ -57,14 +57,82 @@ const SKIN: f32 = 1e-3;
 /// equal to one that never moved.
 pub const SPIN_SETTLES_AT: f32 = 0.05;
 
-/// A sphere with weight.
+/// What a body is, per spec 0034. A sphere that turns is still the same sphere,
+/// which is the whole reason spec 0030 could get away with having only one.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Shape {
+    Sphere {
+        radius: f32,
+    },
+    /// Half the width, height and depth, measured from the middle, in the
+    /// body's own frame. Half rather than whole because every use of it is an
+    /// offset from the middle and halving it at each one is the kind of thing
+    /// that gets forgotten once.
+    Block {
+        half: Vec3,
+    },
+}
+
+impl Shape {
+    /// How far the shape reaches from its middle. A sphere's radius, or a
+    /// block's distance to a corner.
+    pub fn reach(&self) -> f32 {
+        match self {
+            Shape::Sphere { radius } => *radius,
+            Shape::Block { half } => half.length(),
+        }
+    }
+
+    /// Whether it resists turning the same way about every axis. True for a
+    /// sphere, and for a cube, which is a block that happens to be square. It
+    /// matters twice: such a body's world tensor does not depend on which way
+    /// it faces, and it cannot develop a gyroscopic torque. Both are no-ops in
+    /// algebra and neither is one in floating point, and both were caught by a
+    /// test. A ball with side spin swerved by 7e-10 on a flat floor, and a cube
+    /// spun about one axis drifted off it by 1e-4.
+    pub fn even(&self) -> bool {
+        match self {
+            Shape::Sphere { .. } => true,
+            Shape::Block { half } => half.x == half.y && half.y == half.z,
+        }
+    }
+
+    /// The moment of inertia about each of the body's own axes, for a solid of
+    /// this shape and that mass.
+    ///
+    /// A sphere is `2/5 m r²` about every axis, which is the one number spec
+    /// 0030 had. A block is `m/12 (w² + d²)` about each axis in the full
+    /// widths, and these are half widths, so the twelfth becomes a third. It is
+    /// easiest to turn about its longest axis and hardest about its shortest,
+    /// which is why a toppling block looks like a block rather than a ball.
+    pub fn inertia(&self, mass: f32) -> Vec3 {
+        match self {
+            Shape::Sphere { radius } => Vec3::splat(0.4 * mass * radius * radius),
+            Shape::Block { half } => {
+                mass / 3.0
+                    * vec3(
+                        half.y * half.y + half.z * half.z,
+                        half.x * half.x + half.z * half.z,
+                        half.x * half.x + half.y * half.y,
+                    )
+            }
+        }
+    }
+}
+
+/// A shape with weight.
 #[derive(Debug, Clone, Copy)]
 pub struct Body {
     pub position: Vec3,
     pub velocity: Vec3,
     /// Radians a second, about the axis it points along.
     pub spin: Vec3,
-    pub radius: f32,
+    /// Which way it faces, turned each step by its spin. Spec 0030 gave a body
+    /// spin and never turned anything with it, because a sphere needs no
+    /// orientation to collide, so poolhall carried its own and integrated it
+    /// itself. This is that, brought home.
+    pub orientation: Quat,
+    pub shape: Shape,
     /// One over the mass. A wall is infinitely heavy, and infinity is awkward
     /// arithmetic; its inverse is zero and behaves.
     pub inverse_mass: f32,
@@ -77,12 +145,36 @@ pub struct Body {
 }
 
 impl Body {
+    /// A sphere, which is what every body was before spec 0034 and what a game
+    /// written against 0.9 still gets.
     pub fn new(position: Vec3, radius: f32, mass: f32) -> Self {
+        Self::of(
+            position,
+            Shape::Sphere {
+                radius: radius.max(1e-4),
+            },
+            mass,
+        )
+    }
+
+    /// A rectangular block, given half its width, height and depth.
+    pub fn block(position: Vec3, half: Vec3, mass: f32) -> Self {
+        Self::of(
+            position,
+            Shape::Block {
+                half: half.max(Vec3::splat(1e-4)),
+            },
+            mass,
+        )
+    }
+
+    fn of(position: Vec3, shape: Shape, mass: f32) -> Self {
         Self {
             position,
             velocity: Vec3::ZERO,
             spin: Vec3::ZERO,
-            radius: radius.max(1e-4),
+            orientation: Quat::IDENTITY,
+            shape,
             inverse_mass: if mass > 0.0 { 1.0 / mass } else { 0.0 },
             restitution: 0.4,
             friction: 0.5,
@@ -95,6 +187,25 @@ impl Body {
         Self {
             inverse_mass: 0.0,
             ..Self::new(position, radius, 1.0)
+        }
+    }
+
+    pub fn facing(mut self, orientation: Quat) -> Self {
+        self.orientation = orientation.normalize();
+        self
+    }
+
+    /// How far the shape reaches from its middle.
+    pub fn radius(&self) -> f32 {
+        self.shape.reach()
+    }
+
+    /// Whether this is a sphere, and how big. Spec 0034 adds blocks without
+    /// colliding them, so the sphere paths ask rather than assume.
+    pub fn sphere(&self) -> Option<f32> {
+        match self.shape {
+            Shape::Sphere { radius } => Some(radius),
+            Shape::Block { .. } => None,
         }
     }
 
@@ -118,13 +229,62 @@ impl Body {
         self
     }
 
-    /// One over the moment of inertia of a solid sphere, which is `2/5 m r²`.
-    pub fn inverse_inertia(&self) -> f32 {
+    /// One over the moment of inertia, in the world rather than in the body,
+    /// which for anything that is not a sphere depends on which way it is
+    /// facing:
+    ///
+    /// ```text
+    /// I⁻¹_world = R · I⁻¹_body · Rᵀ
+    /// ```
+    ///
+    /// Spec 0030 returned one number here, because a sphere resists turning the
+    /// same way about every axis and the matrix was a multiple of the identity.
+    /// A block does not, and that difference is the whole of why it topples.
+    pub fn inverse_inertia(&self) -> Mat3 {
+        if self.inverse_mass <= 0.0 {
+            return Mat3::ZERO;
+        }
+
+        let inertia = self.shape.inertia(1.0 / self.inverse_mass);
+        let inverse = Mat3::from_diagonal(vec3(1.0 / inertia.x, 1.0 / inertia.y, 1.0 / inertia.z));
+
+        // R·(kI)·Rᵀ is exactly kI in algebra and not quite in floating point.
+        if self.shape.even() {
+            return inverse;
+        }
+
+        let turn = Mat3::from_quat(self.orientation);
+
+        turn * inverse * turn.transpose()
+    }
+
+    /// The moment of inertia in the world, which is what the turning itself is
+    /// worked out against.
+    pub fn inertia(&self) -> Mat3 {
+        if self.inverse_mass <= 0.0 {
+            return Mat3::ZERO;
+        }
+
+        let inertia = Mat3::from_diagonal(self.shape.inertia(1.0 / self.inverse_mass));
+        if self.shape.even() {
+            return inertia;
+        }
+
+        let turn = Mat3::from_quat(self.orientation);
+
+        turn * inertia * turn.transpose()
+    }
+
+    /// The same thing as one number, for a sphere. The sphere collision paths
+    /// work out an effective mass along a direction, and for a sphere that is a
+    /// scalar because the tensor is a multiple of the identity. Spec 0035
+    /// replaces those with the general form, which a block needs.
+    fn inverse_inertia_scalar(&self) -> f32 {
         if self.inverse_mass <= 0.0 {
             return 0.0;
         }
 
-        2.5 * self.inverse_mass / (self.radius * self.radius)
+        1.0 / self.shape.inertia(1.0 / self.inverse_mass).x
     }
 
     /// How fast the surface is moving at a point, which is not how fast the
@@ -135,7 +295,7 @@ impl Body {
 
     fn apply(&mut self, impulse: Vec3, at: Vec3) {
         self.velocity += impulse * self.inverse_mass;
-        self.spin += at.cross(impulse) * self.inverse_inertia();
+        self.spin += self.inverse_inertia() * at.cross(impulse);
     }
 
     /// Hits the body at a point on its surface, per spec 0032.
@@ -159,7 +319,23 @@ impl Body {
             return;
         }
 
-        self.apply(impulse, out.normalize() * self.radius);
+        let on_the_surface = match self.shape {
+            // A sphere's surface is one radius out in whatever direction it was
+            // pointed, so a cue can reach neither inside the ball nor past it.
+            Shape::Sphere { radius } => out.normalize() * radius,
+            // A block's is not a fixed distance from the middle, so the offset
+            // is taken as it was given and only held inside the block's own
+            // extent, turned into the block's frame to do it. Pointing at a
+            // corner means the corner, not a point on a sphere around it.
+            Shape::Block { half } => {
+                let turn = self.orientation;
+                let inside = turn.inverse() * out;
+
+                turn * inside.clamp(-half, half)
+            }
+        };
+
+        self.apply(impulse, on_the_surface);
     }
 }
 
@@ -208,7 +384,7 @@ fn contacts(bodies: &[Body], world: &[Aabb]) -> Vec<Contact> {
     // a stack gets to answer what is standing on it rather than being decided
     // before that is known.
     for (n, body) in bodies.iter().enumerate() {
-        if body.inverse_mass <= 0.0 {
+        if body.inverse_mass <= 0.0 || body.sphere().is_none() {
             continue;
         }
 
@@ -217,7 +393,7 @@ fn contacts(bodies: &[Body], world: &[Aabb]) -> Vec<Contact> {
             let out = body.position - near;
             let apart = out.length();
 
-            if apart > body.radius + TOUCHING || apart < 1e-6 {
+            if apart > body.radius() + TOUCHING || apart < 1e-6 {
                 continue;
             }
 
@@ -237,9 +413,13 @@ fn contacts(bodies: &[Body], world: &[Aabb]) -> Vec<Contact> {
     for first in 0..bodies.len() {
         for second in (first + 1)..bodies.len() {
             let (one, other) = (&bodies[first], &bodies[second]);
+            if one.sphere().is_none() || other.sphere().is_none() {
+                continue;
+            }
+
             let between = other.position - one.position;
             let apart = between.length();
-            let touching = one.radius + other.radius;
+            let touching = one.radius() + other.radius();
 
             if apart >= touching || apart < 1e-6 {
                 continue;
@@ -288,11 +468,11 @@ fn began(
 
 /// How fast the two surfaces are coming together at the contact.
 fn closing(bodies: &[Body], one: usize, other: Option<usize>, normal: Vec3) -> Vec3 {
-    let here = -normal * bodies[one].radius;
+    let here = -normal * bodies[one].radius();
 
     match other {
         Some(other) => {
-            let there = normal * bodies[other].radius;
+            let there = normal * bodies[other].radius();
 
             bodies[one].velocity_at(here) - bodies[other].velocity_at(there)
         }
@@ -318,9 +498,12 @@ fn once(bodies: &mut [Body], contact: &mut Contact) {
     let (inverse_mass, inverse_inertia) = match other {
         Some(other) => (
             bodies[one].inverse_mass + bodies[other].inverse_mass,
-            bodies[one].inverse_inertia() + bodies[other].inverse_inertia(),
+            bodies[one].inverse_inertia_scalar() + bodies[other].inverse_inertia_scalar(),
         ),
-        None => (bodies[one].inverse_mass, bodies[one].inverse_inertia()),
+        None => (
+            bodies[one].inverse_mass,
+            bodies[one].inverse_inertia_scalar(),
+        ),
     };
 
     if inverse_mass <= 0.0 {
@@ -346,7 +529,7 @@ fn once(bodies: &mut [Body], contact: &mut Contact) {
     let mut rub = Vec3::ZERO;
     if across.length_squared() > 1e-12 && contact.pushed > 0.0 {
         let way = across.normalize();
-        let spread = inverse_mass + inverse_inertia * bodies[one].radius * bodies[one].radius;
+        let spread = inverse_mass + inverse_inertia * bodies[one].radius() * bodies[one].radius();
         let most = contact.friction * contact.pushed;
 
         let total = (contact.rubbed - across.length() / spread).clamp(-most, most);
@@ -357,12 +540,12 @@ fn once(bodies: &mut [Body], contact: &mut Contact) {
     }
 
     let impulse = normal * along_normal + rub;
-    let here = -normal * bodies[one].radius;
+    let here = -normal * bodies[one].radius();
 
     bodies[one].apply(impulse, here);
 
     if let Some(other) = other {
-        let there = normal * bodies[other].radius;
+        let there = normal * bodies[other].radius();
 
         bodies[other].apply(-impulse, there);
     }
@@ -391,9 +574,9 @@ fn resolve(
     let (inverse_mass, inverse_inertia) = match &other {
         Some(other) => (
             body.inverse_mass + other.inverse_mass,
-            body.inverse_inertia() + other.inverse_inertia(),
+            body.inverse_inertia_scalar() + other.inverse_inertia_scalar(),
         ),
-        None => (body.inverse_mass, body.inverse_inertia()),
+        None => (body.inverse_mass, body.inverse_inertia_scalar()),
     };
 
     if inverse_mass <= 0.0 {
@@ -401,8 +584,8 @@ fn resolve(
     }
 
     // the contact sits one radius along the normal, towards what was hit
-    let here = -normal * body.radius;
-    let there = other.as_ref().map(|other| normal * other.radius);
+    let here = -normal * body.radius();
+    let there = other.as_ref().map(|other| normal * other.radius());
 
     let closing = match (&other, there) {
         (Some(other), Some(there)) => body.velocity_at(here) - other.velocity_at(there),
@@ -430,7 +613,7 @@ fn resolve(
     let mut rub = Vec3::ZERO;
     if across.length_squared() > 1e-12 {
         let way = across.normalize();
-        let spread = inverse_mass + inverse_inertia * body.radius * body.radius;
+        let spread = inverse_mass + inverse_inertia * body.radius() * body.radius();
         let wanted = -across.length() / spread;
         let most = friction * along_normal;
 
@@ -459,7 +642,11 @@ fn resolve(
 /// `along_normal` is the impulse into the surface, so a heavy ball pays more
 /// than a light one and one barely touching pays almost nothing.
 fn slow_the_roll(body: &mut Body, along_normal: f32) {
-    if body.rolling <= 0.0 || along_normal <= 0.0 {
+    // A block does not roll, it tips, and the whole of this is worked out from
+    // the contact being one radius from the middle. A game that sets a rolling
+    // coefficient on a block is asking for something that does not exist, and
+    // it is ignored rather than approximated into something that looks like it.
+    if body.rolling <= 0.0 || along_normal <= 0.0 || body.sphere().is_none() {
         return;
     }
 
@@ -471,14 +658,121 @@ fn slow_the_roll(body: &mut Body, along_normal: f32) {
 
     // clamped to what brings it to a stop, or a large coefficient and a small
     // spin make a ball that rolls backwards
-    let taken = (body.rolling * along_normal * body.radius * body.inverse_inertia()).min(spinning);
+    let taken =
+        (body.rolling * along_normal * body.radius() * body.inverse_inertia_scalar()).min(spinning);
 
     body.spin -= body.spin / spinning * taken;
 }
 
+/// How many slices the turning is taken in. One Newton step over a whole frame
+/// is stable but damps, and the error halves with every doubling. Measured on a
+/// block of half extents (0.2, 0.6, 1.4) spun at 7 radians a second about its
+/// middle axis, over five seconds, against the momentum and energy it began
+/// with:
+///
+/// ```text
+///  1   8.0% of L lost   15.3% of E
+///  2   4.1%              8.1%
+///  4   2.1%              4.2%
+///  8   1.1%              2.1%
+/// 16   0.5%              1.1%
+/// ```
+///
+/// Eight, which is a percent over five seconds of a hard tumble and costs eight
+/// three by three inverses for a block that is actually turning. A block at rest
+/// in a stack pays none of it.
+const GYRO_STEPS: usize = 8;
+
+/// A matrix that does what crossing with `v` on the left does.
+fn skew(v: Vec3) -> Mat3 {
+    Mat3::from_cols(
+        vec3(0.0, v.z, -v.y),
+        vec3(-v.z, 0.0, v.x),
+        vec3(v.y, -v.x, 0.0),
+    )
+}
+
+/// Turns a body and works out what that does to its spin, per spec 0034.
+///
+/// A thing turning with nothing touching it keeps its angular momentum, not its
+/// angular velocity, and those are the same only when it resists turning the
+/// same way about every axis. A block does not, so left alone it wobbles, and a
+/// block spun about its middle axis tumbles end over end whatever it was given.
+///
+/// Euler's equation, `I ω̇ + ω × I ω = 0`, taken in the body's own frame where
+/// `I` is three numbers on a diagonal and does not move. Solved implicitly, by
+/// one Newton step on
+///
+/// ```text
+/// f(ω') = I ω' - I ω + dt (ω' × I ω')
+/// ```
+///
+/// Both cheaper ways were tried and both are wrong in ways you can watch.
+/// Stepping `ω̇ = -I⁻¹(ω × I ω)` forwards gained nine and a half percent of
+/// angular momentum in five seconds. Carrying the momentum instead and reading
+/// `ω` back from it held momentum to four decimals and let the energy go from
+/// 16 to 82 over the same five seconds, because nothing stopped the body
+/// settling onto its easy axis, which is what a real one does only when
+/// something is taking energy out of it.
+fn turn(body: &mut Body, dt: f32) {
+    if body.inverse_mass <= 0.0 || body.shape.even() {
+        body.orientation = turned(body.orientation, body.spin, dt);
+        return;
+    }
+
+    // A block barely turning has nothing for this to find, and a tower of forty
+    // of them sitting still should not pay for eight matrix inverses each.
+    if body.spin.length_squared() < 1e-6 {
+        body.orientation = turned(body.orientation, body.spin, dt);
+        return;
+    }
+
+    let inertia = Mat3::from_diagonal(body.shape.inertia(1.0 / body.inverse_mass));
+    let into_body = body.orientation.inverse();
+    let mut spin = into_body * body.spin;
+
+    let slice = dt / GYRO_STEPS as f32;
+    for _ in 0..GYRO_STEPS {
+        let momentum = inertia * spin;
+        let f = slice * spin.cross(momentum);
+        let jacobian = inertia + slice * (skew(spin) * inertia - skew(momentum));
+        if jacobian.determinant().abs() <= 1e-12 {
+            break;
+        }
+
+        spin -= jacobian.inverse() * f;
+    }
+
+    body.spin = body.orientation * spin;
+
+    body.orientation = turned(body.orientation, body.spin, dt);
+}
+
+/// Turns a body by its spin over `dt`, per spec 0034.
+///
+/// Normalised every time rather than every so often: a quaternion multiplied a
+/// few thousand times drifts off the unit sphere, and a drifted one scales
+/// whatever it rotates.
+fn turned(facing: Quat, spin: Vec3, dt: f32) -> Quat {
+    let rate = spin.length();
+    if rate < 1e-6 {
+        return facing;
+    }
+
+    (Quat::from_axis_angle(spin / rate, rate * dt) * facing).normalize()
+}
+
 /// Moves one body through the static world, swept so a fast one cannot pass
 /// through a thin wall, and bouncing off whatever it meets.
+///
+/// Spheres only. Spec 0034 adds blocks and spec 0035 collides them; until then
+/// a block is moved and nothing else, which is what 0034 says it does.
 fn through_the_world(body: &mut Body, dt: f32, world: &[Aabb]) {
+    if body.sphere().is_none() {
+        body.position += body.velocity * dt;
+        return;
+    }
+
     let mut left = dt;
 
     for _ in 0..SLIDES {
@@ -488,7 +782,7 @@ fn through_the_world(body: &mut Body, dt: f32, world: &[Aabb]) {
             break;
         }
 
-        let shape = Sphere::new(body.position, body.radius);
+        let shape = Sphere::new(body.position, body.radius());
         let met = world
             .iter()
             .filter_map(|wall| sweep_sphere(&shape, motion, wall))
@@ -535,6 +829,7 @@ pub fn step(bodies: &mut [Body], world: &[Aabb], gravity: Vec3, dt: f32) {
             body.velocity += gravity * dt;
         }
         through_the_world(body, dt, world);
+        turn(body, dt);
     }
 
     // gathered first and worked over several times, per spec 0033, by index
@@ -549,7 +844,7 @@ pub fn step(bodies: &mut [Body], world: &[Aabb], gravity: Vec3, dt: f32) {
     // third of a unit into the floor and sat there however many passes it was
     // given, because no amount of velocity undoes a position.
     for body in bodies.iter_mut() {
-        if body.inverse_mass <= 0.0 {
+        if body.inverse_mass <= 0.0 || body.sphere().is_none() {
             continue;
         }
 
@@ -558,11 +853,11 @@ pub fn step(bodies: &mut [Body], world: &[Aabb], gravity: Vec3, dt: f32) {
             let out = body.position - near;
             let apart = out.length();
 
-            if apart >= body.radius || apart < 1e-6 {
+            if apart >= body.radius() || apart < 1e-6 {
                 continue;
             }
 
-            let over = body.radius - apart;
+            let over = body.radius() - apart;
             if over > SLOP {
                 body.position += out / apart * (over - SLOP) * PUSH_BACK;
             }
@@ -576,10 +871,13 @@ pub fn step(bodies: &mut [Body], world: &[Aabb], gravity: Vec3, dt: f32) {
         for second in (first + 1)..bodies.len() {
             let (left, right) = bodies.split_at_mut(second);
             let (one, other) = (&mut left[first], &mut right[0]);
+            if one.sphere().is_none() || other.sphere().is_none() {
+                continue;
+            }
 
             let between = other.position - one.position;
             let apart = between.length();
-            let touching = one.radius + other.radius;
+            let touching = one.radius() + other.radius();
 
             if apart >= touching || apart < 1e-6 {
                 continue;
@@ -784,7 +1082,7 @@ mod tests {
         for one in 0..bodies.len() {
             for other in (one + 1)..bodies.len() {
                 let apart = bodies[one].position.distance(bodies[other].position);
-                let touching = bodies[one].radius + bodies[other].radius;
+                let touching = bodies[one].radius() + bodies[other].radius();
                 assert!(
                     apart > touching - SLOP * 4.0,
                     "balls {} and {} ended {} apart, and touch at {}",
@@ -908,7 +1206,7 @@ mod tests {
             .with_velocity(vec3(speed, 0.0, 0.0))
             .with_friction(0.9)];
         // already rolling: the surface at the contact is still against the floor
-        bodies[0].spin = vec3(0.0, 0.0, -speed / bodies[0].radius);
+        bodies[0].spin = vec3(0.0, 0.0, -speed / bodies[0].radius());
 
         run(&mut bodies, &[floor()], DOWN, 240);
 
@@ -926,7 +1224,7 @@ mod tests {
             .with_velocity(vec3(speed, 0.0, 0.0))
             .with_friction(0.9)
             .with_rolling(rolling);
-        body.spin = vec3(0.0, 0.0, -speed / body.radius);
+        body.spin = vec3(0.0, 0.0, -speed / body.radius());
 
         body
     }
@@ -1127,8 +1425,8 @@ mod tests {
 
             for body in bodies.iter() {
                 for wall in &walls {
-                    let into =
-                        body.radius - (wall.closest_point(body.position) - body.position).length();
+                    let into = body.radius()
+                        - (wall.closest_point(body.position) - body.position).length();
                     assert!(
                         into < SLOP + 0.05,
                         "a body is {} inside a wall at {:?}",
@@ -1320,14 +1618,208 @@ mod tests {
         );
     }
 
+    /// Spec 0034: a block of half extents (0.5, 0.5, 2.0) is longest along z,
+    /// so it is easiest to turn about z and hardest about x and y.
+    #[test]
+    fn a_long_box_turns_easily_the_long_way() {
+        let long = Body::block(Vec3::ZERO, vec3(0.5, 0.5, 2.0), 1.0);
+        let inertia = long.shape.inertia(1.0);
+
+        assert!(
+            inertia.z < inertia.x,
+            "about its long axis {} should be less than across it {}",
+            inertia.z,
+            inertia.x
+        );
+        assert!((inertia.x - inertia.y).abs() < 1e-6, "square in section");
+
+        // m/3 (y² + z²) = (0.25 + 4) / 3
+        assert!((inertia.x - 4.25 / 3.0).abs() < 1e-6, "{}", inertia.x);
+        // m/3 (x² + y²) = (0.25 + 0.25) / 3
+        assert!((inertia.z - 0.5 / 3.0).abs() < 1e-6, "{}", inertia.z);
+    }
+
+    /// Spec 0034: and a sphere is the degenerate case rather than a special one.
+    #[test]
+    fn a_sphere_turns_the_same_every_way() {
+        let inertia = Shape::Sphere { radius: 2.0 }.inertia(3.0);
+
+        // 2/5 m r², which is what spec 0030 had as its one number
+        assert!((inertia.x - 0.4 * 3.0 * 4.0).abs() < 1e-6, "{}", inertia.x);
+        assert_eq!(inertia.x, inertia.y);
+        assert_eq!(inertia.y, inertia.z);
+
+        // and the world tensor does not care which way it faces
+        let turned = Body::new(Vec3::ZERO, 2.0, 3.0)
+            .facing(Quat::from_rotation_x(0.9) * Quat::from_rotation_z(0.4));
+        assert_eq!(
+            turned.inverse_inertia(),
+            Body::new(Vec3::ZERO, 2.0, 3.0).inverse_inertia()
+        );
+    }
+
+    /// Spec 0034: nothing is touching it, so its angular momentum and its
+    /// energy are the things that hold still. The solve damps rather than
+    /// gaining, which is the safe direction, and a percent or two over five
+    /// seconds of a hard tumble is what eight slices cost.
+    #[test]
+    fn a_free_spin_is_conserved() {
+        let mut lopsided = [Body::block(Vec3::ZERO, vec3(0.2, 0.6, 1.4), 1.0)];
+        lopsided[0].spin = vec3(0.05, 7.0, 0.0);
+
+        let momentum = |b: &Body| (b.inertia() * b.spin).length();
+        let energy = |b: &Body| 0.5 * b.spin.dot(b.inertia() * b.spin);
+
+        let (was_turning, was_worth) = (momentum(&lopsided[0]), energy(&lopsided[0]));
+        run(&mut lopsided, &[], Vec3::ZERO, 600);
+        let (now_turning, now_worth) = (momentum(&lopsided[0]), energy(&lopsided[0]));
+
+        let lost = (was_turning - now_turning) / was_turning;
+        assert!(
+            (0.0..0.02).contains(&lost),
+            "angular momentum went from {} to {}",
+            was_turning,
+            now_turning
+        );
+
+        let spent = (was_worth - now_worth) / was_worth;
+        assert!(
+            (0.0..0.04).contains(&spent),
+            "energy went from {} to {}",
+            was_worth,
+            now_worth
+        );
+    }
+
+    /// Spec 0034: and its angular velocity is the thing that does not. Spun
+    /// about its middle axis, a lopsided body tumbles rather than holding its
+    /// axis, which is the tennis racket theorem and the whole reason a thrown
+    /// block looks thrown.
+    ///
+    /// Watched the whole way rather than at the end: it comes back round, and
+    /// an earlier version of this test sampled one moment, caught it near where
+    /// it started, and called a body that had swung through a radian still.
+    #[test]
+    fn a_lopsided_body_wobbles() {
+        let mut lopsided = [Body::block(Vec3::ZERO, vec3(0.2, 0.6, 1.4), 1.0)];
+        // mostly about the middle axis, with a nudge off it to get it started
+        lopsided[0].spin = vec3(0.05, 7.0, 0.0);
+        let began = lopsided[0].spin;
+
+        let mut furthest = 0.0f32;
+        for _ in 0..600 {
+            run(&mut lopsided, &[], Vec3::ZERO, 1);
+            furthest = furthest.max(began.angle_between(lopsided[0].spin));
+        }
+
+        assert!(
+            furthest > 0.25,
+            "the axis never moved further than {} radians, so it spun like a sphere",
+            furthest
+        );
+
+        // a sphere given the same treatment holds its axis exactly
+        let mut round = [Body::new(Vec3::ZERO, 0.5, 1.0)];
+        round[0].spin = began;
+        run(&mut round, &[], Vec3::ZERO, 600);
+        assert_eq!(round[0].spin, began);
+    }
+
+    /// Spec 0034: the engine turns a body, which is what poolhall was doing for
+    /// itself.
+    #[test]
+    fn a_spin_turns_the_body() {
+        let mut body = [Body::block(Vec3::ZERO, Vec3::splat(0.5), 1.0)];
+        body[0].spin = vec3(0.0, std::f32::consts::FRAC_PI_2, 0.0);
+
+        run(&mut body, &[], Vec3::ZERO, 120);
+
+        // a quarter turn a second for one second, so x has become -z
+        let moved = body[0].orientation * Vec3::X;
+        assert!(
+            (moved - vec3(0.0, 0.0, -1.0)).length() < 1e-3,
+            "x ended up at {}",
+            moved
+        );
+    }
+
+    /// Spec 0034: and it stays a unit quaternion while doing it.
+    #[test]
+    fn turning_does_not_drift() {
+        let mut body = [Body::block(Vec3::ZERO, vec3(0.3, 0.5, 0.9), 1.0)];
+        body[0].spin = vec3(1.3, 4.0, 0.7);
+
+        run(&mut body, &[], Vec3::ZERO, 12_000);
+
+        let length = body[0].orientation.length();
+        assert!((length - 1.0).abs() < 1e-4, "quaternion length {}", length);
+    }
+
+    /// Spec 0032's rule, on a block: through the middle and it does not turn.
+    #[test]
+    fn a_middle_strike_does_not_turn_it() {
+        let mut body = Body::block(Vec3::ZERO, vec3(0.5, 0.5, 2.0), 1.0);
+        body.strike(vec3(0.0, 0.0, 4.0), vec3(0.0, 0.0, -2.0));
+
+        assert_eq!(body.spin, Vec3::ZERO, "it turned");
+        assert!((body.velocity - vec3(0.0, 0.0, 4.0)).length() < 1e-6);
+    }
+
+    /// Spec 0034: and off centre it turns about the axis the cross product
+    /// names, with the block's own inertia deciding how much.
+    #[test]
+    fn an_off_centre_strike_turns_a_box() {
+        // hit on the +z end, pushed along +x: r x J is +y
+        let mut body = Body::block(Vec3::ZERO, vec3(0.5, 0.5, 2.0), 1.0);
+        body.strike(vec3(3.0, 0.0, 0.0), vec3(0.0, 0.0, 2.0));
+
+        assert!(body.spin.y > 0.0, "spun the wrong way: {}", body.spin);
+        assert!(body.spin.x.abs() < 1e-6 && body.spin.z.abs() < 1e-6);
+
+        // the same push applied so as to turn it about its long axis instead:
+        // a quarter of the torque and more than twice the spin, because that is
+        // the axis it has least to resist with
+        let mut the_easy_way = Body::block(Vec3::ZERO, vec3(0.5, 0.5, 2.0), 1.0);
+        the_easy_way.strike(vec3(3.0, 0.0, 0.0), vec3(0.0, 0.5, 0.0));
+
+        assert!(the_easy_way.spin.z.abs() > 0.0 && the_easy_way.spin.y.abs() < 1e-6);
+        assert!(
+            the_easy_way.spin.length() > body.spin.length() * 2.0,
+            "about the long axis {} should beat across it {} by more than double",
+            the_easy_way.spin.length(),
+            body.spin.length()
+        );
+    }
+
+    /// Spec 0034: rolling resistance is worked out from a contact one radius
+    /// from the middle, and a block has no such thing. It is ignored rather
+    /// than approximated.
+    #[test]
+    fn a_box_does_not_pay_rolling_rent() {
+        let mut body = Body::block(vec3(0.0, 0.5, 0.0), Vec3::splat(0.5), 1.0).with_rolling(5.0);
+        body.spin = vec3(0.0, 0.0, 6.0);
+
+        let mut bodies = [body];
+        run(&mut bodies, &[floor()], DOWN, 120);
+
+        assert_eq!(
+            bodies[0].spin,
+            vec3(0.0, 0.0, 6.0),
+            "something charged a block for rolling"
+        );
+    }
+
     #[test]
     fn a_sphere_turns_about_one_number() {
         // 2/5 m r², so a bigger ball of the same weight is harder to spin up
         let small = Body::new(Vec3::ZERO, 0.5, 1.0);
         let big = Body::new(Vec3::ZERO, 2.0, 1.0);
 
-        assert!(small.inverse_inertia() > big.inverse_inertia());
-        assert_eq!(Body::immovable(Vec3::ZERO, 1.0).inverse_inertia(), 0.0);
+        assert!(small.inverse_inertia().x_axis.x > big.inverse_inertia().x_axis.x);
+        assert_eq!(
+            Body::immovable(Vec3::ZERO, 1.0).inverse_inertia(),
+            Mat3::ZERO
+        );
     }
 
     #[test]
@@ -1335,7 +1827,7 @@ mod tests {
         let mut body = ball(Vec3::ZERO);
         body.spin = vec3(0.0, 0.0, -2.0);
 
-        let under = vec3(0.0, -body.radius, 0.0);
+        let under = vec3(0.0, -body.radius(), 0.0);
 
         assert!(
             body.velocity_at(under).x < 0.0,

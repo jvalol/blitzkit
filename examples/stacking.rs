@@ -432,7 +432,7 @@ impl Game for Stacking {
             }
             scene.push_material(
                 ball,
-                &Transform::at(body.position).with_scale(Vec3::splat(body.radius * 2.0)),
+                &Transform::at(body.position).with_scale(Vec3::splat(body.radius() * 2.0)),
                 colour,
                 64.0,
             );
@@ -455,7 +455,7 @@ impl Game for Stacking {
             .iter()
             .enumerate()
             .filter_map(|(which, body)| {
-                hit_sphere(&ray, body.position, body.radius).map(|away| (away, which))
+                hit_sphere(&ray, body.position, body.radius()).map(|away| (away, which))
             })
             .min_by(|one, other| one.0.total_cmp(&other.0))
             .map(|(away, which)| (which, ray.at(away)));
