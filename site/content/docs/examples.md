@@ -34,18 +34,18 @@ rest.
 cargo run --release --example stacking
 ```
 
-The pyramid has a kerb either side of its bottom row. Loose spheres will not hold
+The pyramid has a rail either side of its bottom row. Loose spheres will not hold
 one up on their own: each ball sitting in a valley shoves the two beneath it
-apart, and only the floor's grip resists. Press K to take the kerbs out and watch
-the pile go flat while the column beside it stands there unbothered.
+apart, and only the floor's grip resists. Press K to pull the rails and watch
+four rows slump into two while the column at the far end stands there untouched.
 
 - click a sphere to shove it away from the camera
-- K takes the kerbs out and puts them back
+- K pulls the rails and puts them back
 - space builds it again
 - drag with the right button to turn the camera
 - scroll to zoom
 
-![A column of five spheres and a pyramid of ten between two low kerbs, standing
+![A column of five spheres and a pyramid of ten between two low rails, standing
 on a grey floor](/media/stacking.png)
 
 ## cubes

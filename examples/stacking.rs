@@ -4,14 +4,14 @@
 //!
 //! `cargo run --release --example stacking`
 //!
-//! Click a sphere to shove it away from the camera, K takes the pyramid's kerbs
+//! Click a sphere to shove it away from the camera, K takes the pyramid's rails
 //! out and puts them back, space builds the whole thing again, drag with the
 //! right button to swing the camera around, scroll to zoom, and escape quits.
 //!
-//! The readout is how far the bottom sphere of the column has gone below where
-//! it should rest, which is the number this spec exists to keep near zero, and
-//! how wide the pyramid's bottom row has spread, which is the number that runs
-//! away the moment the kerbs come out.
+//! The readout counts each pile in spheres rather than units, since five high
+//! and one row say at a glance what 4.54 and 0.50 do not, and carries the one
+//! number this spec exists to keep near zero: how far the lowest sphere has sunk
+//! into the floor.
 
 use blitzkit::camera::Camera;
 use blitzkit::collision::{Aabb, Ray};
@@ -35,31 +35,87 @@ const ROWS: usize = 4;
 /// into contact rather than a stack that was already resolved.
 const GAP: f32 = 0.01;
 const GRAVITY: f32 = -9.81;
-/// How hard a click shoves a sphere. Mass is 1, so this is also the speed it
-/// leaves at, and 4 is enough to put a column over without firing it off the
-/// floor.
-const NUDGE: f32 = 4.0;
-const COLUMN_AT: f32 = -4.0;
-const PYRAMID_AT: f32 = 3.0;
-/// Where a kerb's middle sits, out from the pyramid's own middle: past the
-/// outermost ball of the bottom row by its own radius and half the kerb's
+/// How wide the floor is, corner to corner, for both the slab that collides and
+/// the plane that is drawn. One number because they were two: the slab was 40
+/// across and the plane mesh is a unit square, so scaling it by 20 drew half the
+/// floor that was there and balls rolled ten units into the black before they
+/// fell.
+const FLOOR: f32 = 20.0;
+/// Below this a sphere has left for good. Without it the readout went on
+/// reporting a ball eight thousand units down and two minutes into a fall, and
+/// the solver went on paying for it.
+const LOST: f32 = -20.0;
+/// What a roll costs, per spec 0031. The default is zero, meaning a ball that is
+/// rolling rolls for ever, and these spheres left at zero crossed the whole
+/// floor when the rails came out: a four row pyramid going flat has its top
+/// sphere's two and a half units of height to spend, and nothing was charging
+/// for it.
+///
+/// Measured on this floor, a shove of 4.0 against how far it gets, and the
+/// pyramid with its rails pulled against how wide it ends up:
+///
+/// ```text
+/// 0.0   travels 71.5   spreads 58.6
+/// 0.05          11.8            7.3
+/// 0.1            6.0            5.1
+/// 0.15           4.0            4.2
+/// 0.5            1.4            3.6
+/// ```
+///
+/// 0.5 is carom's number for a ring a few units across, and here it stopped a
+/// shoved sphere inside three of its own widths. 0.1 is poolhall's: a shove
+/// crosses a good third of the floor and the loose pile still ends up a long way
+/// short of the column.
+const ROLLING: f32 = 0.1;
+/// How hard a click shoves a sphere. Not the speed it leaves at: the strike
+/// lands on the surface, so friction spends a good part of it turning slip into
+/// spin, and 4.0 left a sphere rolling at 2.5 and stopped inside four seconds.
+/// Measured on this floor, which is 20 across, shoving flat:
+///
+/// ```text
+/// 4.0   6.0 units in 4.0s
+/// 5.0   9.3          5.0
+/// 6.0  13.4          6.0
+/// 8.0  23.8          8.1
+/// ```
+///
+/// 6.0 crosses most of the floor and takes six seconds doing it. Harder than
+/// that and a shove usually ends over the edge.
+const NUDGE: f32 = 6.0;
+/// The two piles sit at opposite ends of the floor rather than beside each
+/// other. A four row pyramid has its top sphere two and a half units up, and a
+/// pile that flat spreads with every bit of that: at seven apart it reached the
+/// column and took it down inside ten seconds, which is a fine thing to watch
+/// but not while the column is the control.
+const COLUMN_AT: f32 = -6.5;
+const PYRAMID_AT: f32 = 4.5;
+/// Where a rail's middle sits, out from the pyramid's own middle: past the
+/// outermost ball of the bottom row by its own radius and half the rail's
 /// depth, so the inner face is right against it.
 const BASE_EDGE: f32 = (ROWS as f32 - 1.0) * 0.5 * (RADIUS * 2.0 + GAP) + RADIUS + 0.25;
-/// How far the outermost ball of the bottom row starts from the pyramid's
-/// middle, to read the spread against.
-const BUILT_SPREAD: f32 = (ROWS as f32 - 1.0) * 0.5 * (RADIUS * 2.0 + GAP);
+/// How much higher each row of the pyramid sits than the one beneath it: the
+/// height of an equilateral triangle on a side of two radii.
+const RISE: f32 = (RADIUS * 2.0 + GAP) * 0.866;
+
+/// Which pile a sphere came from, kept alongside it because a sphere leaving the
+/// floor shifts every index after it and the two groups are read separately.
+#[derive(Clone, Copy, PartialEq)]
+enum Pile {
+    Column,
+    Pyramid,
+}
 
 struct Stacking {
     ball_mesh: Option<MeshId>,
     box_mesh: Option<MeshId>,
     floor_mesh: Option<MeshId>,
     bodies: Vec<Body>,
-    /// The slab first and the two kerbs after it, so taking the kerbs out is a
+    piles: Vec<Pile>,
+    /// The slab first and the two rails after it, so taking the rails out is a
     /// shorter slice rather than a second Vec kept in step with this one.
     floor: Vec<Aabb>,
-    /// Where the bottom of the column should sit, to measure against.
-    resting: f32,
-    elapsed: f32,
+    /// How many have gone over the edge since the last build.
+    gone: usize,
     camera_angle: f32,
     /// Turning the camera is the right button, because the left one shoves a
     /// sphere and a drag that did both would be unusable.
@@ -71,7 +127,7 @@ struct Stacking {
     picked: Option<(usize, Vec3)>,
     /// The ray the last pick was made along, to shove along.
     aim: Option<Ray>,
-    kerbs: bool,
+    rails: bool,
     quitting: bool,
 }
 
@@ -97,8 +153,9 @@ fn hit_sphere(ray: &Ray, middle: Vec3, radius: f32) -> Option<f32> {
 
 /// The column, then the pyramid beside it. Both out of one function so that
 /// space can put everything back without reaching into the running state.
-fn build() -> Vec<Body> {
+fn build() -> (Vec<Body>, Vec<Pile>) {
     let mut bodies = Vec::new();
+    let mut piles = Vec::new();
     let spacing = RADIUS * 2.0 + GAP;
 
     for level in 0..HIGH {
@@ -106,48 +163,54 @@ fn build() -> Vec<Body> {
         bodies.push(
             Body::new(vec3(COLUMN_AT, height, 0.0), RADIUS, 1.0)
                 .with_restitution(0.0)
-                .with_friction(0.6),
+                .with_friction(0.6)
+                .with_rolling(ROLLING),
         );
+        piles.push(Pile::Column);
     }
 
     // A pyramid in the x/y plane, which is the one across the default view: in
     // z/y it points at the camera and reads as a second column. Each row up is
     // one sphere shorter and sits in the valley between two below, which is a
     // row's radius in and the height of an equilateral triangle up.
-    let rise = spacing * 0.866;
     for row in 0..ROWS {
         let across = ROWS - row;
-        let height = RADIUS + row as f32 * rise;
+        let height = RADIUS + row as f32 * RISE;
         for seat in 0..across {
             let along = (seat as f32 - (across as f32 - 1.0) * 0.5) * spacing;
             bodies.push(
                 Body::new(vec3(PYRAMID_AT + along, height, 0.0), RADIUS, 1.0)
                     .with_restitution(0.0)
-                    .with_friction(0.6),
+                    .with_friction(0.6)
+                    .with_rolling(ROLLING),
             );
+            piles.push(Pile::Pyramid);
         }
     }
 
-    bodies
+    (bodies, piles)
 }
 
 impl Stacking {
     fn new() -> Self {
+        let (bodies, piles) = build();
+
         Self {
             ball_mesh: None,
             box_mesh: None,
             floor_mesh: None,
-            bodies: build(),
+            bodies,
+            piles,
             // A slab, so the floor is a body-against-world contact like any
-            // game's, and a kerb either side of the pyramid's bottom row.
+            // game's, and a rail either side of the pyramid's bottom row.
             // Loose spheres will not hold a pyramid on their own: each ball
             // resting in a valley shoves the two beneath it apart, and only the
             // floor's grip resists, which is never enough. Measured without the
-            // kerbs the pile slumps to a line. A rack has a frame for the same
+            // rails the pile slumps to a line. A rack has a frame for the same
             // reason, so this one does too, and what is left to watch is the
             // rows holding each other up.
             floor: vec![
-                Aabb::from_center_size(vec3(0.0, -1.0, 0.0), vec3(40.0, 2.0, 40.0)),
+                Aabb::from_center_size(vec3(0.0, -1.0, 0.0), vec3(FLOOR, 2.0, FLOOR)),
                 Aabb::from_center_size(
                     vec3(PYRAMID_AT + BASE_EDGE, 0.45, 0.0),
                     vec3(0.5, 0.9, 3.0),
@@ -157,24 +220,23 @@ impl Stacking {
                     vec3(0.5, 0.9, 3.0),
                 ),
             ],
-            resting: RADIUS,
-            elapsed: 0.0,
+            gone: 0,
             camera_angle: 0.0,
             turning: false,
             distance: 14.0,
             cursor: Vec2::ZERO,
             picked: None,
             aim: None,
-            kerbs: true,
+            rails: true,
             quitting: false,
         }
     }
 }
 
 impl Stacking {
-    /// The slab on its own, or the slab and both kerbs.
+    /// The slab on its own, or the slab and both rails.
     fn world(&self) -> &[Aabb] {
-        if self.kerbs {
+        if self.rails {
             &self.floor
         } else {
             &self.floor[..1]
@@ -205,52 +267,73 @@ impl Game for Stacking {
         text_renderer: &mut TextRenderer,
         _sound_system: &SoundSystem,
     ) {
-        self.elapsed += dt;
         // Sliced out before the bodies are borrowed, since one method cannot
         // hand out both halves of self at once.
-        let world = if self.kerbs {
+        let world = if self.rails {
             &self.floor[..]
         } else {
             &self.floor[..1]
         };
         step(&mut self.bodies, world, vec3(0.0, GRAVITY, 0.0), dt);
 
-        let sunk = self.resting - self.bodies[0].position.y;
-        let top = self
+        // Anything past the edge is off for good, so it stops being stepped and
+        // stops being counted.
+        let keeping: Vec<bool> = self.bodies.iter().map(|b| b.position.y > LOST).collect();
+        if keeping.iter().any(|k| !k) {
+            let mut n = 0;
+            self.bodies.retain(|_| {
+                n += 1;
+                keeping[n - 1]
+            });
+            n = 0;
+            self.piles.retain(|_| {
+                n += 1;
+                keeping[n - 1]
+            });
+            self.gone += keeping.iter().filter(|k| !**k).count();
+            self.picked = None;
+        }
+
+        // How tall each pile still is, counted in spheres rather than units,
+        // because five and one say at a glance what 4.54 and 0.50 do not.
+        let tallest = |want: Pile| {
+            self.bodies
+                .iter()
+                .zip(self.piles.iter())
+                .filter(|(_, pile)| **pile == want)
+                .map(|(body, _)| body.position.y)
+                .fold(0.0f32, f32::max)
+        };
+        let high = ((tallest(Pile::Column) + RADIUS) / (RADIUS * 2.0 + GAP)).round() as i32;
+        let rows = (((tallest(Pile::Pyramid) - RADIUS) / RISE).round() as i32 + 1).max(0);
+
+        // Measured only over the floor, so a sphere mid fall does not report
+        // itself as having sunk through it.
+        let sunk = self
             .bodies
             .iter()
-            .take(HIGH)
-            .map(|body| body.position.y)
-            .fold(0.0f32, f32::max);
-        let spread = self
-            .bodies
-            .iter()
-            .skip(HIGH)
-            .map(|body| (body.position.x - PYRAMID_AT).abs())
+            .filter(|b| b.position.x.abs() < FLOOR * 0.5 && b.position.z.abs() < FLOOR * 0.5)
+            .map(|b| RADIUS - b.position.y)
             .fold(0.0f32, f32::max);
 
         text_renderer.reset();
         // vec!, not an array: on edition 2018 an array's into_iter hands back
         // references, which is the whole trap this project keeps walking into.
         for (line, text) in vec![
-            String::from("click a sphere to shove it, k takes the kerbs out, space rebuilds"),
-            String::from("drag with the right button to turn the camera, scroll zooms"),
+            String::from("click shoves, k pulls the rails, space rebuilds, right-drag turns"),
             format!(
-                "{:.0}s, bottom sphere {:+.3} from where it should rest",
-                self.elapsed, -sunk
+                "column {} high, pyramid {} row{}{}, sunk {:.2}{}",
+                high,
+                rows,
+                if rows == 1 { "" } else { "s" },
+                if self.rails { "" } else { ", rails out" },
+                sunk,
+                match self.gone {
+                    0 => String::new(),
+                    1 => String::from(", 1 off the floor"),
+                    many => format!(", {} off the floor", many),
+                }
             ),
-            format!(
-                "column reaches {:.2} of {:.2}, pyramid spreads to {:.2} of {:.2}",
-                top,
-                RADIUS + (HIGH - 1) as f32 * (RADIUS * 2.0 + GAP),
-                spread,
-                BUILT_SPREAD
-            ),
-            String::from(if self.kerbs {
-                "kerbs in"
-            } else {
-                "kerbs out: nothing wedges the bottom row, so the pile goes flat"
-            }),
         ]
         .into_iter()
         .enumerate()
@@ -272,11 +355,11 @@ impl Game for Stacking {
 
         scene.push_colored(
             floor,
-            &Transform::at(Vec3::ZERO).with_scale(Vec3::splat(20.0)),
+            &Transform::at(Vec3::ZERO).with_scale(Vec3::splat(FLOOR)),
             vec4(0.18, 0.2, 0.24, 1.0),
         );
 
-        // The kerbs are drawn exactly where they collide, skipping the slab,
+        // The rails are drawn exactly where they collide, skipping the slab,
         // which is the plane above, and not at all once they are out.
         for wall in self.world().iter().skip(1) {
             scene.push_colored(
@@ -336,14 +419,16 @@ impl Game for Stacking {
         let held = input.state == KeyboardKeyState::Pressed;
         match input.key {
             KeyboardKey::Space if held => {
-                self.bodies = build();
-                self.kerbs = true;
-                self.elapsed = 0.0;
+                let (bodies, piles) = build();
+                self.bodies = bodies;
+                self.piles = piles;
+                self.rails = true;
+                self.gone = 0;
             }
-            // Putting the kerbs back under a pile that has already spread
+            // Putting the rails back under a pile that has already spread
             // leaves balls inside them, which the solver pushes apart rather
             // than ignoring. That is worth watching too.
-            KeyboardKey::K if held => self.kerbs = !self.kerbs,
+            KeyboardKey::K if held => self.rails = !self.rails,
             KeyboardKey::Escape => self.quitting = held,
             _ => (),
         }
@@ -356,7 +441,14 @@ impl Game for Stacking {
                 // Shove it the way the cursor is looking, at the point the ray
                 // met it, so a click off centre spins it as well as moves it.
                 if let (Some((which, at)), Some(ray)) = (self.picked, self.aim) {
-                    self.bodies[which].strike(ray.direction * NUDGE, at);
+                    // Flattened, because the camera looks down at the floor at
+                    // about 24 degrees and a shove straight down the ray put a
+                    // quarter of itself into the ground: 4.6 units of travel
+                    // against 6.0 for the same force sent along the floor. The
+                    // point it was aimed at is kept, so a click high on a sphere
+                    // still rolls it forward and one low still drags it back.
+                    let way = vec3(ray.direction.x, 0.0, ray.direction.z).normalize_or_zero();
+                    self.bodies[which].strike(way * NUDGE, at);
                 }
             }
             _ => (),

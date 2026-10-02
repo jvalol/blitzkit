@@ -151,13 +151,19 @@ the bottom sphere has gone below where it should rest. Twelve seconds in it read
 -0.012, and the column reaches 4.45 of the 4.54 it was built to, the rest being
 the slop every contact is allowed.
 
-The pyramid has a kerb either side of its bottom row, because loose spheres will
+The pyramid has a rail either side of its bottom row, because loose spheres will
 not hold one up on their own. Each ball sitting in a valley shoves the two
 beneath it apart and only the floor's grip resists, which is never enough. K
-takes the kerbs out to show it rather than leaving it asserted here: the pile
-goes flat and spreads from 1.51 to 5.19, while the column standing beside it does
-not move. That is geometry rather than the solver, and a rack has a frame for the
-same reason.
+pulls the rails to show it rather than leaving it asserted here: four rows slump
+into two and the pile spreads into a loose mound, while the column at the far end
+does not move. That is geometry rather than the solver, and a rack has a frame
+for the same reason.
+
+The spheres are given spec 0031's rolling resistance, which is not decoration.
+Left at the default of zero they roll for ever, and a four row pyramid going flat
+has its top sphere's two and a half units of height to spend: the pile crossed
+the whole floor, knocked the column down from eleven units away, and put three
+spheres over the edge.
 
 Clicking a sphere shoves it away from the camera, at the point the ray met it, so
 a click off centre spins it too. It is the quickest way to find out whether a
