@@ -66,8 +66,8 @@ that is already there, with nothing added.
 
 Measured, striking one ball into another four away at the same speed and reading
 where the striker ended up. They touch when it has gone 3.0. Struck at the bottom
-it ends at 2.6, behind where they met, which is the real thing rather than merely
-stopping short. Dead centre it ends at 6.2 and at the top 9.3, and every height
+it ends at 2.8, behind where they met, which is the real thing rather than merely
+stopping short. Dead centre it ends at 6.5 and at the top 9.5, and every height
 between those falls in order. That is the whole range a player has.
 
 **The floor's grip and the balls' grip pull opposite ways**, and one number used
@@ -79,10 +79,11 @@ that draws wants a gripping cloth and glassy balls, which is what a real table
 is, and both numbers belong to the game rather than to this spec.
 
 These were 2.9, 5.9 and 8.3 when this spec was written, against a solver that
-took one pass at each contact. Spec 0033 made the friction converge across
-several, so a ball keeps less of its backspin through a collision, and the one
-number setting both grips hid which way each was pulling. Remeasured rather than
-left to rot.
+took one pass at each contact, and 2.6, 6.2 and 9.3 after spec 0033 made the
+friction converge across several. Spec 0034 moved them again, by a tenth or two:
+a sphere's inertia tensor is the same number it always was, but it goes through a
+matrix multiply now rather than a scalar one and rounds differently. Remeasured
+each time rather than left to rot.
 
 **Side off a cushion, yes.** A cushion's normal is horizontal, so a spin about
 the vertical is no longer about the contact normal, and it has somewhere to act.

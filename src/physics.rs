@@ -11,7 +11,7 @@
 
 use glam::{vec3, Mat3, Quat, Vec3};
 
-use crate::collision::{obbs_meet, sphere_meets_obb, sweep_sphere, Aabb, Obb, Sphere};
+use crate::collision::{obbs_meet, sphere_meets_obb, sweep_sphere, Aabb, Meeting, Obb, Sphere};
 
 /// Below this closing speed a bounce is dropped and the body simply stops
 /// moving into the surface.
@@ -56,6 +56,26 @@ const SKIN: f32 = 1e-3;
 /// of what is left never arrives, and a ball that has stopped should compare
 /// equal to one that never moved.
 pub const SPIN_SETTLES_AT: f32 = 0.05;
+
+/// Under this much speed and this much spin a body is still enough to be put
+/// aside, per spec 0036. Not the same as spec 0030's settling, which stops a
+/// body shivering into a surface: this stops the engine paying for one that is
+/// not doing anything, and stops a stack gathering a frame of error at a time
+/// into a lean.
+/// This is only the floor, for a scene with no gravity in it. The real one is
+/// worked out from the step, because a resting body cannot be stiller than the
+/// speed gravity gives it in one frame and the solver then takes back out:
+/// measured, a standing tower at 120 a second jitters between 0.09 and 0.14,
+/// where gravity alone adds 0.082 a frame. A fixed number tuned there would sit
+/// below the floor at 60 a second and nothing would ever sleep.
+pub const SLEEPS_UNDER: f32 = 0.05;
+/// How many frames of gravity still counts as still. Two: one for the increment
+/// itself and one for the room the solver needs to not quite cancel it.
+pub const SLEEPS_UNDER_FRAMES: f32 = 2.0;
+pub const SLEEPS_UNDER_SPIN: f32 = 0.15;
+/// And it has to stay that still for this long, so a block at the top of its
+/// bounce does not fall asleep in mid air.
+pub const SLEEPS_AFTER: f32 = 0.5;
 
 /// What a body is, per spec 0034. A sphere that turns is still the same sphere,
 /// which is the whole reason spec 0030 could get away with having only one.
@@ -142,6 +162,14 @@ pub struct Body {
     /// How much a roll costs, per spec 0031. Zero and a rolling ball rolls for
     /// ever, which is what spec 0030 alone does.
     pub rolling: f32,
+    /// Whether it has been put aside, per spec 0036. A sleeping body is not
+    /// moved by gravity and not integrated, which is how a tower stops leaning:
+    /// even a good solver leaves a little error each frame and a stack gathers
+    /// it into a slow drift. Nothing moves it, so it does not drift.
+    pub asleep: bool,
+    /// How long it has been still enough to sleep. Public so a game can see
+    /// how close something is rather than guess.
+    pub still: f32,
 }
 
 impl Body {
@@ -179,6 +207,8 @@ impl Body {
             restitution: 0.4,
             friction: 0.5,
             rolling: 0.0,
+            asleep: false,
+            still: 0.0,
         }
     }
 
@@ -227,6 +257,13 @@ impl Body {
     pub fn with_velocity(mut self, velocity: Vec3) -> Self {
         self.velocity = velocity;
         self
+    }
+
+    /// Puts it back in play. A game that sets a body's velocity or moves it by
+    /// hand says so with this; `strike` does it for itself.
+    pub fn wake(&mut self) {
+        self.asleep = false;
+        self.still = 0.0;
     }
 
     /// One over the moment of inertia, in the world rather than in the body,
@@ -293,7 +330,31 @@ impl Body {
         self.velocity + self.spin.cross(from_middle)
     }
 
+    /// What a contact can move it by. A sleeping body is a wall until something
+    /// wakes it: pushed while it sleeps it would gather velocity it never
+    /// integrates, and jump the moment it woke. Measured, every block in a
+    /// sleeping tower was holding 0.45 of speed it was never going to spend.
+    fn shoved_by(&self) -> f32 {
+        if self.asleep {
+            0.0
+        } else {
+            self.inverse_mass
+        }
+    }
+
+    fn turned_by(&self) -> Mat3 {
+        if self.asleep {
+            Mat3::ZERO
+        } else {
+            self.inverse_inertia()
+        }
+    }
+
     fn apply(&mut self, impulse: Vec3, at: Vec3) {
+        if self.asleep {
+            return;
+        }
+
         self.velocity += impulse * self.inverse_mass;
         self.spin += self.inverse_inertia() * at.cross(impulse);
     }
@@ -318,6 +379,12 @@ impl Body {
         if out.length_squared() < 1e-12 {
             return;
         }
+
+        // A game hitting something means it, so this wakes it. The solver's own
+        // impulses do not, because a sleeping body is a wall to them, per spec
+        // 0036: without this, clicking a block in a settled tower did nothing at
+        // all and the engine had no way to say why.
+        self.wake();
 
         let on_the_surface = match self.shape {
             // A sphere's surface is one radius out in whatever direction it was
@@ -367,6 +434,11 @@ struct Contact {
     /// place they touch, which is what a lever arm means.
     here: Vec3,
     there: Vec3,
+    /// Which parts of the two touched, per spec 0036. The same contact next
+    /// frame answers to the same name, which is how what it pushed with is
+    /// carried over. For a body against the static world the wall's number goes
+    /// in the top bits, since `other` is nothing and cannot say which wall.
+    named: u32,
     friction: f32,
     /// How much of the bounce is still owed, worked out once from the speed the
     /// two met at. Worked out every pass instead, it would be owed again every
@@ -401,7 +473,7 @@ fn contacts(bodies: &[Body], world: &[Aabb]) -> Vec<Contact> {
         if let Shape::Block { half } = body.shape {
             let me = Obb::new(body.position, body.orientation, half);
 
-            for wall in world {
+            for (w, wall) in world.iter().enumerate() {
                 let Some(met) = obbs_meet(&Obb::from_aabb(wall), &me) else {
                     continue;
                 };
@@ -412,8 +484,9 @@ fn contacts(bodies: &[Body], world: &[Aabb]) -> Vec<Contact> {
                         n,
                         None,
                         met.normal,
-                        point - body.position,
+                        point.at - body.position,
                         Vec3::ZERO,
+                        named_by_wall(w, point.named),
                         body.restitution,
                         body.friction,
                     ));
@@ -423,7 +496,7 @@ fn contacts(bodies: &[Body], world: &[Aabb]) -> Vec<Contact> {
             continue;
         }
 
-        for wall in world {
+        for (w, wall) in world.iter().enumerate() {
             let near = body.position.clamp(wall.min, wall.max);
             let out = body.position - near;
             let apart = out.length();
@@ -450,6 +523,7 @@ fn contacts(bodies: &[Body], world: &[Aabb]) -> Vec<Contact> {
                 normal,
                 -normal * body.radius(),
                 Vec3::ZERO,
+                named_by_wall(w, 0),
                 0.0,
                 0.0,
             ));
@@ -474,8 +548,9 @@ fn contacts(bodies: &[Body], world: &[Aabb]) -> Vec<Contact> {
                         first,
                         Some(second),
                         -met.normal,
-                        point - one.position,
-                        point - other.position,
+                        point.at - one.position,
+                        point.at - other.position,
+                        point.named,
                         agreed(one.restitution, other.restitution),
                         agreed(one.friction, other.friction),
                     ));
@@ -501,6 +576,7 @@ fn contacts(bodies: &[Body], world: &[Aabb]) -> Vec<Contact> {
                 normal,
                 -normal * one.radius(),
                 normal * other.radius(),
+                0,
                 agreed(one.restitution, other.restitution),
                 agreed(one.friction, other.friction),
             ));
@@ -510,10 +586,99 @@ fn contacts(bodies: &[Body], world: &[Aabb]) -> Vec<Contact> {
     found
 }
 
+/// Puts still bodies aside and wakes anything that has been disturbed, per spec
+/// 0036.
+///
+/// Sleeping is a property of a group rather than of a body. A block resting on
+/// another cannot sleep while the one under it is awake, or the sleeping one
+/// hangs in the air the moment its support moves. So stillness is spread
+/// through the contacts until it stops changing: anything touching something
+/// that is moving is counted as moving too.
+fn sleep(bodies: &mut [Body], found: &[Contact], gravity: Vec3, dt: f32) {
+    let under = SLEEPS_UNDER.max(gravity.length() * dt * SLEEPS_UNDER_FRAMES);
+    let mut still: Vec<f32> = bodies
+        .iter()
+        .map(|body| {
+            if body.inverse_mass <= 0.0 {
+                // a wall has always been still and never wakes anything
+                return f32::INFINITY;
+            }
+
+            if body.velocity.length() < under && body.spin.length() < SLEEPS_UNDER_SPIN {
+                body.still + dt
+            } else {
+                0.0
+            }
+        })
+        .collect();
+
+    // Nothing sleeps on nothing: a body touching the world or another body is
+    // held up by it, and one touching nothing at all is in mid air however
+    // still it looks at the top of its arc.
+    let mut held = vec![false; bodies.len()];
+    for contact in found {
+        held[contact.one] = true;
+        if let Some(other) = contact.other {
+            held[other] = true;
+        }
+    }
+
+    for (n, body) in bodies.iter().enumerate() {
+        if body.inverse_mass > 0.0 && !held[n] {
+            still[n] = 0.0;
+        }
+    }
+
+    // spread being awake outwards through the contacts
+    let mut again = true;
+    while again {
+        again = false;
+
+        for contact in found {
+            let Some(other) = contact.other else {
+                continue;
+            };
+
+            let least = still[contact.one].min(still[other]);
+            for at in [contact.one, other] {
+                if still[at] > least && still[at].is_finite() {
+                    still[at] = least;
+                    again = true;
+                }
+            }
+        }
+    }
+
+    for (body, still) in bodies.iter_mut().zip(still) {
+        if body.inverse_mass <= 0.0 {
+            continue;
+        }
+
+        body.still = still;
+        let sleeping = still >= SLEEPS_AFTER;
+
+        if sleeping && !body.asleep {
+            body.velocity = Vec3::ZERO;
+            body.spin = Vec3::ZERO;
+        }
+
+        body.asleep = sleeping;
+    }
+}
+
+/// A contact against the static world needs the wall in its name as well, since
+/// `other` is nothing and the point's own name only says which corner of the
+/// body it is. The point names use the low twenty-six bits, so this holds up to
+/// sixty-three walls, and a world with more of them than that wants a broad
+/// phase long before it wants this.
+fn named_by_wall(wall: usize, point: u32) -> u32 {
+    (wall as u32 & 0x3f) << 26 | (point & 0x03ff_ffff)
+}
+
 /// Where two bodies touch, when at least one of them is a block. The normal
 /// points from `one` towards `other`, which is the shape test's convention and
 /// the opposite of a contact's.
-fn met(one: &Body, other: &Body) -> Option<crate::collision::Meeting> {
+fn met(one: &Body, other: &Body) -> Option<Meeting> {
     let boxy = |body: &Body, half: Vec3| Obb::new(body.position, body.orientation, half);
 
     match (one.shape, other.shape) {
@@ -528,7 +693,7 @@ fn met(one: &Body, other: &Body) -> Option<crate::collision::Meeting> {
         // second piece of arithmetic that has to be kept agreeing
         (Shape::Block { half }, Shape::Sphere { radius }) => {
             sphere_meets_obb(&Sphere::new(other.position, radius), &boxy(one, half)).map(|met| {
-                crate::collision::Meeting {
+                Meeting {
                     normal: -met.normal,
                     ..met
                 }
@@ -547,6 +712,7 @@ fn began(
     normal: Vec3,
     here: Vec3,
     there: Vec3,
+    named: u32,
     restitution: f32,
     friction: f32,
 ) -> Contact {
@@ -563,6 +729,7 @@ fn began(
         normal,
         here,
         there,
+        named,
         friction,
         owed,
         pushed: 0.0,
@@ -579,8 +746,8 @@ fn closing(bodies: &[Body], one: usize, other: Option<usize>, here: Vec3, there:
 }
 
 /// Works the contacts over, several times, per spec 0033.
-fn work(bodies: &mut [Body], found: &mut [Contact]) {
-    for _ in 0..PASSES {
+fn work(bodies: &mut [Body], found: &mut [Contact], passes: usize) {
+    for _ in 0..passes {
         for contact in found.iter_mut() {
             once(bodies, contact);
         }
@@ -593,14 +760,27 @@ fn once(bodies: &mut [Body], contact: &mut Contact) {
     let other = contact.other;
     let normal = contact.normal;
 
+    let asleep = |at: usize| bodies[at].asleep;
     let (inverse_mass, inverse_inertia) = match other {
         Some(other) => (
-            bodies[one].inverse_mass + bodies[other].inverse_mass,
-            bodies[one].inverse_inertia_scalar() + bodies[other].inverse_inertia_scalar(),
+            bodies[one].shoved_by() + bodies[other].shoved_by(),
+            if asleep(one) {
+                0.0
+            } else {
+                bodies[one].inverse_inertia_scalar()
+            } + if asleep(other) {
+                0.0
+            } else {
+                bodies[other].inverse_inertia_scalar()
+            },
         ),
         None => (
-            bodies[one].inverse_mass,
-            bodies[one].inverse_inertia_scalar(),
+            bodies[one].shoved_by(),
+            if asleep(one) {
+                0.0
+            } else {
+                bodies[one].inverse_inertia_scalar()
+            },
         ),
     };
 
@@ -685,14 +865,14 @@ fn resistance(
     there: Vec3,
     way: Vec3,
 ) -> f32 {
-    let mut total = bodies[one].inverse_mass;
-    total += (bodies[one].inverse_inertia() * here.cross(way))
+    let mut total = bodies[one].shoved_by();
+    total += (bodies[one].turned_by() * here.cross(way))
         .cross(here)
         .dot(way);
 
     if let Some(other) = other {
-        total += bodies[other].inverse_mass;
-        total += (bodies[other].inverse_inertia() * there.cross(way))
+        total += bodies[other].shoved_by();
+        total += (bodies[other].turned_by() * there.cross(way))
             .cross(there)
             .dot(way);
     }
@@ -954,114 +1134,262 @@ fn through_the_world(body: &mut Body, dt: f32, world: &[Aabb]) {
 
 /// Pushes a pair apart when they end a step inside each other.
 fn unstick(one: &mut Body, other: &mut Body, normal: Vec3, overlap: f32) {
-    let share = one.inverse_mass + other.inverse_mass;
+    let share = one.shoved_by() + other.shoved_by();
     if share <= 0.0 || overlap <= SLOP {
         return;
     }
 
     let push = normal * (PUSH_BACK * (overlap - SLOP) / share);
-    one.position += push * one.inverse_mass;
-    other.position -= push * other.inverse_mass;
+    one.position += push * one.shoved_by();
+    other.position -= push * other.shoved_by();
 }
 
 /// One step of the world: gravity, movement, and what that broke.
 ///
 /// Every pair is tested, because there is no broad phase. Tens of bodies are
 /// fine and thousands are not.
+/// One step, remembering nothing and putting nothing aside: exactly what every
+/// game had before spec 0036, and what a scene of a few bodies that are not
+/// standing on each other wants.
+///
+/// Sleeping is off here on purpose rather than by omission. It cuts the last of
+/// a roll off, which is right for a tower and wrong for a pool table: poolhall
+/// had a ball dribbling towards a pocket fall asleep a hand short of it the
+/// first time this shipped with sleeping on for everyone.
 pub fn step(bodies: &mut [Body], world: &[Aabb], gravity: Vec3, dt: f32) {
-    if dt <= 0.0 {
-        return;
+    Solver {
+        sleeps: false,
+        ..Default::default()
+    }
+    .step(bodies, world, gravity, dt);
+}
+
+/// What a contact pushed with, kept for the next frame. Spec 0036.
+#[derive(Debug, Clone, Copy)]
+struct Remembered {
+    one: usize,
+    other: Option<usize>,
+    named: u32,
+    pushed: f32,
+}
+
+/// A step that remembers the last one, per spec 0036.
+///
+/// Spec 0033 starts every contact at zero each step and spends its passes
+/// rediscovering the weight of whatever is standing on it. One body on a floor
+/// finds that in a pass or two. A block at the bottom of a tower is holding up
+/// nineteen more, and the passes needed to find that from nothing grow with the
+/// height, which is why a tall stack sinks and shivers on a solver that
+/// otherwise works. Starting each contact at what it ended on is the difference
+/// between a tower and a pile.
+///
+/// A game that keeps one of these across frames gets that. The free `step` makes
+/// a fresh one every call and so remembers nothing, which is what every game
+/// written before this had and is fine for a handful of bodies that are not
+/// standing on each other.
+#[derive(Debug, Clone)]
+pub struct Solver {
+    /// How many times each contact is worked, per spec 0033. On the solver
+    /// rather than fixed, because what holds a tower up is the passes and the
+    /// step together. Measured on cairn's twenty level lattice, run for thirty
+    /// seconds:
+    ///
+    /// ```text
+    /// 120 a second,  8 passes   stands, leaning 0.024
+    ///  60 a second,  8 passes   flat on the floor
+    ///  60 a second, 16 passes   stands, leaning 0.020
+    ///  60 a second, 32 passes   stands, leaning 0.005
+    /// ```
+    ///
+    /// A game taking bigger steps and stacking things wants more of these. The
+    /// default is what every game had before this and what spec 0032's numbers
+    /// were measured against.
+    pub passes: usize,
+    /// Whether still bodies are put aside. On for a solver a game keeps, since
+    /// that is what one is for, and off in the free `step`.
+    pub sleeps: bool,
+    remembered: Vec<Remembered>,
+    /// How many bodies there were. A game that adds or drops one renumbers
+    /// every index after it, which is the trap this project has walked into
+    /// three times, so the memory is thrown away rather than misapplied.
+    counted: usize,
+}
+
+impl Default for Solver {
+    fn default() -> Self {
+        Self {
+            passes: PASSES,
+            sleeps: true,
+            remembered: Vec::new(),
+            counted: 0,
+        }
+    }
+}
+
+impl Solver {
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    for body in bodies.iter_mut() {
-        if body.inverse_mass > 0.0 {
-            body.velocity += gravity * dt;
-        }
-        through_the_world(body, dt, world);
-        turn(body, dt);
+    pub fn with_passes(mut self, passes: usize) -> Self {
+        self.passes = passes.max(1);
+        self
     }
 
-    // gathered first and worked over several times, per spec 0033, by index
-    // both ways round so the same run twice is the same run
-    let mut found = contacts(bodies, world);
-    work(bodies, &mut found);
+    /// Throws away what it remembers. A game that has reordered its bodies
+    /// without changing how many there are should say so.
+    pub fn forget(&mut self) {
+        self.remembered.clear();
+    }
 
-    // and the overlap pushed apart afterwards, once, rather than inside the
-    // passes. The world first: a sweep keeps a body out of a wall it is moving
-    // towards and has nothing to say about one that is already inside, and a
-    // column that sank while the solver caught up stayed sunk. It settled a
-    // third of a unit into the floor and sat there however many passes it was
-    // given, because no amount of velocity undoes a position.
-    for body in bodies.iter_mut() {
-        if body.inverse_mass <= 0.0 {
-            continue;
+    pub fn step(&mut self, bodies: &mut [Body], world: &[Aabb], gravity: Vec3, dt: f32) {
+        self.run(bodies, world, gravity, dt);
+    }
+
+    fn run(&mut self, bodies: &mut [Body], world: &[Aabb], gravity: Vec3, dt: f32) {
+        if dt <= 0.0 {
+            return;
         }
 
-        // Once per meeting, not once per point. The shape test hands back one
-        // depth for the whole patch however many places it touches at, so four
-        // points do not get to push four times for the same overlap.
-        if let Shape::Block { half } = body.shape {
-            let me = Obb::new(body.position, body.orientation, half);
+        if self.counted != bodies.len() {
+            self.remembered.clear();
+            self.counted = bodies.len();
+        }
 
-            for wall in world {
-                if let Some(met) = obbs_meet(&Obb::from_aabb(wall), &me) {
-                    if met.depth > SLOP {
-                        body.position += met.normal * (met.depth - SLOP) * PUSH_BACK;
+        for body in bodies.iter_mut() {
+            if body.asleep {
+                continue;
+            }
+
+            if body.inverse_mass > 0.0 {
+                body.velocity += gravity * dt;
+            }
+            through_the_world(body, dt, world);
+            turn(body, dt);
+        }
+
+        // gathered first and worked over several times, per spec 0033, by index
+        // both ways round so the same run twice is the same run
+        let mut found = contacts(bodies, world);
+        self.carry_over(bodies, &mut found);
+        work(bodies, &mut found, self.passes);
+        self.put_away(&found);
+        if self.sleeps {
+            sleep(bodies, &found, gravity, dt);
+        }
+
+        // and the overlap pushed apart afterwards, once, rather than inside the
+        // passes. The world first: a sweep keeps a body out of a wall it is moving
+        // towards and has nothing to say about one that is already inside, and a
+        // column that sank while the solver caught up stayed sunk. It settled a
+        // third of a unit into the floor and sat there however many passes it was
+        // given, because no amount of velocity undoes a position.
+        for body in bodies.iter_mut() {
+            if body.shoved_by() <= 0.0 {
+                continue;
+            }
+
+            // Once per meeting, not once per point. The shape test hands back one
+            // depth for the whole patch however many places it touches at, so four
+            // points do not get to push four times for the same overlap.
+            if let Shape::Block { half } = body.shape {
+                let me = Obb::new(body.position, body.orientation, half);
+
+                for wall in world {
+                    if let Some(met) = obbs_meet(&Obb::from_aabb(wall), &me) {
+                        if met.depth > SLOP {
+                            body.position += met.normal * (met.depth - SLOP) * PUSH_BACK;
+                        }
                     }
                 }
-            }
 
-            continue;
-        }
-
-        for wall in world {
-            let near = body.position.clamp(wall.min, wall.max);
-            let out = body.position - near;
-            let apart = out.length();
-
-            if apart >= body.radius() || apart < 1e-6 {
                 continue;
             }
 
-            let over = body.radius() - apart;
-            if over > SLOP {
-                body.position += out / apart * (over - SLOP) * PUSH_BACK;
+            for wall in world {
+                let near = body.position.clamp(wall.min, wall.max);
+                let out = body.position - near;
+                let apart = out.length();
+
+                if apart >= body.radius() || apart < 1e-6 {
+                    continue;
+                }
+
+                let over = body.radius() - apart;
+                if over > SLOP {
+                    body.position += out / apart * (over - SLOP) * PUSH_BACK;
+                }
+            }
+        }
+
+        // then the pairs. Either way it is after the passes rather than inside
+        // them: moving positions about in the loop adds energy the velocities
+        // never agreed to, and a stack built that way breathes.
+        for first in 0..bodies.len() {
+            for second in (first + 1)..bodies.len() {
+                let (left, right) = bodies.split_at_mut(second);
+                let (one, other) = (&mut left[first], &mut right[0]);
+
+                if one.sphere().is_none() || other.sphere().is_none() {
+                    let Some(found) = met(one, other) else {
+                        continue;
+                    };
+
+                    if found.depth > SLOP {
+                        // the shape test points from one towards other and unstick
+                        // wants the way `one` should go, which is the other way
+                        unstick(one, other, -found.normal, found.depth);
+                    }
+
+                    continue;
+                }
+
+                let between = other.position - one.position;
+                let apart = between.length();
+                let touching = one.radius() + other.radius();
+
+                if apart >= touching || apart < 1e-6 {
+                    continue;
+                }
+
+                unstick(one, other, -between / apart, touching - apart);
             }
         }
     }
 
-    // then the pairs. Either way it is after the passes rather than inside
-    // them: moving positions about in the loop adds energy the velocities
-    // never agreed to, and a stack built that way breathes.
-    for first in 0..bodies.len() {
-        for second in (first + 1)..bodies.len() {
-            let (left, right) = bodies.split_at_mut(second);
-            let (one, other) = (&mut left[first], &mut right[0]);
-
-            if one.sphere().is_none() || other.sphere().is_none() {
-                let Some(found) = met(one, other) else {
-                    continue;
-                };
-
-                if found.depth > SLOP {
-                    // the shape test points from one towards other and unstick
-                    // wants the way `one` should go, which is the other way
-                    unstick(one, other, -found.normal, found.depth);
-                }
-
+    /// Hands each contact what its name pushed with last frame, and applies it
+    /// before the first pass so the stack starts the step already held up.
+    fn carry_over(&self, bodies: &mut [Body], found: &mut [Contact]) {
+        for contact in found.iter_mut() {
+            let Some(was) = self.remembered.iter().find(|was| {
+                was.one == contact.one && was.other == contact.other && was.named == contact.named
+            }) else {
                 continue;
+            };
+
+            contact.pushed = was.pushed;
+            let impulse = contact.normal * was.pushed;
+
+            bodies[contact.one].apply(impulse, contact.here);
+            if let Some(other) = contact.other {
+                bodies[other].apply(-impulse, contact.there);
             }
-
-            let between = other.position - one.position;
-            let apart = between.length();
-            let touching = one.radius() + other.radius();
-
-            if apart >= touching || apart < 1e-6 {
-                continue;
-            }
-
-            unstick(one, other, -between / apart, touching - apart);
         }
+    }
+
+    /// Only the push along the normal, not the rub across it. A resting stack
+    /// has almost no sideways motion, so the direction friction is working in
+    /// is whatever the last crumb of velocity pointed at, and carrying a number
+    /// over for a direction that is noise is worse than starting it at nothing.
+    fn put_away(&mut self, found: &[Contact]) {
+        self.remembered.clear();
+        self.remembered
+            .extend(found.iter().filter(|c| c.pushed > 0.0).map(|c| Remembered {
+                one: c.one,
+                other: c.other,
+                named: c.named,
+                pushed: c.pushed,
+            }));
     }
 }
 
@@ -1748,6 +2076,13 @@ mod tests {
                 heights
             );
         }
+
+        // and the range as a whole is still the whole range a player has
+        assert!(
+            ends[ends.len() - 1] - ends[0] > 6.0,
+            "the spread collapsed to {:?}",
+            ends
+        );
     }
 
     #[test]
@@ -1965,6 +2300,317 @@ mod tests {
             "about the long axis {} should beat across it {} by more than double",
             the_easy_way.spin.length(),
             body.spin.length()
+        );
+    }
+
+    /// Cairn's tower: two blocks a level at the outer edges, a quarter turn
+    /// each level, twenty levels. A block is square in section and five long,
+    /// so a level is five by five and the whole thing is hollow.
+    fn tower() -> Vec<Body> {
+        let mut blocks = Vec::new();
+
+        for level in 0..20 {
+            let height = 0.5 + level as f32 * 1.0;
+            let half = if level % 2 == 0 {
+                vec3(2.5, 0.5, 0.5)
+            } else {
+                vec3(0.5, 0.5, 2.5)
+            };
+
+            for side in [-2.0f32, 2.0] {
+                let at = if level % 2 == 0 {
+                    vec3(0.0, height, side)
+                } else {
+                    vec3(side, height, 0.0)
+                };
+
+                blocks.push(
+                    Body::block(at, half, 1.0)
+                        .with_restitution(0.0)
+                        .with_friction(0.8),
+                );
+            }
+        }
+
+        blocks
+    }
+
+    /// How tall the tower still reaches, and how far the worst block has tipped.
+    fn standing(blocks: &[Body]) -> (f32, f32) {
+        (
+            blocks.iter().map(|b| b.position.y).fold(0.0f32, f32::max),
+            blocks
+                .iter()
+                .map(|b| (b.orientation * Vec3::Y).angle_between(Vec3::Y))
+                .fold(0.0f32, f32::max),
+        )
+    }
+
+    /// Fifteen seconds of it, which is ten times longer than it takes to fall
+    /// asleep. Once it is asleep nothing moves it, so the thirty second claim
+    /// and the fifteen second one are the same claim.
+    fn tower_run() -> Vec<Body> {
+        let mut blocks = tower();
+        let mut solver = Solver::new();
+
+        for _ in 0..1800 {
+            solver.step(&mut blocks, &[floor()], DOWN, 1.0 / 120.0);
+        }
+
+        blocks
+    }
+
+    /// Spec 0036: twenty levels of cairn's lattice, still standing.
+    #[test]
+    fn a_tower_stands() {
+        let blocks = tower_run();
+        let (top, _) = standing(&blocks);
+
+        assert!(top > 19.0, "the top of it came down to {}", top);
+    }
+
+    /// Spec 0036: and not leaning. Measured at 0.024 radians, which is a degree
+    /// and a half rather than the one degree this spec first claimed.
+    #[test]
+    fn a_tower_does_not_lean() {
+        let blocks = tower_run();
+        let (_, lean) = standing(&blocks);
+
+        assert!(lean < 0.04, "the worst block is {} radians over", lean);
+    }
+
+    /// Spec 0036: and not sunk into the floor or into itself.
+    ///
+    /// It does settle, and it has to: every contact is allowed its slop and a
+    /// tower has one at every level, so the sag gathers all the way up.
+    /// Measured, the worst of it is 0.22 over twenty levels, which is about a
+    /// hundredth of a unit a level against a slop of 0.005 and the rest the
+    /// push-out leaving a sliver on purpose.
+    #[test]
+    fn a_tower_does_not_sink() {
+        let blocks = tower_run();
+
+        let worst = blocks
+            .iter()
+            .enumerate()
+            .map(|(n, block)| 0.5 + (n / 2) as f32 - block.position.y)
+            .fold(0.0f32, f32::max);
+
+        assert!(
+            worst < 0.3,
+            "a level sank {} below where it was built",
+            worst
+        );
+    }
+
+    /// Spec 0036: and it is asleep, which is what stops it leaning any further.
+    #[test]
+    fn a_tower_falls_asleep() {
+        let mut blocks = tower();
+        let mut solver = Solver::new();
+
+        let mut when = None;
+        for tick in 0..1800 {
+            solver.step(&mut blocks, &[floor()], DOWN, 1.0 / 120.0);
+
+            if when.is_none() && blocks.iter().all(|b| b.asleep) {
+                when = Some(tick as f32 / 120.0);
+            }
+        }
+
+        let when = when.expect("it never fell asleep");
+        assert!(when < 5.0, "it took {} seconds to settle", when);
+        assert!(blocks.iter().all(|b| b.asleep), "something woke up again");
+        assert!(blocks.iter().all(|b| b.velocity == Vec3::ZERO));
+    }
+
+    /// Spec 0036: touching one block in a sleeping tower wakes what it is
+    /// touching, and that spreads outwards rather than stopping at one.
+    #[test]
+    fn waking_spreads_through_contacts() {
+        let mut blocks = tower();
+        let mut solver = Solver::new();
+        for _ in 0..900 {
+            solver.step(&mut blocks, &[floor()], DOWN, 1.0 / 120.0);
+        }
+        assert!(blocks.iter().all(|b| b.asleep), "it never settled");
+
+        // shove the bottom one hard enough to be going somewhere
+        blocks[0].asleep = false;
+        blocks[0].velocity = vec3(4.0, 0.0, 0.0);
+
+        solver.step(&mut blocks, &[floor()], DOWN, 1.0 / 120.0);
+
+        let awake = blocks.iter().filter(|b| !b.asleep).count();
+        assert!(awake > 1, "only {} woke up", awake);
+
+        // and after a moment it has run further up the tower than its own level
+        for _ in 0..30 {
+            solver.step(&mut blocks, &[floor()], DOWN, 1.0 / 120.0);
+        }
+        let highest = blocks
+            .iter()
+            .filter(|b| !b.asleep)
+            .map(|b| b.position.y)
+            .fold(0.0f32, f32::max);
+        assert!(highest > 2.0, "waking stopped at {}", highest);
+    }
+
+    /// Spec 0036: a game that hits something means it, so striking a sleeping
+    /// body wakes it. The solver's own impulses do not, since to those a
+    /// sleeping body is a wall.
+    #[test]
+    fn a_struck_body_wakes() {
+        let mut bodies = [Body::block(vec3(0.0, 0.5, 0.0), Vec3::splat(0.5), 1.0)
+            .with_restitution(0.0)
+            .with_friction(0.8)];
+        let mut solver = Solver::new();
+
+        for _ in 0..240 {
+            solver.step(&mut bodies, &[floor()], DOWN, 1.0 / 120.0);
+        }
+        assert!(bodies[0].asleep, "it never settled");
+
+        let was = bodies[0].position;
+        bodies[0].strike(vec3(4.0, 0.0, 0.0), vec3(-0.5, 0.5, 0.0));
+        assert!(!bodies[0].asleep, "it was struck and stayed asleep");
+
+        for _ in 0..30 {
+            solver.step(&mut bodies, &[floor()], DOWN, 1.0 / 120.0);
+        }
+        assert!(
+            (bodies[0].position - was).length() > 0.2,
+            "it was struck and did not move: {} to {}",
+            was,
+            bodies[0].position
+        );
+    }
+
+    /// Spec 0036: a body touching nothing is in mid air however still it looks,
+    /// so nothing sleeps on nothing.
+    #[test]
+    fn nothing_sleeps_on_nothing() {
+        // thrown straight up, so there is a moment at the top where it is not
+        // moving at all and is touching nothing
+        let mut bodies = [Body::new(vec3(0.0, 4.0, 0.0), 0.5, 1.0).with_velocity(Vec3::ZERO)];
+        let mut solver = Solver::new();
+
+        for _ in 0..30 {
+            solver.step(&mut bodies, &[], DOWN, 1.0 / 120.0);
+            assert!(!bodies[0].asleep, "it fell asleep in mid air");
+        }
+
+        // and it is still falling rather than hanging there
+        assert!(bodies[0].position.y < 4.0);
+    }
+
+    /// Spec 0036: nor at the top of a bounce, where it is still for a frame.
+    #[test]
+    fn a_bounce_does_not_sleep() {
+        let mut bodies = [Body::new(vec3(0.0, 3.0, 0.0), 0.5, 1.0)
+            .with_restitution(0.9)
+            .with_friction(0.1)];
+        let mut solver = Solver::new();
+
+        for _ in 0..240 {
+            solver.step(&mut bodies, &[floor()], DOWN, 1.0 / 120.0);
+
+            if bodies[0].asleep {
+                assert!(
+                    bodies[0].position.y < 0.6,
+                    "it went to sleep at {} up",
+                    bodies[0].position.y
+                );
+            }
+        }
+    }
+
+    /// Spec 0036: a contact that is still there next frame is handed what it
+    /// pushed with, so the stack starts the step already held up.
+    #[test]
+    fn an_impulse_is_carried_over() {
+        let mut bodies = [Body::block(vec3(0.0, 0.5, 0.0), Vec3::splat(0.5), 1.0)
+            .with_restitution(0.0)
+            .with_friction(0.8)];
+        let mut solver = Solver::new();
+
+        for _ in 0..60 {
+            solver.step(&mut bodies, &[floor()], DOWN, 1.0 / 120.0);
+        }
+
+        assert!(
+            !solver.remembered.is_empty(),
+            "nothing was remembered at all"
+        );
+        assert!(
+            solver.remembered.iter().all(|was| was.pushed > 0.0),
+            "a contact was remembered as pushing with nothing"
+        );
+
+        // the names are the contact's own, not its place in the list
+        let named: Vec<u32> = solver.remembered.iter().map(|was| was.named).collect();
+        let mut sorted = named.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(named.len(), sorted.len(), "two contacts answer to one name");
+    }
+
+    /// Spec 0036: and one that has genuinely changed does not inherit anything.
+    #[test]
+    fn a_new_contact_starts_at_zero() {
+        let mut bodies = [Body::block(vec3(0.0, 0.5, 0.0), Vec3::splat(0.5), 1.0)];
+        let mut solver = Solver::new();
+        for _ in 0..60 {
+            solver.step(&mut bodies, &[floor()], DOWN, 1.0 / 120.0);
+        }
+        let held = solver.remembered.len();
+        assert!(held > 0);
+
+        // a body added renumbers everything after it, which is the trap this
+        // project has walked into three times, so the memory goes
+        let mut more = vec![bodies[0], Body::new(vec3(9.0, 4.0, 0.0), 0.5, 1.0)];
+        solver.step(&mut more, &[floor()], DOWN, 1.0 / 120.0);
+        assert_eq!(solver.counted, 2, "it did not notice the body count change");
+
+        // and a contact under a different name inherits nothing
+        let mut contact = Contact {
+            one: 0,
+            other: None,
+            normal: Vec3::Y,
+            here: vec3(0.0, -0.5, 0.0),
+            there: Vec3::ZERO,
+            named: 0xdead,
+            friction: 0.0,
+            owed: 0.0,
+            pushed: 0.0,
+            rubbed: 0.0,
+        };
+        solver.carry_over(&mut more, std::slice::from_mut(&mut contact));
+        assert_eq!(contact.pushed, 0.0, "it inherited from a different contact");
+    }
+
+    /// Spec 0036: and the whole reason for any of it. Without carrying the
+    /// impulse over, the passes needed to find the load grow with the height,
+    /// and twenty levels is further than eight passes reach.
+    #[test]
+    fn warm_starting_earns_its_keep() {
+        let mut warm = tower();
+        let mut cold = tower();
+        let mut solver = Solver::new();
+
+        for _ in 0..600 {
+            solver.step(&mut warm, &[floor()], DOWN, 1.0 / 120.0);
+            step(&mut cold, &[floor()], DOWN, 1.0 / 120.0);
+        }
+
+        let (warm_top, _) = standing(&warm);
+        let (cold_top, _) = standing(&cold);
+
+        assert!(warm_top > 19.0, "the warm one came down to {}", warm_top);
+        assert!(
+            cold_top < 10.0,
+            "the cold one stayed up at {}, so this proves nothing",
+            cold_top
         );
     }
 

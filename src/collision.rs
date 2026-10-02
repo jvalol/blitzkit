@@ -520,7 +520,25 @@ pub struct Meeting {
     /// face on an edge two, and an edge crossing an edge one. A single point
     /// cannot hold a box level: resolved at one corner it see-saws onto the
     /// next.
-    pub points: Vec<Vec3>,
+    pub points: Vec<Touch>,
+}
+
+/// One place two shapes touch, and which parts of them made it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Touch {
+    pub at: Vec3,
+    /// What made this point, so the same one can be recognised next frame: a
+    /// corner of the incident face, or the crossing of one of its edges with
+    /// one of the reference face's sides. Spec 0036 carries a contact's
+    /// accumulated impulse over on this, and matching by position instead would
+    /// drift.
+    pub named: u32,
+}
+
+impl Touch {
+    fn new(at: Vec3, named: u32) -> Self {
+        Self { at, named }
+    }
 }
 
 /// Only take a cross-product axis over a face axis when it is clearly better.
@@ -597,7 +615,7 @@ pub fn obbs_meet(one: &Obb, other: &Obb) -> Option<Meeting> {
 
 /// The one place two crossing edges touch: the nearest points of the two edges
 /// that are furthest along the normal.
-fn edge_point(one: &Obb, other: &Obb, normal: Vec3, i: usize, j: usize) -> Vec<Vec3> {
+fn edge_point(one: &Obb, other: &Obb, normal: Vec3, i: usize, j: usize) -> Vec<Touch> {
     let here = one.furthest(normal) - one.axis(i) * one.half[i] * one.axis(i).dot(normal).signum();
     let there = other.furthest(-normal)
         - other.axis(j) * other.half[j] * other.axis(j).dot(-normal).signum();
@@ -607,8 +625,11 @@ fn edge_point(one: &Obb, other: &Obb, normal: Vec3, i: usize, j: usize) -> Vec<V
     let (b, d, e) = (u.dot(v), u.dot(w), v.dot(w));
     let denominator = 1.0 - b * b;
 
+    // which two edges crossed is the whole of its name
+    let named = 0x0100_0000 | (i as u32) << 4 | j as u32;
+
     if denominator.abs() < 1e-6 {
-        return vec![(here + there) * 0.5];
+        return vec![Touch::new((here + there) * 0.5, named)];
     }
 
     let s = (b * e - d) / denominator;
@@ -616,14 +637,14 @@ fn edge_point(one: &Obb, other: &Obb, normal: Vec3, i: usize, j: usize) -> Vec<V
     let on_one = here + u * s.clamp(-one.half[i], one.half[i]);
     let on_other = there + v * t.clamp(-other.half[j], other.half[j]);
 
-    vec![(on_one + on_other) * 0.5]
+    vec![Touch::new((on_one + on_other) * 0.5, named)]
 }
 
 /// The patch where a face of `reference` is met by whatever of `incident` is
 /// nearest it, found by clipping one against the sides of the other.
 ///
 /// `normal` points from the reference towards the incident.
-fn face_points(reference: &Obb, incident: &Obb, normal: Vec3) -> Vec<Vec3> {
+fn face_points(reference: &Obb, incident: &Obb, normal: Vec3) -> Vec<Touch> {
     let out = (0..3)
         .max_by(|a, b| {
             reference
@@ -655,11 +676,14 @@ fn face_points(reference: &Obb, incident: &Obb, normal: Vec3) -> Vec<Vec3> {
         incident.axis(p) * incident.half[p],
         incident.axis(q) * incident.half[q],
     );
+    // the four corners of the incident face, each named by which corner it is,
+    // which face it came off, and which way that face was pointing
+    let stamp = (into as u32) << 8 | ((incident.axis(into).dot(normal) < 0.0) as u32) << 12;
     let mut polygon = vec![
-        middle - across - along,
-        middle + across - along,
-        middle + across + along,
-        middle - across + along,
+        Touch::new(middle - across - along, stamp),
+        Touch::new(middle + across - along, stamp | 1),
+        Touch::new(middle + across + along, stamp | 2),
+        Touch::new(middle - across + along, stamp | 3),
     ];
 
     // clipped against the four sides of the reference face, which is what keeps
@@ -669,9 +693,16 @@ fn face_points(reference: &Obb, incident: &Obb, normal: Vec3) -> Vec<Vec3> {
             continue;
         }
 
-        for side in [1.0f32, -1.0] {
-            let edge = reference.axis(n) * side;
-            polygon = clipped(&polygon, edge, reference.at.dot(edge) + reference.half[n]);
+        for (s, side) in [1.0f32, -1.0].iter().enumerate() {
+            let edge = reference.axis(n) * *side;
+            let plane = (n as u32) << 17 | (s as u32) << 16;
+
+            polygon = clipped(
+                &polygon,
+                edge,
+                reference.at.dot(edge) + reference.half[n],
+                plane,
+            );
             if polygon.is_empty() {
                 return Vec::new();
             }
@@ -679,9 +710,9 @@ fn face_points(reference: &Obb, incident: &Obb, normal: Vec3) -> Vec<Vec3> {
     }
 
     // and then only the ones actually at or under the face
-    let mut touching: Vec<Vec3> = polygon
+    let mut touching: Vec<Touch> = polygon
         .into_iter()
-        .filter(|point| (*point - plane).dot(facing) <= 0.0)
+        .filter(|point| (point.at - plane).dot(facing) <= 0.0)
         .collect();
 
     // four is as many as a rectangle meeting a rectangle can need, and clipping
@@ -690,7 +721,7 @@ fn face_points(reference: &Obb, incident: &Obb, normal: Vec3) -> Vec<Vec3> {
         let (drop, _) = touching
             .iter()
             .enumerate()
-            .map(|(n, point)| (n, (*point - plane).dot(facing)))
+            .map(|(n, point)| (n, (point.at - plane).dot(facing)))
             .max_by(|a, b| a.1.total_cmp(&b.1))
             .unwrap();
         touching.remove(drop);
@@ -701,19 +732,24 @@ fn face_points(reference: &Obb, incident: &Obb, normal: Vec3) -> Vec<Vec3> {
 
 /// Sutherland and Hodgman, for one plane: keeps what is on the inside of
 /// `point · way <= limit`, and puts a new corner where an edge crosses out.
-fn clipped(polygon: &[Vec3], way: Vec3, limit: f32) -> Vec<Vec3> {
+fn clipped(polygon: &[Touch], way: Vec3, limit: f32, plane: u32) -> Vec<Touch> {
     let mut kept = Vec::with_capacity(polygon.len() + 1);
 
     for n in 0..polygon.len() {
         let (here, next) = (polygon[n], polygon[(n + 1) % polygon.len()]);
-        let (near, far) = (here.dot(way) - limit, next.dot(way) - limit);
+        let (near, far) = (here.at.dot(way) - limit, next.at.dot(way) - limit);
 
         if near <= 0.0 {
             kept.push(here);
         }
 
         if (near > 0.0) != (far > 0.0) && (near - far).abs() > 1e-9 {
-            kept.push(here + (next - here) * (near / (near - far)));
+            // a corner the clip made, named by the edge it came from and the
+            // side it crossed, so it is the same corner again next frame
+            kept.push(Touch::new(
+                here.at + (next.at - here.at) * (near / (near - far)),
+                0x0200_0000 | plane | here.named & 0xffff,
+            ));
         }
     }
 
@@ -756,7 +792,7 @@ pub fn sphere_meets_obb(ball: &Sphere, boxy: &Obb) -> Option<Meeting> {
         // convention wants: from the first named towards the second
         normal: -(boxy.turn * way),
         depth,
-        points: vec![boxy.at + boxy.turn * near],
+        points: vec![Touch::new(boxy.at + boxy.turn * near, 0)],
     })
 }
 
@@ -785,8 +821,8 @@ mod tests {
 
         // all four on the shared face, which is y = 1 give or take the overlap
         for point in &met.points {
-            assert!(point.y > 0.8 && point.y < 1.0, "{}", point);
-            assert!(point.x.abs() <= 1.0 + 1e-5 && point.z.abs() <= 1.0 + 1e-5);
+            assert!(point.at.y > 0.8 && point.at.y < 1.0, "{}", point.at);
+            assert!(point.at.x.abs() <= 1.0 + 1e-5 && point.at.z.abs() <= 1.0 + 1e-5);
         }
     }
 
@@ -797,7 +833,11 @@ mod tests {
 
         assert_eq!(met.points.len(), 4, "{:?}", met.points);
         for point in &met.points {
-            assert!(point.x <= 1.0 + 1e-5, "contact out in mid air at {}", point);
+            assert!(
+                point.at.x <= 1.0 + 1e-5,
+                "contact out in mid air at {}",
+                point.at
+            );
         }
     }
 
@@ -887,7 +927,7 @@ mod tests {
         assert!((met.normal + Vec3::Y).length() < 1e-5, "{}", met.normal);
         assert!((met.depth - 0.1).abs() < 1e-5, "{}", met.depth);
         assert_eq!(met.points.len(), 1);
-        assert!((met.points[0] - vec3(0.0, 1.0, 0.0)).length() < 1e-5);
+        assert!((met.points[0].at - vec3(0.0, 1.0, 0.0)).length() < 1e-5);
 
         assert!(
             sphere_meets_obb(&Sphere::new(vec3(0.0, 1.6, 0.0), 0.5), &cube(Vec3::ZERO)).is_none()

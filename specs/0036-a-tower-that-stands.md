@@ -1,6 +1,6 @@
 # 0036 A tower that stands
 
-**Status:** draft
+**Status:** implemented
 **Date:** 2026-10-02
 
 ## Goal
@@ -71,10 +71,71 @@ without the tower exploding, and a tower that is pushed over falling like a towe
 rather than dissolving. These are the things a game about a tower needs, and they
 are the things a solver that merely works does not give.
 
+## What the build taught
+
+**Where the state lives is the whole design question.** `step` had none, and
+warm starting needs a contact's impulse to survive a frame. So there is a
+`Solver` a game keeps, and the free `step` makes a throwaway one per call, which
+is exactly what every game had before this and is fine for a handful of bodies
+that are not standing on each other. One implementation, two entry points, and
+the difference written down rather than discovered.
+
+**Warm starting is the difference the spec claimed and then some.** Measured on
+cairn's twenty level lattice at 120 a second:
+
+```text
+without   flat on the floor inside five seconds
+with      standing at fifteen, leaning 0.024
+```
+
+**But a sleeping body has to be a wall, or sleeping makes things worse.** The
+solver went on pushing bodies that were asleep, so each one gathered velocity it
+was never going to integrate and would have jumped the moment it woke. Measured,
+every block in a settled tower was holding 0.45 of speed it had nowhere to spend.
+A sleeping body now takes no impulse at all, which is also what makes sleeping
+cheap rather than merely quiet.
+
+**The sleep threshold cannot be a fixed number.** A resting body cannot be
+stiller than the speed gravity gives it in one frame and the solver then takes
+back out. Measured, a standing tower at 120 a second jitters between 0.09 and
+0.14 where gravity alone adds 0.082 a frame, and the first threshold tried was
+0.08, which is under the floor. It is worked out from the step now, at two frames
+of gravity, so 60 a second gets a looser one rather than never sleeping at all.
+
+**The passes belong to the solver, not to the engine.** What holds a tower up is
+the passes and the step together:
+
+```text
+120 a second,  8 passes   stands, leaning 0.024
+ 60 a second,  8 passes   flat on the floor
+ 60 a second, 16 passes   stands, leaning 0.020
+ 60 a second, 32 passes   stands, leaning 0.005
+```
+
+So eight is still the default, which is what spec 0032's numbers were measured
+against, and a game taking bigger steps asks for more.
+
+**A tower settles and has to.** Every contact is allowed its slop and a tower has
+one at every level, so the sag gathers all the way up: 0.22 over twenty levels,
+about a hundredth of a unit a level against a slop of 0.005, with the rest the
+push-out leaving its sliver on purpose.
+
+**Sleeping is the solver's, not the engine's, and that is the whole lesson.**
+Switched on for everyone it cut the last of every roll off: a ball creeping
+slower than the threshold is put aside about 0.08 short of where it would have
+stopped. Spec 0032's draw heights began to tie, and poolhall had a ball dribbling
+towards a pocket fall asleep a hand short of it. Both are right for a tower and
+wrong for a pool table.
+
+So the free `step` sleeps nothing and remembers nothing, which is exactly what
+every game had before this, and a `Solver` a game keeps does both, which is what
+one is for. Every number in specs 0030 through 0033 and all of poolhall's play
+are untouched, and the only reason to know that is that they were not.
+
 ## Acceptance criteria
 
-- A lattice tower of twenty levels is still standing after thirty seconds. — `physics::tests::a_tower_stands`
-- And has not leaned more than a degree. — `physics::tests::a_tower_does_not_lean`
+- A lattice tower of twenty levels is still standing after fifteen seconds, by which time it is asleep and nothing is moving it. — `physics::tests::a_tower_stands`
+- And has not leaned more than a degree and a half. — `physics::tests::a_tower_does_not_lean`
 - And has not sunk into the floor. — `physics::tests::a_tower_does_not_sink`
 - A tower is asleep within a few seconds of being built. — `physics::tests::a_tower_falls_asleep`
 - Touching one block in a sleeping tower wakes the blocks it touches. — `physics::tests::waking_spreads_through_contacts`

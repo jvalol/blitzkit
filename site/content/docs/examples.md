@@ -49,6 +49,25 @@ four rows slump into two while the column at the far end stands there untouched.
 ![A column of five spheres, a heap of green blocks, and a pyramid of ten
 spheres between two low rails, standing on a grey floor](/media/stacking.png)
 
+## tower
+
+In which forty blocks stand on each other and nothing happens. Cairn's tower:
+two blocks a level laid at the outer edges, turned a quarter turn each level,
+twenty levels of them and hollow all the way up. It settles in about a second
+and a half, falls asleep, and then costs nothing.
+
+```
+cargo run --release --example tower
+```
+
+- click a block to shove it and find out what was leaning on it
+- space builds it again
+- drag with the right button to turn the camera
+- scroll to zoom
+
+![A tall hollow tower of forty blocks, two to a level and turned a quarter turn
+each level, standing on a grey floor](/media/tower.png)
+
 ## cubes
 
 In which the lighting is shown off. There's a sun, two spotlights moving

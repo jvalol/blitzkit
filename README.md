@@ -68,6 +68,21 @@ units down.
 ![A column of five spheres, a heap of green blocks, and a pyramid of ten spheres
 on a grey floor](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/stacking.png)
 
+**tower**, a stack that stays up. Cairn's tower: two blocks a level laid at the
+outer edges, turned a quarter turn each level, twenty levels of them and hollow
+all the way up. The thing worth watching is that nothing happens. It settles in
+about a second and a half, falls asleep, and then stops costing anything at all.
+
+```
+cargo run --release --example tower
+```
+
+Click a block to shove it and find out what was leaning on it, space builds it
+again, dragging with the right button turns the camera, and scrolling zooms.
+
+![A tall hollow tower of forty blocks, two to a level and turned a quarter turn
+each level, standing on a grey floor](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/tower.png)
+
 **cubes**, A demonstration of more sophisticated lighting.
 L takes you through the different modes one at a time. The sun is placed infinitely away so it has a direction with no
 defined position. There's nothing to draw for it, and turning it off is the only
