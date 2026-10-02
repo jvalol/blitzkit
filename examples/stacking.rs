@@ -1,6 +1,8 @@
-//! A column of spheres and a pyramid of them, standing on a floor, to see what
-//! spec 0033 is for: a contact worked once holds nothing up, and a stack built
-//! on single-pass resolution sinks through itself.
+//! A column of spheres, a pyramid of them, and a heap of blocks, standing on a
+//! floor. Two specs in one scene: 0033, because a contact worked once holds
+//! nothing up and a stack built on single-pass resolution sinks through itself,
+//! and 0035, because a block resting on a face needs the four places it touches
+//! and a single point lets it see-saw from corner to corner.
 //!
 //! `cargo run --release --example stacking`
 //!
@@ -8,10 +10,10 @@
 //! out and puts them back, space builds the whole thing again, drag with the
 //! right button to swing the camera around, scroll to zoom, and escape quits.
 //!
-//! The readout counts each pile in spheres rather than units, since five high
-//! and one row say at a glance what 4.54 and 0.50 do not, and carries the one
-//! number this spec exists to keep near zero: how far the lowest sphere has sunk
-//! into the floor.
+//! The readout counts each pile in spheres and blocks rather than units, since
+//! five high and one row say at a glance what 4.54 and 0.50 do not, and carries
+//! the one number these specs exist to keep near zero: how far the lowest body
+//! has sunk into whatever it is on.
 
 use blitzkit::camera::Camera;
 use blitzkit::collision::{Aabb, Ray};
@@ -19,13 +21,13 @@ use blitzkit::geometry::Geometry;
 use blitzkit::keyboard::{KeyboardInput, KeyboardKey, KeyboardKeyState};
 use blitzkit::mesh::{MeshData, Transform};
 use blitzkit::mouse::{MouseButton, MouseInput};
-use blitzkit::physics::{step, Body};
+use blitzkit::physics::{step, Body, Shape};
 use blitzkit::renderer::render_text::{RenderText, TextRenderer};
 use blitzkit::renderer::scene::{MeshId, Scene};
 use blitzkit::renderer::Renderer;
 use blitzkit::sound::SoundSystem;
 use blitzkit::{start, Game};
-use glam::{vec2, vec3, vec4, Vec2, Vec3};
+use glam::{vec2, vec3, vec4, Quat, Vec2, Vec3};
 
 const RADIUS: f32 = 0.5;
 const HIGH: usize = 5;
@@ -102,6 +104,10 @@ const WINDING: f32 = 1.5;
 /// pile that flat spreads with every bit of that: at seven apart it reached the
 /// column and took it down inside ten seconds, which is a fine thing to watch
 /// but not while the column is the control.
+/// Half a block, so one is 1.2 long, 0.4 thick and 0.8 wide: clearly not a cube,
+/// so which way up it lands is something you can see.
+const BLOCK: Vec3 = vec3(0.6, 0.2, 0.4);
+const HEAP_AT: f32 = -1.0;
 const COLUMN_AT: f32 = -6.5;
 const PYRAMID_AT: f32 = 4.5;
 /// Where a rail's middle sits, out from the pyramid's own middle: past the
@@ -118,6 +124,10 @@ const RISE: f32 = (RADIUS * 2.0 + GAP) * 0.866;
 enum Pile {
     Column,
     Pyramid,
+    /// Blocks, which spec 0035 lets touch things. Dropped rather than placed,
+    /// because the thing worth watching is that they land on their faces and
+    /// settle into a heap instead of a smear.
+    Heap,
 }
 
 struct Stacking {
@@ -157,6 +167,36 @@ struct Stacking {
 /// Where a ray first meets a sphere, or nothing. The usual quadratic: how far
 /// along the ray the nearest point to the middle is, then back off by the half
 /// chord the radius leaves.
+/// Where a ray first meets a block: the slab test, done in the block's own
+/// frame, where it is an axis aligned box again.
+fn hit_block(ray: &Ray, middle: Vec3, turn: Quat, half: Vec3) -> Option<f32> {
+    let back = turn.inverse();
+    let from = back * (ray.origin - middle);
+    let way = back * ray.direction;
+
+    let mut entry = f32::NEG_INFINITY;
+    let mut exit = f32::INFINITY;
+
+    for n in 0..3 {
+        if way[n].abs() < 1e-6 {
+            if from[n].abs() > half[n] {
+                return None;
+            }
+            continue;
+        }
+
+        let (near, far) = ((-half[n] - from[n]) / way[n], (half[n] - from[n]) / way[n]);
+        entry = entry.max(near.min(far));
+        exit = exit.min(near.max(far));
+    }
+
+    if exit < entry.max(0.0) {
+        None
+    } else {
+        Some(entry.max(0.0))
+    }
+}
+
 fn hit_sphere(ray: &Ray, middle: Vec3, radius: f32) -> Option<f32> {
     let towards = middle - ray.origin;
     let nearest = towards.dot(ray.direction);
@@ -209,6 +249,27 @@ fn build() -> (Vec<Body>, Vec<Pile>) {
             );
             piles.push(Pile::Pyramid);
         }
+    }
+
+    // and a heap of blocks, dropped from a little way up and turned a bit each,
+    // so they land on each other rather than in a neat pile
+    for n in 0..6 {
+        let turn = n as f32 * 0.9;
+        bodies.push(
+            Body::block(
+                vec3(
+                    HEAP_AT + (n % 2) as f32 * 0.25 - 0.12,
+                    0.6 + n as f32 * 0.6,
+                    (n % 3) as f32 * 0.25 - 0.25,
+                ),
+                BLOCK,
+                1.0,
+            )
+            .facing(Quat::from_rotation_y(turn))
+            .with_restitution(0.0)
+            .with_friction(0.7),
+        );
+        piles.push(Pile::Heap);
     }
 
     (bodies, piles)
@@ -344,16 +405,33 @@ impl Game for Stacking {
                 .map(|(body, _)| body.position.y)
                 .fold(0.0f32, f32::max)
         };
+        // a block is flat when its own up is still the world's up
+        let flat = self
+            .bodies
+            .iter()
+            .zip(self.piles.iter())
+            .filter(|(body, pile)| {
+                **pile == Pile::Heap && (body.orientation * Vec3::Y).dot(Vec3::Y).abs() > 0.95
+            })
+            .count();
+
         let high = ((tallest(Pile::Column) + RADIUS) / (RADIUS * 2.0 + GAP)).round() as i32;
         let rows = (((tallest(Pile::Pyramid) - RADIUS) / RISE).round() as i32 + 1).max(0);
 
         // Measured only over the floor, so a sphere mid fall does not report
         // itself as having sunk through it.
+        // Each against where its own shape should rest, which is a radius for a
+        // sphere and half a thickness for a block lying flat. One number for
+        // all of them read 0.30 the moment blocks arrived, which is not a
+        // sinking block, it is a block being measured as a ball.
         let sunk = self
             .bodies
             .iter()
             .filter(|b| b.position.x.abs() < FLOOR * 0.5 && b.position.z.abs() < FLOOR * 0.5)
-            .map(|b| RADIUS - b.position.y)
+            .map(|b| match b.shape {
+                Shape::Sphere { radius } => radius - b.position.y,
+                Shape::Block { half } => half.y - b.position.y,
+            })
             .fold(0.0f32, f32::max);
 
         text_renderer.reset();
@@ -362,10 +440,11 @@ impl Game for Stacking {
         for (line, text) in vec![
             String::from("hold on a sphere to wind it up, k pulls the rails, space rebuilds"),
             format!(
-                "column {} high, pyramid {} row{}{}, sunk {:.2}{}",
+                "column {} high, pyramid {} row{}, {} blocks flat{}, sunk {:.2}{}",
                 high,
                 rows,
                 if rows == 1 { "" } else { "s" },
+                flat,
                 if self.rails { "" } else { ", rails out" },
                 sunk,
                 match self.gone {
@@ -420,6 +499,7 @@ impl Game for Stacking {
             let mut colour = match self.piles[which] {
                 Pile::Column => vec4(0.9, 0.35 + up * 0.5, 0.2, 1.0),
                 Pile::Pyramid => vec4(0.25, 0.45 + up * 0.35, 0.85, 1.0),
+                Pile::Heap => vec4(0.55, 0.75 + up * 0.2, 0.35, 1.0),
             };
             // The one under the cursor goes pale, so a click is aimed rather
             // than hopeful, and the one being wound up runs to red, which is
@@ -430,9 +510,18 @@ impl Game for Stacking {
             } else if self.picked.map(|(at, _)| at) == Some(which) {
                 colour = (colour + vec4(0.5, 0.5, 0.5, 0.0)).min(vec4(1.0, 1.0, 1.0, 1.0));
             }
+            // drawn as whatever it collides as, so a mismatch between what is
+            // seen and what is hit would be obvious
+            let (mesh, size) = match body.shape {
+                Shape::Sphere { radius } => (ball, Vec3::splat(radius * 2.0)),
+                Shape::Block { half } => (cube, half * 2.0),
+            };
+
             scene.push_material(
-                ball,
-                &Transform::at(body.position).with_scale(Vec3::splat(body.radius() * 2.0)),
+                mesh,
+                &Transform::at(body.position)
+                    .with_rotation(body.orientation)
+                    .with_scale(size),
                 colour,
                 64.0,
             );
@@ -455,7 +544,11 @@ impl Game for Stacking {
             .iter()
             .enumerate()
             .filter_map(|(which, body)| {
-                hit_sphere(&ray, body.position, body.radius()).map(|away| (away, which))
+                match body.shape {
+                    Shape::Sphere { radius } => hit_sphere(&ray, body.position, radius),
+                    Shape::Block { half } => hit_block(&ray, body.position, body.orientation, half),
+                }
+                .map(|away| (away, which))
             })
             .min_by(|one, other| one.0.total_cmp(&other.0))
             .map(|(away, which)| (which, ray.at(away)));

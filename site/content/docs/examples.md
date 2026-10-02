@@ -25,10 +25,10 @@ casting a shadow](/media/rolling.png)
 
 ## stacking
 
-In which bodies hold each other up. A column of spheres five high and a pyramid
-of them four rows deep, standing there rather than sinking through each other,
-with a readout of how far the bottom sphere has drifted below where it should
-rest.
+In which bodies hold each other up. A column of spheres five high, a pyramid of
+them four rows deep, and a heap of blocks landing on their faces, all standing
+there rather than sinking through, with a readout of how far the lowest one has
+drifted below where it should rest.
 
 ```
 cargo run --release --example stacking
@@ -46,8 +46,8 @@ four rows slump into two while the column at the far end stands there untouched.
 - drag with the right button to turn the camera
 - scroll to zoom
 
-![A column of five spheres and a pyramid of ten between two low rails, standing
-on a grey floor](/media/stacking.png)
+![A column of five spheres, a heap of green blocks, and a pyramid of ten
+spheres between two low rails, standing on a grey floor](/media/stacking.png)
 
 ## cubes
 

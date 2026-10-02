@@ -37,10 +37,10 @@ swing the camera around, and scroll to zoom.
 ![A ball on the floor of a walled room, three blocks standing on it, each
 casting a shadow](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/rolling.png)
 
-**stacking**, bodies holding each other up. A column of spheres five high and a
-pyramid of them four rows deep, standing there instead of sinking through each
-other. The readout is how far the bottom sphere of the column has gone below
-where it should rest.
+**stacking**, bodies holding each other up. A column of spheres five high, a
+pyramid of them four rows deep, and a heap of blocks dropped on top of each
+other, all standing there instead of sinking through. The readout counts each
+pile and says how far the lowest body has gone below where it should rest.
 
 ```
 cargo run --release --example stacking
@@ -65,7 +65,7 @@ Push one off the edge and it is gone for good rather than falling for ever, whic
 is what it did until the readout was found reporting a sphere eight thousand
 units down.
 
-![A column of five spheres and a pyramid of ten between two low rails, standing
+![A column of five spheres, a heap of green blocks, and a pyramid of ten spheres
 on a grey floor](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/stacking.png)
 
 **cubes**, A demonstration of more sophisticated lighting.

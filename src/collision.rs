@@ -3,7 +3,7 @@
 //! See `specs/0014-collision.md`. Pure maths on the CPU: no GPU, no rigid
 //! bodies, no solver. A game decides what a collision means.
 
-use glam::Vec3;
+use glam::{Quat, Vec3};
 
 /// How far a slide stops short of a surface, so it does not end up inside it
 /// and stick there.
@@ -457,10 +457,452 @@ pub fn move_and_slide(sphere: Sphere, velocity: Vec3, dt: f32, colliders: &[Aabb
     position
 }
 
+/// A box that can be turned, which an `Aabb` cannot. Spec 0035.
+///
+/// The static world is made of `Aabb`s and they are read as these with no
+/// rotation, so a block against a wall and a block against a block are the same
+/// test rather than two that have to be kept agreeing.
+#[derive(Debug, Clone, Copy)]
+pub struct Obb {
+    pub at: Vec3,
+    pub turn: Quat,
+    /// Half the width, height and depth, in the box's own frame.
+    pub half: Vec3,
+}
+
+impl Obb {
+    pub fn new(at: Vec3, turn: Quat, half: Vec3) -> Self {
+        Self { at, turn, half }
+    }
+
+    pub fn from_aabb(wall: &Aabb) -> Self {
+        Self {
+            at: wall.center(),
+            turn: Quat::IDENTITY,
+            half: wall.size() * 0.5,
+        }
+    }
+
+    /// Which way one of its own three axes points, in the world.
+    pub fn axis(&self, n: usize) -> Vec3 {
+        self.turn
+            * match n {
+                0 => Vec3::X,
+                1 => Vec3::Y,
+                _ => Vec3::Z,
+            }
+    }
+
+    /// How far it reaches from its middle along a direction, which is the
+    /// shadow it casts on that line.
+    fn reach_along(&self, way: Vec3) -> f32 {
+        (0..3)
+            .map(|n| (self.half[n] * self.axis(n).dot(way)).abs())
+            .sum()
+    }
+
+    /// The corner furthest along a direction.
+    fn furthest(&self, way: Vec3) -> Vec3 {
+        (0..3).fold(self.at, |at, n| {
+            at + self.axis(n) * self.half[n] * self.axis(n).dot(way).signum()
+        })
+    }
+}
+
+/// Where two shapes meet, and how far in. Spec 0035.
+#[derive(Debug, Clone)]
+pub struct Meeting {
+    /// Points from the first towards the second, so pushing the second along it
+    /// takes them apart.
+    pub normal: Vec3,
+    pub depth: f32,
+    /// Up to four places they touch. A face resting on a face gives four, a
+    /// face on an edge two, and an edge crossing an edge one. A single point
+    /// cannot hold a box level: resolved at one corner it see-saws onto the
+    /// next.
+    pub points: Vec<Vec3>,
+}
+
+/// Only take a cross-product axis over a face axis when it is clearly better.
+/// Two boxes lying square on each other have nine cross axes that tie with the
+/// face, and a tie broken the wrong way gives one contact point where four were
+/// wanted, which is a resting box that rocks.
+const PREFER_A_FACE: f32 = 1.01;
+
+/// Whether two boxes overlap, and where, by separating axes. Spec 0035.
+///
+/// Fifteen of them: three faces of each, and the nine cross products of their
+/// edge directions. The cross ones are what catch an edge landing on an edge,
+/// and leaving them out is what lets a box sink corner first into another one.
+pub fn obbs_meet(one: &Obb, other: &Obb) -> Option<Meeting> {
+    let between = other.at - one.at;
+
+    let mut least = f32::INFINITY;
+    let mut normal = Vec3::ZERO;
+    let mut which = usize::MAX;
+
+    for n in 0..15 {
+        let axis = if n < 3 {
+            one.axis(n)
+        } else if n < 6 {
+            other.axis(n - 3)
+        } else {
+            one.axis((n - 6) / 3).cross(other.axis((n - 6) % 3))
+        };
+
+        // two boxes square on each other have parallel edges, and the cross of
+        // two parallel directions is nothing rather than an axis
+        if axis.length_squared() < 1e-8 {
+            continue;
+        }
+
+        let way = axis.normalize();
+        let overlap = one.reach_along(way) + other.reach_along(way) - between.dot(way).abs();
+        if overlap <= 0.0 {
+            return None;
+        }
+
+        let judged = if n < 6 {
+            overlap
+        } else {
+            overlap * PREFER_A_FACE
+        };
+        if judged < least {
+            least = judged;
+            which = n;
+            normal = if between.dot(way) < 0.0 { -way } else { way };
+        }
+    }
+
+    if which == usize::MAX {
+        return None;
+    }
+
+    let depth = one.reach_along(normal) + other.reach_along(normal) - between.dot(normal).abs();
+
+    let points = if which < 3 {
+        face_points(one, other, normal)
+    } else if which < 6 {
+        face_points(other, one, -normal)
+    } else {
+        edge_point(one, other, normal, (which - 6) / 3, (which - 6) % 3)
+    };
+
+    Some(Meeting {
+        normal,
+        depth,
+        points,
+    })
+}
+
+/// The one place two crossing edges touch: the nearest points of the two edges
+/// that are furthest along the normal.
+fn edge_point(one: &Obb, other: &Obb, normal: Vec3, i: usize, j: usize) -> Vec<Vec3> {
+    let here = one.furthest(normal) - one.axis(i) * one.half[i] * one.axis(i).dot(normal).signum();
+    let there = other.furthest(-normal)
+        - other.axis(j) * other.half[j] * other.axis(j).dot(-normal).signum();
+
+    let (u, v) = (one.axis(i), other.axis(j));
+    let w = here - there;
+    let (b, d, e) = (u.dot(v), u.dot(w), v.dot(w));
+    let denominator = 1.0 - b * b;
+
+    if denominator.abs() < 1e-6 {
+        return vec![(here + there) * 0.5];
+    }
+
+    let s = (b * e - d) / denominator;
+    let t = (e - b * d) / denominator;
+    let on_one = here + u * s.clamp(-one.half[i], one.half[i]);
+    let on_other = there + v * t.clamp(-other.half[j], other.half[j]);
+
+    vec![(on_one + on_other) * 0.5]
+}
+
+/// The patch where a face of `reference` is met by whatever of `incident` is
+/// nearest it, found by clipping one against the sides of the other.
+///
+/// `normal` points from the reference towards the incident.
+fn face_points(reference: &Obb, incident: &Obb, normal: Vec3) -> Vec<Vec3> {
+    let out = (0..3)
+        .max_by(|a, b| {
+            reference
+                .axis(*a)
+                .dot(normal)
+                .abs()
+                .total_cmp(&reference.axis(*b).dot(normal).abs())
+        })
+        .unwrap_or(0);
+    let facing = reference.axis(out) * reference.axis(out).dot(normal).signum();
+    let plane = reference.at + facing * reference.half[out];
+
+    // the face of the incident box that looks back at it most squarely
+    let into = (0..3)
+        .min_by(|a, b| {
+            incident
+                .axis(*a)
+                .dot(normal)
+                .abs()
+                .total_cmp(&incident.axis(*b).dot(normal).abs())
+                .reverse()
+        })
+        .unwrap_or(0);
+    let back = -incident.axis(into) * incident.axis(into).dot(normal).signum();
+    let (p, q) = ((into + 1) % 3, (into + 2) % 3);
+
+    let middle = incident.at + back * incident.half[into];
+    let (across, along) = (
+        incident.axis(p) * incident.half[p],
+        incident.axis(q) * incident.half[q],
+    );
+    let mut polygon = vec![
+        middle - across - along,
+        middle + across - along,
+        middle + across + along,
+        middle - across + along,
+    ];
+
+    // clipped against the four sides of the reference face, which is what keeps
+    // a face hanging over an edge from reporting contact out in mid air
+    for n in 0..3 {
+        if n == out {
+            continue;
+        }
+
+        for side in [1.0f32, -1.0] {
+            let edge = reference.axis(n) * side;
+            polygon = clipped(&polygon, edge, reference.at.dot(edge) + reference.half[n]);
+            if polygon.is_empty() {
+                return Vec::new();
+            }
+        }
+    }
+
+    // and then only the ones actually at or under the face
+    let mut touching: Vec<Vec3> = polygon
+        .into_iter()
+        .filter(|point| (*point - plane).dot(facing) <= 0.0)
+        .collect();
+
+    // four is as many as a rectangle meeting a rectangle can need, and clipping
+    // can leave more when corners land on edges
+    while touching.len() > 4 {
+        let (drop, _) = touching
+            .iter()
+            .enumerate()
+            .map(|(n, point)| (n, (*point - plane).dot(facing)))
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .unwrap();
+        touching.remove(drop);
+    }
+
+    touching
+}
+
+/// Sutherland and Hodgman, for one plane: keeps what is on the inside of
+/// `point · way <= limit`, and puts a new corner where an edge crosses out.
+fn clipped(polygon: &[Vec3], way: Vec3, limit: f32) -> Vec<Vec3> {
+    let mut kept = Vec::with_capacity(polygon.len() + 1);
+
+    for n in 0..polygon.len() {
+        let (here, next) = (polygon[n], polygon[(n + 1) % polygon.len()]);
+        let (near, far) = (here.dot(way) - limit, next.dot(way) - limit);
+
+        if near <= 0.0 {
+            kept.push(here);
+        }
+
+        if (near > 0.0) != (far > 0.0) && (near - far).abs() > 1e-9 {
+            kept.push(here + (next - here) * (near / (near - far)));
+        }
+    }
+
+    kept
+}
+
+/// Where a sphere meets a box. Spec 0035.
+///
+/// The nearest point of the box to the middle of the sphere, which is the box's
+/// own clamp done in the box's own frame. One contact point, because a sphere
+/// has only ever touched anything at one.
+pub fn sphere_meets_obb(ball: &Sphere, boxy: &Obb) -> Option<Meeting> {
+    let into_box = boxy.turn.inverse();
+    let middle = into_box * (ball.center - boxy.at);
+    let near = middle.clamp(-boxy.half, boxy.half);
+    let out = middle - near;
+    let apart = out.length();
+
+    if apart >= ball.radius {
+        return None;
+    }
+
+    // the middle inside the box: push it out of whichever face is closest,
+    // since there is no direction from a point to itself
+    let (way, depth) = if apart < 1e-6 {
+        let room = boxy.half - middle.abs();
+        let n = (0..3)
+            .min_by(|a, b| room[*a].total_cmp(&room[*b]))
+            .unwrap_or(0);
+        let mut way = Vec3::ZERO;
+        way[n] = middle[n].signum();
+
+        (way, room[n] + ball.radius)
+    } else {
+        (out / apart, ball.radius - apart)
+    };
+
+    Some(Meeting {
+        // from the box towards the sphere, then turned the way the contact
+        // convention wants: from the first named towards the second
+        normal: -(boxy.turn * way),
+        depth,
+        points: vec![boxy.at + boxy.turn * near],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use glam::vec3;
+
+    fn cube(at: Vec3) -> Obb {
+        Obb::new(at, Quat::IDENTITY, Vec3::ONE)
+    }
+
+    #[test]
+    fn two_boxes_apart_do_not_meet() {
+        assert!(obbs_meet(&cube(Vec3::ZERO), &cube(vec3(0.0, 2.1, 0.0))).is_none());
+        assert!(obbs_meet(&cube(Vec3::ZERO), &cube(vec3(5.0, 0.0, 0.0))).is_none());
+    }
+
+    #[test]
+    fn a_face_resting_on_a_face_gives_four_points() {
+        let met = obbs_meet(&cube(Vec3::ZERO), &cube(vec3(0.0, 1.9, 0.0))).expect("they overlap");
+
+        assert!((met.normal - Vec3::Y).length() < 1e-5, "{}", met.normal);
+        assert!((met.depth - 0.1).abs() < 1e-5, "{}", met.depth);
+        assert_eq!(met.points.len(), 4, "{:?}", met.points);
+
+        // all four on the shared face, which is y = 1 give or take the overlap
+        for point in &met.points {
+            assert!(point.y > 0.8 && point.y < 1.0, "{}", point);
+            assert!(point.x.abs() <= 1.0 + 1e-5 && point.z.abs() <= 1.0 + 1e-5);
+        }
+    }
+
+    #[test]
+    fn a_face_hanging_over_an_edge_only_touches_where_it_is_held() {
+        // shifted so half of it is out past the edge of the one below
+        let met = obbs_meet(&cube(Vec3::ZERO), &cube(vec3(1.0, 1.9, 0.0))).expect("they overlap");
+
+        assert_eq!(met.points.len(), 4, "{:?}", met.points);
+        for point in &met.points {
+            assert!(point.x <= 1.0 + 1e-5, "contact out in mid air at {}", point);
+        }
+    }
+
+    #[test]
+    fn fewer_points_for_an_edge_or_a_corner() {
+        // turned a half turn about z so it comes down on one of its long edges
+        let on_edge = Obb::new(
+            vec3(0.0, 2.3, 0.0),
+            Quat::from_rotation_z(std::f32::consts::FRAC_PI_4),
+            Vec3::ONE,
+        );
+        let met = obbs_meet(&cube(Vec3::ZERO), &on_edge).expect("they overlap");
+        assert!(
+            met.points.len() <= 2,
+            "an edge gave {} points: {:?}",
+            met.points.len(),
+            met.points
+        );
+
+        // turned about two axes so it comes down on a corner
+        let on_corner = Obb::new(
+            vec3(0.0, 2.5, 0.0),
+            Quat::from_rotation_z(std::f32::consts::FRAC_PI_4)
+                * Quat::from_rotation_x(std::f32::consts::FRAC_PI_4),
+            Vec3::ONE,
+        );
+        let met = obbs_meet(&cube(Vec3::ZERO), &on_corner).expect("they overlap");
+        assert!(
+            met.points.len() <= 2,
+            "a corner gave {} points: {:?}",
+            met.points.len(),
+            met.points
+        );
+    }
+
+    #[test]
+    fn an_edge_crossing_an_edge_is_found() {
+        // one long bar along x, another along z, crossed and overlapping a
+        // little. Nothing separates them on any face axis, so only a cross
+        // product can find it.
+        let along_x = Obb::new(Vec3::ZERO, Quat::IDENTITY, vec3(4.0, 0.5, 0.5));
+        let along_z = Obb::new(
+            vec3(0.0, 0.9, 0.0),
+            Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+            vec3(4.0, 0.5, 0.5),
+        );
+
+        let met = obbs_meet(&along_x, &along_z).expect("they overlap");
+        assert!((met.normal - Vec3::Y).length() < 1e-4, "{}", met.normal);
+        assert!((met.depth - 0.1).abs() < 1e-4, "{}", met.depth);
+    }
+
+    #[test]
+    fn a_turned_box_is_separated_where_a_square_one_would_not_be() {
+        // a cube turned 45 degrees about y reaches sqrt(2) along x, not 1, and
+        // a test that forgot its axes would say these two overlap
+        let turned = Obb::new(
+            vec3(2.2, 0.0, 0.0),
+            Quat::from_rotation_y(std::f32::consts::FRAC_PI_4),
+            Vec3::ONE,
+        );
+
+        assert!(
+            obbs_meet(&cube(Vec3::ZERO), &turned).is_some(),
+            "1 + 1.414 > 2.2"
+        );
+        assert!(obbs_meet(&cube(Vec3::ZERO), &cube(vec3(2.2, 0.0, 0.0))).is_none());
+    }
+
+    #[test]
+    fn a_wall_is_a_box_with_no_turn() {
+        let wall = Aabb::from_center_size(vec3(0.0, -1.0, 0.0), vec3(20.0, 2.0, 20.0));
+        let read = Obb::from_aabb(&wall);
+
+        assert_eq!(read.at, vec3(0.0, -1.0, 0.0));
+        assert_eq!(read.half, vec3(10.0, 1.0, 10.0));
+        assert_eq!(read.turn, Quat::IDENTITY);
+    }
+
+    #[test]
+    fn a_sphere_meets_a_box_on_its_nearest_point() {
+        let ball = Sphere::new(vec3(0.0, 1.4, 0.0), 0.5);
+        let met = sphere_meets_obb(&ball, &cube(Vec3::ZERO)).expect("they overlap");
+
+        // from the box towards the sphere is up, and the convention here is
+        // from the first named towards the second, so it points down
+        assert!((met.normal + Vec3::Y).length() < 1e-5, "{}", met.normal);
+        assert!((met.depth - 0.1).abs() < 1e-5, "{}", met.depth);
+        assert_eq!(met.points.len(), 1);
+        assert!((met.points[0] - vec3(0.0, 1.0, 0.0)).length() < 1e-5);
+
+        assert!(
+            sphere_meets_obb(&Sphere::new(vec3(0.0, 1.6, 0.0), 0.5), &cube(Vec3::ZERO)).is_none()
+        );
+    }
+
+    #[test]
+    fn a_sphere_inside_a_box_comes_out_the_near_side() {
+        // middle of the sphere inside the box, closer to +x than anything else
+        let ball = Sphere::new(vec3(0.8, 0.0, 0.0), 0.5);
+        let met = sphere_meets_obb(&ball, &cube(Vec3::ZERO)).expect("it is inside");
+
+        assert!((met.normal + Vec3::X).length() < 1e-5, "{}", met.normal);
+        assert!(met.depth > 0.0);
+    }
 
     fn unit_box() -> Aabb {
         Aabb::from_center_size(Vec3::ZERO, Vec3::splat(2.0))
