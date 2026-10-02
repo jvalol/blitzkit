@@ -46,9 +46,16 @@ where it should rest.
 cargo run --release --example stacking
 ```
 
-Drag or move the mouse to swing the camera around, scroll to zoom, and space
-builds it again. The pyramid has a kerb either side of its bottom row, because
-loose spheres shove each other apart and will not hold one up on their own.
+Click a sphere to shove it away from the camera, which is how to knock the column
+over. `K` takes the pyramid's kerbs out and puts them back, space builds the
+whole thing again, dragging with the right button turns the camera, and scrolling
+zooms.
+
+The kerbs are there because loose spheres will not hold a pyramid up on their
+own: each ball sitting in a valley shoves the two beneath it apart, and only the
+floor's grip resists. Taking them out is the quickest way to see it. The pile
+goes flat and spreads to three times the width it was built to, while the column
+beside it stands there unbothered.
 
 ![A column of five spheres and a pyramid of ten between two low kerbs, standing
 on a grey floor](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/stacking.png)

@@ -153,9 +153,15 @@ the slop every contact is allowed.
 
 The pyramid has a kerb either side of its bottom row, because loose spheres will
 not hold one up on their own. Each ball sitting in a valley shoves the two
-beneath it apart and only the floor's grip resists, which is never enough:
-without the kerbs the thing slumps into a line. That is geometry rather than the
-solver, and a rack has a frame for the same reason.
+beneath it apart and only the floor's grip resists, which is never enough. K
+takes the kerbs out to show it rather than leaving it asserted here: the pile
+goes flat and spreads from 1.51 to 5.19, while the column standing beside it does
+not move. That is geometry rather than the solver, and a rack has a frame for the
+same reason.
+
+Clicking a sphere shoves it away from the camera, at the point the ray met it, so
+a click off centre spins it too. It is the quickest way to find out whether a
+stack that is standing is standing for a good reason.
 
 marble, carom and poolhall were run and looked at after this landed: the marble
 rests on its platform, carom's cross of thirteen sits as it was dealt, and
