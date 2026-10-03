@@ -605,6 +605,40 @@ fn contacts(bodies: &[Body], world: &[Aabb]) -> Vec<Contact> {
     found
 }
 
+/// Wakes anything a moving body has come up against, before the passes rather
+/// than after them.
+///
+/// A sleeping body is a wall to the solver, which is what makes sleeping worth
+/// anything: see `once`. But waking only ever happened at the end of the step,
+/// so the frame in which something ran into a sleeping body spent its impulse
+/// on an immovable wall and the wall woke up afterwards with nothing. Measured
+/// in cascada, a domino pushed into the end of a sleeping one shoved it half a
+/// unit along the floor and tilted it two degrees, where the same hit with the
+/// target already awake took it over.
+///
+/// Spec 0036 fixed the same shape of thing for `strike`, which wakes what a
+/// game hits. This is what the thing it hits then runs into.
+fn shaken(bodies: &mut [Body], found: &[Contact]) {
+    let stirring: Vec<bool> = bodies
+        .iter()
+        .map(|body| {
+            !body.asleep && body.inverse_mass > 0.0 && body.velocity.length() > SLEEPS_UNDER
+        })
+        .collect();
+
+    for contact in found {
+        let Some(other) = contact.other else {
+            continue;
+        };
+
+        for (moving, still) in [(contact.one, other), (other, contact.one)] {
+            if stirring[moving] && bodies[still].asleep {
+                bodies[still].wake();
+            }
+        }
+    }
+}
+
 /// Puts still bodies aside and wakes anything that has been disturbed, per spec
 /// 0036.
 ///
@@ -1286,6 +1320,7 @@ impl Solver {
         // gathered first and worked over several times, per spec 0033, by index
         // both ways round so the same run twice is the same run
         let mut found = contacts(bodies, world);
+        shaken(bodies, &found);
         self.carry_over(bodies, &mut found);
         work(bodies, &mut found, self.passes);
         self.put_away(&found);
@@ -2437,6 +2472,62 @@ mod tests {
         assert!(when < 5.0, "it took {} seconds to settle", when);
         assert!(blocks.iter().all(|b| b.asleep), "something woke up again");
         assert!(blocks.iter().all(|b| b.velocity == Vec3::ZERO));
+    }
+
+    /// Spec 0036: and it wakes in the step it is run into, not the one after.
+    ///
+    /// A sleeping body is a wall to the solver, which is what makes sleeping
+    /// worth anything. Waking used to happen only at the end of a step, so the
+    /// frame something ran into a sleeping body spent its impulse on an
+    /// immovable wall and the wall woke afterwards with nothing. Measured in
+    /// cascada, a domino pushed into the end of a sleeping one shoved it half a
+    /// unit and tilted it two degrees where the same hit on a waking one took
+    /// it over.
+    #[test]
+    fn running_into_a_sleeper_moves_it_that_step() {
+        let mut blocks = [
+            Body::block(vec3(-1.5, 0.25, 0.0), vec3(0.25, 0.25, 0.25), 1.0)
+                .with_restitution(0.0)
+                .with_friction(0.3),
+            Body::block(vec3(0.0, 0.25, 0.0), vec3(0.25, 0.25, 0.25), 1.0)
+                .with_restitution(0.0)
+                .with_friction(0.3),
+        ];
+        let mut solver = Solver::new();
+        for _ in 0..900 {
+            solver.step(&mut blocks, &[floor()], DOWN, 1.0 / 120.0);
+        }
+        assert!(blocks.iter().all(|b| b.asleep), "they never settled");
+
+        let was = blocks[1].position.x;
+        blocks[0].wake();
+        blocks[0].velocity = vec3(6.0, 0.0, 0.0);
+
+        // run it up to the moment of contact and one step past it
+        let mut touched = 0;
+        for _ in 0..240 {
+            solver.step(&mut blocks, &[floor()], DOWN, 1.0 / 120.0);
+            touched += 1;
+            if blocks[1].position.x - was > 1e-3 {
+                break;
+            }
+        }
+
+        assert!(touched < 240, "the sleeper was never moved at all");
+        assert!(
+            !blocks[1].asleep,
+            "it was shoved along while still counted asleep"
+        );
+
+        // and it carries a real share of what hit it rather than a crumb
+        for _ in 0..60 {
+            solver.step(&mut blocks, &[floor()], DOWN, 1.0 / 120.0);
+        }
+        assert!(
+            blocks[1].position.x - was > 0.2,
+            "it only moved {} after being run into at six a second",
+            blocks[1].position.x - was
+        );
     }
 
     /// Spec 0036: touching one block in a sleeping tower wakes what it is

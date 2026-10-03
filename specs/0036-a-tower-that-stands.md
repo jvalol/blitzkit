@@ -41,6 +41,14 @@ sleep while the one under it is awake, or the sleeping one hangs in the air when
 its support moves. Bodies in contact sleep and wake together: a touched body
 wakes, and everything touching it wakes with it, out through the contacts.
 
+**And it wakes in the step it is run into, not the one after.** Waking used to
+happen only at the end of a step, after the passes, so the frame something ran
+into a sleeping body spent its impulse on an immovable wall and the wall woke up
+afterwards with nothing. Measured in cascada, a domino pushed into the end of a
+sleeping one shoved it half a unit along the floor and tilted it two degrees,
+where the same hit with the target already awake took it over. Anything a moving
+body is in contact with is woken before the passes now.
+
 **Waking is cheap and sleeping is slow.** A sleeping body wakes the instant
 something touches it, is struck, or has its velocity set by a game. Falling
 asleep takes the threshold held for a time rather than a single frame, so a block
@@ -168,6 +176,7 @@ are untouched, and the only reason to know that is that they were not.
 - And has not sunk into the floor. — `physics::tests::a_tower_does_not_sink`
 - A tower is asleep within a few seconds of being built. — `physics::tests::a_tower_falls_asleep`
 - Touching one block in a sleeping tower wakes the blocks it touches. — `physics::tests::waking_spreads_through_contacts`
+- A body run into while asleep is moved in that step rather than the next. — `physics::tests::running_into_a_sleeper_moves_it_that_step`
 - A sleeping body does not hang in the air when what it rested on is taken away. — `physics::tests::nothing_sleeps_on_nothing`
 - A body does not fall asleep at the top of a bounce. — `physics::tests::a_bounce_does_not_sleep`
 - A contact keeps its impulse across a frame where nothing moved. — `physics::tests::an_impulse_is_carried_over`
