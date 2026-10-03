@@ -80,16 +80,15 @@ const SKIN: f32 = 1e-3;
 pub const SPIN_SETTLES_AT: f32 = 0.05;
 
 /// Under this much speed and this much spin a body is still enough to be put
-/// aside, per spec 0036. Not the same as spec 0030's settling, which stops a
-/// body shivering into a surface: this stops the engine paying for one that is
-/// not doing anything, and stops a stack gathering a frame of error at a time
-/// into a lean.
-/// This is only the floor, for a scene with no gravity in it. The real one is
-/// worked out from the step, because a resting body cannot be stiller than the
-/// speed gravity gives it in one frame and the solver then takes back out:
-/// measured, a standing tower at 120 a second jitters between 0.09 and 0.14,
-/// where gravity alone adds 0.082 a frame. A fixed number tuned there would sit
-/// below the floor at 60 a second and nothing would ever sleep.
+/// aside, per spec 0036. Not spec 0030's settling, which stops a body
+/// shivering into a surface. This stops the engine paying for one doing
+/// nothing, and stops a stack gathering error into a lean. This is only the
+/// floor, for a scene with no gravity in it. The real one is worked out from
+/// the step, because a resting body cannot be stiller than the speed gravity
+/// gives it in one frame and the solver then takes back out: measured, a
+/// standing tower at 120 a second jitters between 0.09 and 0.14, where gravity
+/// alone adds 0.082 a frame. A fixed number tuned there would sit below the
+/// floor at 60 a second and nothing would ever sleep.
 pub const SLEEPS_UNDER: f32 = 0.05;
 /// How many frames of gravity still counts as still. Two: one for the increment
 /// itself and one for the room the solver needs to not quite cancel it.
@@ -185,9 +184,9 @@ pub struct Body {
     /// ever, which is what spec 0030 alone does.
     pub rolling: f32,
     /// Whether it has been put aside, per spec 0036. A sleeping body is not
-    /// moved by gravity and not integrated, which is how a tower stops leaning:
-    /// even a good solver leaves a little error each frame and a stack gathers
-    /// it into a slow drift. Nothing moves it, so it does not drift.
+    /// moved by gravity and not integrated, which is how a tower stops
+    /// leaning: a good solver still leaves a little error each frame, and a
+    /// stack gathers it into a drift. Nothing moves it, so it does not drift.
     pub asleep: bool,
     /// How long it has been still enough to sleep. Public so a game can see
     /// how close something is rather than guess.
@@ -404,8 +403,7 @@ impl Body {
 
         // A game hitting something means it, so this wakes it. The solver's own
         // impulses do not, because a sleeping body is a wall to them, per spec
-        // 0036: without this, clicking a block in a settled tower did nothing at
-        // all and the engine had no way to say why.
+        // 0036: without this, clicking a block in a settled tower did nothing.
         self.wake();
 
         let on_the_surface = match self.shape {
@@ -436,12 +434,11 @@ fn agreed(one: f32, other: f32) -> f32 {
     one.min(other)
 }
 
-/// One place two things touch, kept for as long as a step lasts.
-///
-/// Gathered before anything is solved, per spec 0033. Finding a contact and
-/// answering it in the same breath is what made the order matter: the first
-/// pair never saw the last, so the floor under a stack was decided before it
-/// knew what was standing on it, and the stack sank through it.
+/// One place two things touch, kept for as long as a step lasts. Gathered
+/// before anything is solved, per spec 0033. Finding a contact and answering
+/// it in the same breath made the order matter. The first pair never saw the
+/// last, so the floor under a stack was decided before it knew what stood on
+/// it, and the stack sank through.
 #[derive(Debug, Clone, Copy)]
 struct Contact {
     one: usize,
@@ -450,10 +447,10 @@ struct Contact {
     /// Away from what was hit, towards `one`.
     normal: Vec3,
     /// Where it is, as an offset from each body's middle. Two offsets rather
-    /// than one world point because a sphere pair measures each to its own
-    /// surface and has done since spec 0030, and a shared point is a different
-    /// answer the moment they overlap. A block pair takes both from the one
-    /// place they touch, which is what a lever arm means.
+    /// than one world point: a sphere pair measures each to its own surface,
+    /// and a shared point is a different answer the moment they overlap. A
+    /// block pair takes both from the one place they touch, which is what a
+    /// lever arm means.
     here: Vec3,
     there: Vec3,
     /// Which parts of the two touched, per spec 0036. The same contact next
@@ -481,9 +478,8 @@ fn contacts(bodies: &[Body], world: &[Aabb]) -> Vec<Contact> {
     let mut found = Vec::new();
 
     // the static world first, and it is a contact like any other. A wall is a
-    // body of no inverse mass, which spec 0030 already says, so the floor under
-    // a stack gets to answer what is standing on it rather than being decided
-    // before that is known.
+    // body of no inverse mass, per spec 0030, so the floor under a stack
+    // answers what is standing on it rather than being decided first.
     for (n, body) in bodies.iter().enumerate() {
         if body.inverse_mass <= 0.0 {
             continue;
@@ -529,13 +525,12 @@ fn contacts(bodies: &[Body], world: &[Aabb]) -> Vec<Contact> {
 
             // support only: no bounce and no grip. The sweep has already
             // answered this contact for one body on its own, with the
-            // restitution, the friction and the rolling, and everything that
-            // behaves as it did depends on that staying where it is. What the
-            // sweep cannot do is hold up whatever is standing on the body,
-            // because it runs before any of the pairs are known, and that is
-            // this contact's whole job. Doing more charges the floor's grip
-            // twice, which is enough to eat the backspin off a struck ball
-            // before it reaches the one it was aimed at.
+            // restitution, the friction and the rolling. What the sweep cannot
+            // do is hold up whatever is standing on the body, because it runs
+            // before any of the pairs are known, and that is this contact's
+            // whole job. Doing more charges the floor's grip twice, which is
+            // enough to eat the backspin off a struck ball before it reaches
+            // the one it was aimed at.
             let normal = out / apart;
 
             found.push(began(
@@ -711,8 +706,7 @@ fn met(one: &Body, other: &Body) -> Option<Meeting> {
             sphere_meets_obb(&Sphere::new(one.position, radius), &boxy(other, half))
         }
         // asked the other way round and turned back, so a block against a
-        // sphere is the same answer as a sphere against a block rather than a
-        // second piece of arithmetic that has to be kept agreeing
+        // sphere is the same answer as a sphere against a block
         (Shape::Block { half }, Shape::Sphere { radius }) => {
             sphere_meets_obb(&Sphere::new(other.position, radius), &boxy(one, half)).map(|met| {
                 Meeting {
@@ -812,10 +806,9 @@ fn once(bodies: &mut [Body], contact: &mut Contact) {
 
     // A sphere's contact is one radius out along the normal, so the normal
     // passes through its middle and pushing on it cannot turn it: the effective
-    // mass is the masses and nothing else, which is what spec 0030 worked out
-    // and what every number measured since rests on. A block is touched off to
-    // one side and the lever arm is real, so the general form is used, and only
-    // for contacts that have a block in them. Running the general form on
+    // mass is the masses and nothing else, per spec 0030. A block is touched
+    // off to one side and the lever arm is real, so the general form is used,
+    // and only for contacts that have a block in them. Running the general form on
     // spheres too would be right in algebra and would put floating point crumbs
     // through the one place this engine has been bitten twice.
     let cornered = bodies[one].sphere().is_none()
@@ -903,18 +896,15 @@ fn resistance(
 }
 
 /// Answers one contact between a body and the static world, as the sweep finds
-/// it, so the sweep can slide the body along what it met.
-///
-/// `normal` points away from what was hit, towards the body. Only the sweep uses
-/// this now. The same contact is gathered and worked over again with everything
-/// else, per spec 0033, which is what lets the floor under a stack answer what
-/// is standing on it; this pass is what lets a body slide along a wall inside
-/// one step, which needs the velocity before the next sweep.
-///
-/// Rolling resistance is charged here and nowhere else. It is a cost of rolling
-/// on a surface, and spec 0031 puts rolling between two bodies out of its scope,
-/// so the gathered body pairs must not charge it. Charging it in both places
-/// came to double rent, and charging it once a pass came to eight times.
+/// it, so the sweep can slide the body along what it met. `normal` points away
+/// from what was hit, towards the body. Only the sweep uses this now. The same
+/// contact is gathered and worked over again with everything else, per spec
+/// 0033, so the floor under a stack answers what is standing on it. This pass
+/// is what lets a body slide along a wall inside one step. Rolling resistance
+/// is charged here and nowhere else. It is a cost of rolling on a surface, and
+/// spec 0031 puts rolling between two bodies out of its scope, so the gathered
+/// body pairs must not charge it. Charging it in both places came to double
+/// rent, and charging it once a pass came to eight times.
 fn resolve(
     body: &mut Body,
     other: Option<&mut Body>,
@@ -981,17 +971,14 @@ fn resolve(
     }
 }
 
-/// Takes a share of a body's spin away for rolling on something, per spec 0031.
-///
-/// A couple against the spin rather than a drag on the velocity. A drag would
-/// slow a ball that is sliding and a ball that is rolling by the same amount,
-/// and a ball in mid air too. This only touches something that is turning, and
-/// friction at the contact already trades spin and velocity for each other, so
-/// slowing the spin slows the ball through the thing that was already joining
-/// them.
-///
-/// `along_normal` is the impulse into the surface, so a heavy ball pays more
-/// than a light one and one barely touching pays almost nothing.
+/// Takes a share of a body's spin away for rolling on something, per spec
+/// 0031. A couple against the spin rather than a drag on the velocity. A drag
+/// would slow a ball that is sliding and a ball that is rolling by the same
+/// amount, and a ball in mid air too. This only touches something that is
+/// turning, and friction at the contact already trades spin and velocity for
+/// each other, so slowing the spin slows the ball too. `along_normal` is the
+/// impulse into the surface, so a heavy ball pays more than a light one and
+/// one barely touching pays almost nothing.
 fn slow_the_roll(body: &mut Body, along_normal: f32) {
     // A block does not roll, it tips, and the whole of this is worked out from
     // the contact being one radius from the middle. A game that sets a rolling
@@ -1043,28 +1030,20 @@ fn skew(v: Vec3) -> Mat3 {
     )
 }
 
-/// Turns a body and works out what that does to its spin, per spec 0034.
-///
-/// A thing turning with nothing touching it keeps its angular momentum, not its
+/// Turns a body and works out what that does to its spin, per spec 0034. A
+/// thing turning with nothing touching it keeps its angular momentum, not its
 /// angular velocity, and those are the same only when it resists turning the
-/// same way about every axis. A block does not, so left alone it wobbles, and a
-/// block spun about its middle axis tumbles end over end whatever it was given.
-///
-/// Euler's equation, `I ω̇ + ω × I ω = 0`, taken in the body's own frame where
-/// `I` is three numbers on a diagonal and does not move. Solved implicitly, by
-/// one Newton step on
-///
-/// ```text
-/// f(ω') = I ω' - I ω + dt (ω' × I ω')
-/// ```
-///
-/// Both cheaper ways were tried and both are wrong in ways you can watch.
-/// Stepping `ω̇ = -I⁻¹(ω × I ω)` forwards gained nine and a half percent of
-/// angular momentum in five seconds. Carrying the momentum instead and reading
-/// `ω` back from it held momentum to four decimals and let the energy go from
-/// 16 to 82 over the same five seconds, because nothing stopped the body
-/// settling onto its easy axis, which is what a real one does only when
-/// something is taking energy out of it.
+/// same way about every axis. A block does not, so left alone it wobbles, and
+/// a block spun about its middle axis tumbles end over end whatever it was
+/// given. Euler's equation, `I ω̇ + ω × I ω = 0`, taken in the body's own
+/// frame where `I` is three numbers on a diagonal and does not move. Solved
+/// implicitly, by one Newton step on ```text f(ω') = I ω' - I ω + dt (ω' × I
+/// ω') ``` Both cheaper ways were tried and both are wrong in ways you can
+/// watch. Stepping `ω̇ = -I⁻¹(ω × I ω)` forwards gained nine and a half
+/// percent of angular momentum in five seconds. Carrying the momentum instead
+/// and reading `ω` back from it held momentum to four decimals and let the
+/// energy go from 16 to 82, because nothing stopped the body settling onto its
+/// easy axis.
 fn turn(body: &mut Body, dt: f32) {
     if body.inverse_mass <= 0.0 || body.shape.even() {
         body.orientation = turned(body.orientation, body.spin, dt);
@@ -1166,18 +1145,14 @@ fn unstick(one: &mut Body, other: &mut Body, normal: Vec3, overlap: f32) {
     other.position -= push * other.shoved_by();
 }
 
-/// One step of the world: gravity, movement, and what that broke.
-///
-/// Every pair is tested, because there is no broad phase. Tens of bodies are
-/// fine and thousands are not.
-/// One step, remembering nothing and putting nothing aside: exactly what every
-/// game had before spec 0036, and what a scene of a few bodies that are not
-/// standing on each other wants.
-///
-/// Sleeping is off here on purpose rather than by omission. It cuts the last of
-/// a roll off, which is right for a tower and wrong for a pool table: poolhall
-/// had a ball dribbling towards a pocket fall asleep a hand short of it the
-/// first time this shipped with sleeping on for everyone.
+/// One step of the world: gravity, movement, and what that broke. Every pair
+/// is tested, because there is no broad phase. Tens of bodies are fine and
+/// thousands are not. One step, remembering nothing and putting nothing aside:
+/// exactly what every game had before spec 0036, and what a scene of a few
+/// bodies that are not standing on each other wants. Sleeping is off here on
+/// purpose rather than by omission. It cuts the last of a roll off, which is
+/// right for a tower and wrong for a pool table. Poolhall had a ball dribbling
+/// towards a pocket fall asleep a hand short of it.
 pub fn step(bodies: &mut [Body], world: &[Aabb], gravity: Vec3, dt: f32) {
     Solver {
         sleeps: false,
@@ -1195,20 +1170,16 @@ struct Remembered {
     pushed: f32,
 }
 
-/// A step that remembers the last one, per spec 0036.
-///
-/// Spec 0033 starts every contact at zero each step and spends its passes
-/// rediscovering the weight of whatever is standing on it. One body on a floor
-/// finds that in a pass or two. A block at the bottom of a tower is holding up
-/// nineteen more, and the passes needed to find that from nothing grow with the
-/// height, which is why a tall stack sinks and shivers on a solver that
-/// otherwise works. Starting each contact at what it ended on is the difference
-/// between a tower and a pile.
-///
-/// A game that keeps one of these across frames gets that. The free `step` makes
-/// a fresh one every call and so remembers nothing, which is what every game
-/// written before this had and is fine for a handful of bodies that are not
-/// standing on each other.
+/// A step that remembers the last one, per spec 0036. Spec 0033 starts every
+/// contact at zero each step and spends its passes rediscovering the weight of
+/// whatever is standing on it. One body on a floor finds that in a pass or
+/// two. A block at the bottom of a tower is holding up nineteen more, and the
+/// passes needed to find that from nothing grow with the height. So a tall
+/// stack sinks and shivers on a solver that otherwise works. Starting each
+/// contact at what it ended on is the difference between a tower and a pile. A
+/// game that keeps one of these across frames gets that. The free `step` makes
+/// a fresh one every call and so remembers nothing, which is fine for a
+/// handful of bodies that are not standing on each other.
 #[derive(Debug, Clone)]
 pub struct Solver {
     /// How many times each contact is worked, per spec 0033. On the solver
@@ -1300,12 +1271,12 @@ impl Solver {
             sleep(bodies, &found, gravity, dt);
         }
 
-        // and the overlap pushed apart afterwards, once, rather than inside the
-        // passes. The world first: a sweep keeps a body out of a wall it is moving
-        // towards and has nothing to say about one that is already inside, and a
-        // column that sank while the solver caught up stayed sunk. It settled a
-        // third of a unit into the floor and sat there however many passes it was
-        // given, because no amount of velocity undoes a position.
+        // and the overlap pushed apart afterwards, once, rather than inside
+        // the passes. The world first. A sweep keeps a body out of a wall it
+        // is moving towards and says nothing about one already inside, so a
+        // column that sank while the solver caught up stayed sunk. It settled
+        // a third of a unit into the floor and sat there however many passes
+        // it was given, because no amount of velocity undoes a position.
         for body in bodies.iter_mut() {
             if body.shoved_by() <= 0.0 {
                 continue;
@@ -1400,9 +1371,9 @@ impl Solver {
     }
 
     /// Only the push along the normal, not the rub across it. A resting stack
-    /// has almost no sideways motion, so the direction friction is working in
-    /// is whatever the last crumb of velocity pointed at, and carrying a number
-    /// over for a direction that is noise is worse than starting it at nothing.
+    /// has almost no sideways motion, so the direction friction works in is
+    /// whatever the last crumb of velocity pointed at. Carrying a number over
+    /// for noise is worse than starting at nothing.
     fn put_away(&mut self, found: &[Contact]) {
         self.remembered.clear();
         self.remembered
@@ -2228,11 +2199,9 @@ mod tests {
     /// Spec 0034: and its angular velocity is the thing that does not. Spun
     /// about its middle axis, a lopsided body tumbles rather than holding its
     /// axis, which is the tennis racket theorem and the whole reason a thrown
-    /// block looks thrown.
-    ///
-    /// Watched the whole way rather than at the end: it comes back round, and
-    /// an earlier version of this test sampled one moment, caught it near where
-    /// it started, and called a body that had swung through a radian still.
+    /// block looks thrown. Watched the whole way rather than at the end. An
+    /// earlier version sampled one moment, caught it near where it started,
+    /// and called a body that had swung through a radian still.
     #[test]
     fn a_lopsided_body_wobbles() {
         let mut lopsided = [Body::block(Vec3::ZERO, vec3(0.2, 0.6, 1.4), 1.0)];
@@ -2829,10 +2798,10 @@ mod tests {
         run(&mut ball_first, &[floor()], DOWN, 300);
         run(&mut block_first, &[floor()], DOWN, 300);
 
-        // Near enough rather than exactly: naming the pair the other way round
-        // puts the contacts in the other order, and a solver that works them in
-        // order gives an answer that differs in the last few bits. The claim is
-        // that it is the same contact, not that floating point is associative.
+        // Near enough rather than exactly. Naming the pair the other way round
+        // puts the contacts in the other order, and the answer differs in the
+        // last few bits. The claim is that it is the same contact, not that
+        // floating point is associative.
         assert!(
             (ball_first[0].position - block_first[1].position).length() < 1e-4,
             "the ball ended at {} one way and {} the other",

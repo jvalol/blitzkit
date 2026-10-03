@@ -14,12 +14,11 @@ This is what makes twenty levels of them sit still for a minute.
 **A contact carries its impulse into the next frame.** Spec 0033 starts every
 contact at zero each step and spends its passes rediscovering the weight of
 whatever is standing on it. One body on a floor finds that in a pass or two. A
-block at the bottom of a tower is holding up seventeen more, and the number of
-passes needed to find that from zero grows with the height, which is why a tall
-stack sinks and shivers on a solver that otherwise works. Starting each contact
-at what it ended on last frame, and applying that total before the first pass,
-is the whole of warm starting, and it is the difference between a tower and a
-pile.
+block at the bottom of a tower is holding up seventeen more, and the passes
+needed to find that from zero grow with the height. So a tall stack sinks and
+shivers on a solver that otherwise works. Starting each contact at what it
+ended on last frame, and applying that total before the first pass, is the
+whole of warm starting, and it is the difference between a tower and a pile.
 
 **Which means a contact has to be recognisable.** An impulse can only be carried
 over if this frame's contact can be matched to last frame's. A contact is
@@ -54,17 +53,16 @@ a quarter turn each level, twenty levels of them. A block is square in section
 and five long, so a level is five by five and the whole thing is hollow from top
 to bottom.
 
-This spec said the game called cairn has this tower. It does not, and cairn's own
-spec 0001 is where that was found: a level of two holds each block above it at
-one end, so taking either one away drops the level above however carefully it is
-done, and a game about taking blocks out has no first move. The lattice is the
+This spec said the game called cairn has this tower. It does not, and cairn's
+own spec 0001 is where that was found. A level of two holds each block above it
+at one end, so taking either away drops the level above however carefully it is
+done. A game about taking blocks out has no first move. The lattice is the
 engine's test, which is what it was good at all along.
 
 That is a harder test than a solid stack and a better one. Each block rests on
 the two below it only at its ends, so every contact is a small patch near a
-corner and the load runs down four columns of corners rather than through a
-mass of touching faces. A manifold that is almost right holds a solid stack up
-anyway and lets a lattice lean.
+corner and the load runs down four columns of them. A manifold that is almost
+right holds a solid stack up anyway and lets a lattice lean.
 
 It is also not the game it will be compared to, which matters. That one is a
 registered mark, and so are the things that make it recognisable: fifty four
@@ -81,10 +79,10 @@ are the things a solver that merely works does not give.
 
 **Where the state lives is the whole design question.** `step` had none, and
 warm starting needs a contact's impulse to survive a frame. So there is a
-`Solver` a game keeps, and the free `step` makes a throwaway one per call, which
-is exactly what every game had before this and is fine for a handful of bodies
-that are not standing on each other. One implementation, two entry points, and
-the difference written down rather than discovered.
+`Solver` a game keeps, and the free `step` makes a throwaway one per call,
+which is fine for a handful of bodies that are not standing on each other. One
+implementation, two entry points, and the difference written down rather than
+discovered.
 
 **Warm starting is the difference the spec claimed and then some.** Measured on
 cairn's twenty level lattice at 120 a second:
@@ -119,12 +117,12 @@ the passes and the step together:
 ```
 
 Eight was the default on the strength of that, and it was the wrong reading of
-it. A tower is the easy case for a low pass count, because warm starting carries
-the load and the passes only have to hold it. A heap has no load to carry over
-and eight leaves it shivering: a pile of fifty four blocks goes on moving for 58
-seconds where sixteen settles it in 7, and cascada's fallen figure of ninety two
-never goes quiet at all, because 75 of them keep crossing the sleep threshold
-and the group's clock never reaches half a second.
+it. A tower is the easy case for a low pass count, because warm starting
+carries the load and the passes only have to hold it. A heap has no load to
+carry over and eight leaves it shivering. A pile of fifty four blocks goes on
+moving for 58 seconds where sixteen settles it in 7. Cascada's fallen figure of
+ninety two never goes quiet at all: 75 of them keep crossing the sleep
+threshold, so the group's clock never reaches half a second.
 
 So the default is thirty two now, which is where spec 0033 measured a five high
 column converging and where a heap stops twitching. A busy step on fifty four

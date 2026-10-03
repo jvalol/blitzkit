@@ -1,19 +1,14 @@
 //! A column of spheres, a pyramid of them, and a heap of blocks, standing on a
-//! floor. Two specs in one scene: 0033, because a contact worked once holds
-//! nothing up and a stack built on single-pass resolution sinks through itself,
-//! and 0035, because a block resting on a face needs the four places it touches
-//! and a single point lets it see-saw from corner to corner.
-//!
-//! `cargo run --release --example stacking`
-//!
-//! Click a sphere to shove it away from the camera, K takes the pyramid's rails
-//! out and puts them back, space builds the whole thing again, drag with the
-//! right button to swing the camera around, scroll to zoom, and escape quits.
-//!
-//! The readout counts each pile in spheres and blocks rather than units, since
-//! five high and one row say at a glance what 4.54 and 0.50 do not, and carries
-//! the one number these specs exist to keep near zero: how far the lowest body
-//! has sunk into whatever it is on.
+//! floor. Two specs in one scene. 0033, because a contact worked once holds
+//! nothing up and a stack sinks through itself. 0035, because a block resting
+//! on a face needs the four places it touches, and a single point lets it see-
+//! saw. `cargo run --release --example stacking` Click a sphere to shove it
+//! away from the camera, K takes the pyramid's rails out and puts them back,
+//! space builds the whole thing again, drag with the right button to swing the
+//! camera around, scroll to zoom, and escape quits. The readout counts each
+//! pile in spheres and blocks rather than units, since five high and one row
+//! say at a glance what 4.54 and 0.50 do not. It also carries the number these
+//! specs exist to keep near zero: how far the lowest body has sunk.
 
 use blitzkit::camera::Camera;
 use blitzkit::collision::{Aabb, Ray};
@@ -37,37 +32,27 @@ const ROWS: usize = 4;
 /// into contact rather than a stack that was already resolved.
 const GAP: f32 = 0.01;
 const GRAVITY: f32 = -9.81;
-/// How wide the floor is, corner to corner, for both the slab that collides and
-/// the plane that is drawn. One number because they were two: the slab was 40
-/// across and the plane mesh is a unit square, so scaling it by 20 drew half the
-/// floor that was there and balls rolled ten units into the black before they
-/// fell.
+/// How wide the floor is, corner to corner, for both the slab that collides
+/// and the plane that is drawn. One number because they were two. The slab was
+/// 40 across and the plane mesh is a unit square, so scaling it by 20 drew
+/// half the floor that was there, and balls rolled ten units into the black
+/// before they fell.
 const FLOOR: f32 = 28.0;
 /// Below this a sphere has left for good. Without it the readout went on
 /// reporting a ball eight thousand units down and two minutes into a fall, and
 /// the solver went on paying for it.
 const LOST: f32 = -20.0;
-/// What a roll costs, per spec 0031. The default is zero, meaning a ball that is
-/// rolling rolls for ever, and these spheres left at zero crossed the whole
-/// floor when the rails came out: a four row pyramid going flat has its top
-/// sphere's two and a half units of height to spend, and nothing was charging
-/// for it.
-///
-/// Measured on this floor, a shove of 4.0 against how far it gets, and the
-/// pyramid with its rails pulled against how wide it ends up:
-///
-/// ```text
-/// 0.0   travels 71.5   spreads 58.6
-/// 0.05          11.8            7.3
-/// 0.1            6.0            5.1
-/// 0.15           4.0            4.2
-/// 0.5            1.4            3.6
-/// ```
-///
-/// 0.5 is carom's number for a ring a few units across, and here it stopped a
-/// shoved sphere inside three of its own widths. 0.1 is poolhall's: a shove
-/// crosses a good third of the floor and the loose pile still ends up a long way
-/// short of the column.
+/// What a roll costs, per spec 0031. The default is zero, meaning a rolling
+/// ball rolls for ever, and these left at zero crossed the whole floor when
+/// the rails came out. A four row pyramid going flat has two and a half units
+/// of height to spend, and nothing was charging for it. Measured on this
+/// floor, a shove of 4.0 against how far it gets, and the pyramid with its
+/// rails pulled against how wide it ends up: ```text 0.0 travels 71.5 spreads
+/// 58.6 0.05 11.8 7.3 0.1 6.0 5.1 0.15 4.0 4.2 0.5 1.4 3.6 ``` 0.5 is carom's
+/// number for a ring a few units across, and here it stopped a shoved sphere
+/// inside three of its own widths. 0.1 is poolhall's: a shove crosses a good
+/// third of the floor and the loose pile still ends up a long way short of the
+/// column.
 const ROLLING: f32 = 0.1;
 /// What a shove is worth let go at once, and wound to the end. Neither is the
 /// speed a sphere leaves at: the strike lands on the surface, so friction spends
@@ -101,11 +86,10 @@ const HARDEST: f32 = 18.0;
 const WINDING: f32 = 1.5;
 /// The two piles sit at opposite ends of the floor rather than beside each
 /// other. A four row pyramid has its top sphere two and a half units up, and a
-/// pile that flat spreads with every bit of that: at seven apart it reached the
-/// column and took it down inside ten seconds, which is a fine thing to watch
-/// but not while the column is the control.
-/// Half a block, so one is 1.2 long, 0.4 thick and 0.8 wide: clearly not a cube,
-/// so which way up it lands is something you can see.
+/// flat pile spreads with every bit of it. At seven apart it reached the
+/// column and took it down inside ten seconds. Half a block, so one is 1.2
+/// long, 0.4 thick and 0.8 wide: clearly not a cube, so which way up it lands
+/// is something you can see.
 const BLOCK: Vec3 = vec3(0.6, 0.2, 0.4);
 const HEAP_AT: f32 = -1.0;
 const COLUMN_AT: f32 = -6.5;
@@ -153,8 +137,7 @@ struct Stacking {
     /// The ray the last pick was made along, to shove along.
     aim: Option<Ray>,
     /// The sphere being wound up and where on it the click landed, kept as an
-    /// offset from its middle rather than a point, so it still means the same
-    /// place if the sphere moves while the button is down.
+    /// offset from its middle so it means the same place if the sphere moves.
     winding: Option<(usize, Vec3)>,
     /// How far through the wind, from none to all of it. Power is read off this
     /// rather than added to directly, so the curve lives in one place.
@@ -490,10 +473,9 @@ impl Game for Stacking {
 
         // The column warms through its height and the pyramid cools through
         // its own, so which sphere is which stays readable while they move.
-        // Which pile a sphere came from is read from the tag beside it and not
-        // from its index: one going over the edge shifts every index after it,
-        // and a pyramid sphere sliding down into the column's numbers was drawn
-        // orange where it stood.
+        // Which pile a sphere came from is read from the tag beside it, not
+        // from its index. One going over the edge shifts every index after it,
+        // and a pyramid sphere once drew orange where it stood.
         for (which, body) in self.bodies.iter().enumerate() {
             let up = (body.position.y / 5.0).clamp(0.0, 1.0);
             let mut colour = match self.piles[which] {
@@ -502,8 +484,8 @@ impl Game for Stacking {
                 Pile::Heap => vec4(0.55, 0.75 + up * 0.2, 0.35, 1.0),
             };
             // The one under the cursor goes pale, so a click is aimed rather
-            // than hopeful, and the one being wound up runs to red, which is
-            // the only reading of how hard it is about to be hit.
+            // than hopeful. The one being wound up runs to red, which is the
+            // only reading of how hard it will be hit.
             if self.winding.map(|(at, _)| at) == Some(which) {
                 let wound = ((self.power - SOFTEST) / (HARDEST - SOFTEST)).clamp(0.0, 1.0);
                 colour = colour.lerp(vec4(1.0, 0.12, 0.08, 1.0), wound);
@@ -588,12 +570,12 @@ impl Game for Stacking {
                 // Aimed on release rather than on the press, so a sphere can be
                 // wound up and then pointed somewhere.
                 if let (Some((which, off)), Some(ray)) = (self.winding.take(), self.aim) {
-                    // Flattened, because the camera looks down at the floor at
-                    // about 24 degrees and a shove straight down the ray put a
-                    // quarter of itself into the ground: 4.6 units of travel
-                    // against 6.0 for the same force sent along the floor. Where
-                    // on the sphere it landed is kept, so high on one still rolls
-                    // it forward and low still drags it back.
+                    // Flattened, because the camera looks down about 24
+                    // degrees and a shove straight down the ray put a quarter
+                    // of itself into the ground: 4.6 units of travel against
+                    // 6.0 along the floor. Where on the sphere it landed is
+                    // kept, so high on one still rolls it forward and low
+                    // still drags it back.
                     let way = vec3(ray.direction.x, 0.0, ray.direction.z).normalize_or_zero();
                     let at = self.bodies[which].position + off;
                     self.bodies[which].strike(way * self.power, at);
