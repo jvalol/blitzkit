@@ -60,11 +60,10 @@ not care about.
 - A cursor outside the window still gives a ray. — `camera::tests::a_cursor_off_the_edge_still_gives_a_ray`
 - A ray through a box's centre hits it. — `camera::tests::a_ray_through_a_box_hits_it`
 
-The round trip one is the load-bearing test. Sign errors in this arithmetic
-survive every check that looks at one axis at a time, because y down against y
-up and a clip space with depth 0 at the near plane are each one flipped sign,
-and a projection followed by its own inverse catches what eyeballing a direction
-does not.
+The round trip one is the load-bearing test. Sign errors here survive every
+check that looks at one axis at a time. Y down against y up, and a clip space
+with depth 0 at the near plane, are each one flipped sign. A projection
+followed by its own inverse catches what eyeballing a direction does not.
 
 ### Verified by hand
 

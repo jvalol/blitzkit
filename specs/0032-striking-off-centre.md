@@ -15,14 +15,15 @@ input in its Out of scope. That was right for marble and for carom: a marble is
 flicked with a thumb and the thumb has no business reaching inside the engine.
 
 Pool is the game where it is the whole skill. A cue ball struck in the middle
-goes where it is pointed and stops where it hits; struck low or high it goes
-somewhere else afterwards, and choosing that is most of what a player is doing.
-Nine ball without draw and follow is a flatter game than nine ball.
+goes where it is pointed and stops where it hits. Struck low or high it goes
+somewhere else afterwards, and choosing that is most of the game. Nine ball
+without draw and follow is a flatter game than nine ball.
 
 `Body::apply` already does this arithmetic. It takes an impulse and a point to
-apply it at, adds the linear part to the velocity and the turning part to the
-spin, and the contact solver has used it from the start. This spec is mostly
-making it something a game can reach, and saying what the rules are when it does.
+apply it at, and adds the linear part to the velocity and the turning part to
+the spin. The contact solver has used it from the start. This spec is mostly
+making it something a game can reach, and saying what the rules are when it
+does.
 
 ## Behavior
 
@@ -58,11 +59,11 @@ step. A strike happens at the moment it is asked for.
 ## What this gets, and what it does not
 
 **Draw and follow, yes.** Striking below the middle leaves the ball spinning
-backwards. The surface at the point of contact with the table is then moving
-forward relative to the ball, so 0030's friction acts backwards: the ball slows,
-the spin is eaten, and with enough of it the ball comes back. Striking high does
-the opposite and the ball runs on after a collision. Both come out of the model
-that is already there, with nothing added.
+backwards. The surface at the contact point is then moving forward relative to
+the ball, so 0030's friction acts backwards. The ball slows, the spin is eaten,
+and with enough of it the ball comes back. Striking high does the opposite and
+the ball runs on after a collision. Both come out of the model that is already
+there, with nothing added.
 
 Measured, striking one ball into another four away at the same speed and reading
 where the striker ended up. They touch when it has gone 3.0. Struck at the bottom
@@ -80,17 +81,17 @@ is, and both numbers belong to the game rather than to this spec.
 
 These were 2.9, 5.9 and 8.3 when this spec was written, against a solver that
 took one pass at each contact, and 2.6, 6.2 and 9.3 after spec 0033 made the
-friction converge across several. Spec 0034 moved them again, by a tenth or two:
-a sphere's inertia tensor is the same number it always was, but it goes through a
-matrix multiply now rather than a scalar one and rounds differently. Remeasured
-each time rather than left to rot.
+friction converge across several. Spec 0034 moved them again, by a tenth or
+two. A sphere's inertia tensor is the same number, but it goes through a matrix
+multiply now and rounds differently. Remeasured each time rather than left to
+rot.
 
 **Side off a cushion, yes.** A cushion's normal is horizontal, so a spin about
-the vertical is no longer about the contact normal, and it has somewhere to act.
-Measured against spec 0030 as it stands: a ball run into a wall at 6 with no
-spin comes off with no sideways velocity at all, and the same ball spinning at 30
-about the vertical comes off with 3.46 across and ends up 0.43 along the wall
-from where the other one did. That is english, and it already works.
+the vertical is no longer about the contact normal, and it has somewhere to
+act. Measured against spec 0030 as it stands. A ball run into a wall at 6 with
+no spin comes off with no sideways velocity. The same ball spinning at 30 about
+the vertical comes off with 3.46 across, and ends 0.43 along the wall from
+where the other did. That is english, and it already works.
 
 **Side on the cloth, no.** The contact between a sphere and a flat table is a
 single point, that point lies on the vertical axis, and a spin about an axis

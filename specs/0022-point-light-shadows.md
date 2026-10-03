@@ -30,10 +30,10 @@ one axis, in the order +x, -x, +y, -y, +z, -z.
 
 **Which face a direction belongs to is arithmetic.** The largest component of
 the direction picks the face; the other two, divided by it, give the place on
-that face. That is a dozen lines, it runs on both sides, and it is the part most
-likely to be subtly wrong, so it is tested against the projections themselves:
-for any direction, the face and place this picks must be where that face's
-matrix actually puts a point in that direction.
+that face. That is a dozen lines, it runs on both sides, and it is the part
+most likely to be subtly wrong. So it is tested against the projections
+themselves: for any direction, the face and place this picks must be where that
+face's matrix puts a point in that direction.
 
 **What is stored is distance, not depth.** A depth buffer holds whatever its own
 projection produced, so reading one back means knowing which projection wrote

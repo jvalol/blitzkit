@@ -17,25 +17,24 @@ whatever is standing on it. One body on a floor finds that in a pass or two. A
 block at the bottom of a tower is holding up seventeen more, and the passes
 needed to find that from zero grow with the height. So a tall stack sinks and
 shivers on a solver that otherwise works. Starting each contact at what it
-ended on last frame, and applying that total before the first pass, is the
-whole of warm starting, and it is the difference between a tower and a pile.
+ended on last frame, and applying that before the first pass, is the whole of
+warm starting. It is the difference between a tower and a pile.
 
-**Which means a contact has to be recognisable.** An impulse can only be carried
-over if this frame's contact can be matched to last frame's. A contact is
-identified by the pair of bodies and by which features touched: which face of
-one against which face, edge, or corner of the other. Matching by position
-instead would drift, and matching by order in the list would be wrong the moment
-anything is removed, which spec 0033's own build got wrong three times in one
-sitting for the same reason.
+**Which means a contact has to be recognisable.** An impulse can only be
+carried over if this frame's contact can be matched to last frame's. A contact
+is identified by the pair of bodies and by which features touched: which face
+of one against which face, edge, or corner of the other. Matching by position
+would drift, and matching by order in the list is wrong the moment anything is
+removed. Spec 0033's own build got that wrong three times in one sitting.
 
-**A body that has stopped stops being integrated.** Spec 0030 put sleeping out of
-scope and said it is a different thing from settling, which is true: settling
-stops a body shivering into a surface, and sleeping stops the engine paying for a
-body that is not doing anything. A tower needs it for a second reason. Even a
-good solver leaves a little error each frame, and a stack accumulates it into a
-slow lean. A body whose speed and spin stay under a threshold for a set time is
-put to sleep: its velocity is zeroed, it is skipped by the integrator, and it
-stops drifting because nothing is moving it.
+**A body that has stopped stops being integrated.** Spec 0030 put sleeping out
+of scope and said it is a different thing from settling, which is true.
+Settling stops a body shivering into a surface; sleeping stops the engine
+paying for one doing nothing. A tower needs it for a second reason. Even a good
+solver leaves a little error each frame, and a stack accumulates it into a slow
+lean. A body whose speed and spin stay under a threshold for a set time is put
+to sleep. Its velocity is zeroed, the integrator skips it, and it stops
+drifting.
 
 **Sleep is a property of a group, not a body.** A block resting on another cannot
 sleep while the one under it is awake, or the sleeping one hangs in the air when
@@ -65,10 +64,10 @@ corner and the load runs down four columns of them. A manifold that is almost
 right holds a solid stack up anyway and lets a lattice lean.
 
 It is also not the game it will be compared to, which matters. That one is a
-registered mark, and so are the things that make it recognisable: fifty four
-blocks, three to a level, eighteen levels, and a block half again as wide as it
-is thick. None of those numbers appear here, and the silhouette is different
-enough to see across a room, since you can see through this one.
+registered mark, and so is what makes it recognisable: fifty four blocks, three
+to a level, eighteen levels, a block half again as wide as it is thick. None of
+those numbers appear here, and the silhouette is different enough to see across
+a room, since you can see through this one.
 
 **The honest bar.** Twenty levels standing still, a block slid out of the middle
 without the tower exploding, and a tower that is pushed over falling like a tower
@@ -145,10 +144,10 @@ It still earns its keep, and the margin is two levels of sag rather than the
 whole tower. It is also what keeps the warm one from moving at all, which is
 what sleeping needs.
 
-**A tower settles and has to.** Every contact is allowed its slop and a tower has
-one at every level, so the sag gathers all the way up: 0.22 over twenty levels,
-about a hundredth of a unit a level against a slop of 0.005, with the rest the
-push-out leaving its sliver on purpose.
+**A tower settles and has to.** Every contact is allowed its slop and a tower
+has one at every level, so the sag gathers all the way up. 0.22 over twenty
+levels, a hundredth of a unit a level against a slop of 0.005, the rest the
+push-out leaving its sliver.
 
 **Sleeping is the solver's, not the engine's, and that is the whole lesson.**
 Switched on for everyone it cut the last of every roll off: a ball creeping

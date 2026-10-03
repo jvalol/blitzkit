@@ -13,9 +13,9 @@ through, and the inside of it is as visible as the outside.
 
 **Twenty copies of itself, each a third the size.** A cube at depth zero is one
 solid. At any greater depth it is the twenty-seven cubes of a three by three by
-three division with seven taken out: the one in the middle, and the one in the
-middle of each of the six faces. What is left is the twenty that touch an edge
-or a corner. Depth `n` is `20^n` cubes.
+three division with seven taken out: the middle one, and the middle of each of
+the six faces. What is left is the twenty that touch an edge or a corner. Depth
+`n` is `20^n` cubes.
 
 **What is drawn is the surface, not the cubes.** Twenty cubes of six faces each
 would be a hundred and twenty faces at depth one, and most of them are pressed
@@ -44,10 +44,10 @@ curvature, and a face should say which way it points.
 | 3 | 8,000 | 18,048 | 38% | 36,096 | 1.0 ms |
 | 4 | 160,000 | 336,384 | 35% | 672,768 | 17.6 ms |
 
-The fourth column is the argument for drawing the surface rather than the cubes.
-At depth four a sponge built as 160,000 separate cubes carries 1.92 million
-triangles; this carries 673 thousand for the same picture, because the other
-65% is pressed against a neighbour where nothing can see it.
+The fourth column is the argument for drawing the surface rather than the
+cubes. At depth four a sponge built as 160,000 separate cubes carries 1.92
+million triangles. This carries 673 thousand for the same picture: the other
+65% is pressed against a neighbour where nothing sees it.
 
 Past the cap it is clamped, not refused.
 

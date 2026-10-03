@@ -78,8 +78,8 @@ impl SoundSystem {
                 // The first sound through the output comes out sharp when it
                 // has to be resampled, so a tenth of a second of silence goes
                 // first and takes that for itself. 44100 because that is what
-                // the games' samples are, and a device already running at it
-                // has nothing to resample and nothing to get wrong.
+                // the games' samples are, and a device already there has
+                // nothing to resample.
                 player.append(rodio::source::Zero::new_samples(
                     PRIMING_CHANNELS,
                     PRIMING_RATE,

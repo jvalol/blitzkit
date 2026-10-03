@@ -54,10 +54,10 @@ slice next door. Drawn at roughly one texel to the pixel it is invisible. Drawn
 much smaller, where a low mip level's texel spans a wide stretch of the image,
 it shows as a fringe of the neighbour along every seam.
 
-A game slicing one image into tiles that sit side by side has three ways out and
-the engine takes none of them for it: draw at or near the source's own size,
-pull the rectangle in by half a texel and accept that half a row is never shown,
-or cut the image into a separate texture per tile and spend the draw calls. The
+A game slicing one image into tiles that sit side by side has three ways out,
+and the engine takes none of them for it. Draw at or near the source's own
+size. Pull the rectangle in by half a texel and accept that half a row is never
+shown. Or cut the image into a texture per tile and spend the draw calls. The
 engine samples the rectangle it is given, because a rectangle that quietly
 becomes a slightly different rectangle is worse to debug than a fringe.
 
@@ -75,8 +75,8 @@ becomes a slightly different rectangle is worse to debug than a fringe.
 - No quads is no draws. — `geometry::tests::nothing_pushed_is_nothing_drawn`
 
 The batching ones are not decoration. Sorting quads by texture is the obvious
-way to cut draw calls and it is wrong here, because without a depth buffer the
-order they are drawn in is the only thing deciding what covers what.
+way to cut draw calls and it is wrong here. Without a depth buffer, the order
+they are drawn in is the only thing deciding what covers what.
 
 ### Verified by hand
 
@@ -96,6 +96,6 @@ How the GPU samples cannot be tested on the CPU, so these need a window.
 Rotating a quad, which is a separate change to the vertex layout. Nine-slice
 scaling. Texture atlases as an engine concept, with names for regions and a
 packer to build them: a game that wants one keeps its own rectangles, which is
-all an atlas is from here. A second sampler for 2D, which would be the way to
-turn mipmapping off for quads drawn at one to one, and is worth revisiting only
-if the seam above turns out to matter in practice.
+all an atlas is from here. A second sampler for 2D, which is how mipmapping
+would be turned off for quads drawn one to one. Worth revisiting only if the
+seam above turns out to matter.

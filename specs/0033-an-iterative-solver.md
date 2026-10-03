@@ -43,11 +43,11 @@ to eight times the grip, which scrubbed the spin clean off a ball at the moment
 it was struck.
 
 **Each contact remembers what it has applied this step**, and that total can
-never go negative. Each pass works out a correction and clamps the running total
-at zero rather than clamping the correction, because a contact that over-pushed
-on an early pass must be allowed to take some back, and a contact that is done
-must not start pulling. Getting this backwards is the classic way an iterative
-solver glues bodies together.
+never go negative. Each pass works out a correction and clamps the running
+total at zero rather than the correction. A contact that over-pushed on an
+early pass has to be allowed to take some back, and one that is done must not
+start pulling. Getting this backwards is the classic way an iterative solver
+glues bodies together.
 
 **Friction is clamped against the running total**, not against one pass's share,
 for the same reason: a pass sees only part of the push and would allow only part
@@ -78,11 +78,11 @@ folded into the passes. Pushing positions about inside the loop adds energy the
 velocities never agreed to, and the result is a stack that breathes.
 
 **The static world is pushed apart too**, which spec 0030 never did. A sweep
-keeps a body out of a wall it is moving towards and has nothing to say about one
-that is already inside, and the column that sank while the solver was catching up
-stayed sunk: it settled a third of a unit into the floor and sat there however
-many passes it was given. No amount of velocity undoes a position. Finding that
-took measuring the pass count, which converged to the wrong answer rather than
+keeps a body out of a wall it is moving towards and says nothing about one
+already inside, so the column that sank while the solver was catching up stayed
+sunk. It settled a third of a unit into the floor and sat there however many
+passes it was given. No amount of velocity undoes a position. Finding that took
+measuring the pass count, which converged to the wrong answer rather than
 creeping towards the right one.
 
 **The same inputs still give the same result.** Fixed passes, fixed order,
@@ -150,10 +150,10 @@ rather than left to rot.
 ### Seen
 
 `cargo run --release --example stacking` is this spec with nothing else in the
-way: a column five high and a pyramid four rows deep, with a readout of how far
-the bottom sphere has gone below where it should rest. Twelve seconds in it reads
--0.012, and the column reaches 4.45 of the 4.54 it was built to, the rest being
-the slop every contact is allowed.
+way: a column five high, a pyramid four rows deep, and a readout of how far the
+bottom sphere has sunk. Twelve seconds in it reads -0.012, and the column
+reaches 4.45 of the 4.54 it was built to, the rest being the slop every contact
+is allowed.
 
 The pyramid has a rail either side of its bottom row, because loose spheres will
 not hold one up on their own. Each ball sitting in a valley shoves the two
@@ -164,17 +164,17 @@ does not move. That is geometry rather than the solver, and a rack has a frame
 for the same reason.
 
 The spheres are given spec 0031's rolling resistance, which is not decoration.
-Left at the default of zero they roll for ever, and a four row pyramid going flat
-has its top sphere's two and a half units of height to spend: the pile crossed
-the whole floor, knocked the column down from eleven units away, and put three
-spheres over the edge.
+Left at the default of zero they roll for ever, and a four row pyramid going
+flat has two and a half units of height to spend. The pile crossed the whole
+floor, knocked the column down from eleven units away, and put three spheres
+over the edge.
 
 Clicking a sphere shoves it away from the camera, at the point the ray met it, so
 a click off centre spins it too. It is the quickest way to find out whether a
 stack that is standing is standing for a good reason.
 
-marble, carom and poolhall were run and looked at after this landed: the marble
+marble, carom and poolhall were run and looked at after this landed. The marble
 rests on its platform, carom's cross of thirteen sits as it was dealt, and
-poolhall's rack of fifteen stands intact rather than shoving itself apart, which
-was the one at real risk, since fifteen touching bodies now get eight passes of
-push instead of one. Whether they still *play* the same is Jake's to say.
+poolhall's rack of fifteen stands intact. The rack was the one at real risk,
+since fifteen touching bodies now get eight passes of push instead of one.
+Whether they still *play* the same is Jake's to say.

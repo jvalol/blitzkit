@@ -43,14 +43,14 @@ twice. Every point that produces is a mix of two it came from, so the rounded
 curve cannot reach further than the one it rounded, which is a property rather
 than a hope and is tested as one.
 
-**The orientations were derived, not recalled.** Three attempts at the
-index-to-cell arithmetic were wrong, and every one of them still visited each
-cell exactly once, so only the adjacency test caught them. The trap each time
-was mixing cell centres up with octant corners. Stated as an invariant instead,
-"a curve through a cube of side `s` enters at cell `(0, 0, 0)` and leaves at
-cell `(s - 1, 0, 0)`, and the cell a child leaves at touches the cell the next
-child enters at", it is a search over signed permutations with one answer. The
-table in the code is that answer.
+**The orientations were derived, not recalled.** Three attempts at the index-
+to-cell arithmetic were wrong, and every one of them still visited each cell
+exactly once, so only the adjacency test caught them. The trap each time was
+mixing cell centres up with octant corners. Stated as an invariant instead, it
+is a search over signed permutations with one answer: a curve through a cube of
+side `s` enters at cell `(0, 0, 0)` and leaves at `(s - 1, 0, 0)`, and the cell
+a child leaves at touches the cell the next child enters at. The table in the
+code is that answer.
 
 **Order is capped at five.** `8^n` is 32,768 points at order five, and a tube of
 eight sides around that is a quarter of a million triangles. Clamped, not

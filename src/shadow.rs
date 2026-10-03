@@ -24,10 +24,10 @@ pub const MIN_BIAS: f32 = 0.00005;
 /// lit surfaces, too much lifts a shadow off what casts it.
 ///
 /// This is depth in the light's clip space, not world units. It was 0.004, and
-/// the sun's box is forty across by default, so that came to about a fifth of a
-/// unit on the ground: a cube in the cubes example stood on a white strip of
-/// lit floor between itself and its own shadow. It can be a twentieth of that
-/// now because the surface is stepped along its normal instead.
+/// the sun's box is forty across by default, so that came to a fifth of a unit
+/// on the ground. A cube in the cubes example stood on a white strip of floor
+/// between itself and its own shadow. It can be a twentieth of that now
+/// because the surface is stepped along its normal instead.
 pub const MAX_BIAS: f32 = 0.0002;
 
 /// What a spot forgives. The numbers the sun used to have, kept where they
@@ -46,10 +46,10 @@ pub fn spot_bias(normal: Vec3, to_light: Vec3) -> f32 {
 /// How far along its own normal a surface is stepped before the sun's map is
 /// asked about it, in texels of that map.
 ///
-/// The same move the lamps make, and for the same reason: slack in depth is
-/// what lifts a shadow off its own wall, and stepping along the surface moves
-/// where the question is asked without moving the answer. It is what pays for
-/// the slack above being small enough not to show.
+/// The same move the lamps make. Slack in depth is what lifts a shadow off its
+/// own wall, and stepping along the surface moves where the question is asked
+/// without moving the answer. It is what pays for the slack above being small
+/// enough not to show.
 pub const NORMAL_STEP: f32 = 1.0;
 
 /// How wide a texel of the sun's map is, in world units.
@@ -138,9 +138,9 @@ pub const SPOT_NEAR: f32 = 0.1;
 /// One matrix taking a world position into a spot's clip space.
 ///
 /// A cone has a direction and an angle, so this is an ordinary perspective
-/// view: the field of view is the whole cone, widened a little so the soft edge
-/// is inside the map rather than clipped by it. Unlike the sun's, this one has
-/// a place to look from.
+/// view. The field of view is the whole cone, widened a little so the soft
+/// edge is inside the map. Unlike the sun's, this one has a place to look
+/// from.
 pub fn spot_view_projection(position: Vec3, direction: Vec3, outer: f32, range: f32) -> Mat4 {
     let direction = direction.normalize_or_zero();
     let direction = if direction.length_squared() < 0.5 {
@@ -229,12 +229,11 @@ pub const POINT_MAP_SIZE: u32 = 512;
 /// Distance as a fraction of the lamp's range, written straight into a depth
 /// buffer by the fragment stage.
 ///
-/// A depth buffer rather than a colour one because the fraction is already
-/// between zero and one, the depth test then keeps the nearest thing the lamp
-/// can see for free, and it can be read back with the same comparison sampler
-/// the sun and the spots use. A colour target would need blending that
-/// [`wgpu::Features::FLOAT32_BLENDABLE`] gates, and this engine asks the device
-/// for no features at all.
+/// A depth buffer rather than a colour one. The fraction is already between
+/// zero and one, the depth test keeps the nearest thing the lamp can see for
+/// free, and the same comparison sampler reads it back. A colour target would
+/// need blending that [`wgpu::Features::FLOAT32_BLENDABLE`] gates, and this
+/// engine asks the device for no features at all.
 pub const POINT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 /// How close to a lamp its faces start.
@@ -379,8 +378,8 @@ pub fn face_and_uv(direction: Vec3) -> Option<(usize, f32, f32)> {
 }
 
 /// What a lamp's map holds for a surface that far from it: a fraction of the
-/// range, so one number means the same thing on all six faces and for every
-/// lamp, and it lands in the nought to one a depth buffer holds.
+/// range. One number then means the same on all six faces and for every lamp,
+/// inside the nought to one a depth buffer holds.
 ///
 /// Matches `fs_point` in `shadow.wgsl`. Keep the two in step.
 pub fn point_distance_fraction(distance: f32, range: f32) -> f32 {
@@ -446,10 +445,9 @@ mod tests {
 
     #[test]
     fn the_suns_step_is_a_texel_or_two() {
-        // enough to clear the map's own coarseness, and no more: stepping a
-        // surface towards the light shrinks its shadow, so a step of several
-        // texels pulls a shadow off the foot of what casts it, which is the
-        // thing this was meant to stop
+        // enough to clear the map's own coarseness, and no more. Stepping a
+        // surface towards the light shrinks its shadow, so several texels
+        // pulls it off the foot of what casts it
         let matrix = light_view_projection(Vec3::NEG_Y, &default_bounds());
         let texel = texel_width(matrix);
         let step = sample_at(Vec3::ZERO, Vec3::Y, matrix, 0.0).length();

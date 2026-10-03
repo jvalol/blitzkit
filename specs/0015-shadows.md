@@ -44,9 +44,9 @@ separate pipeline drawn afterwards, per spec 0009.
 **The slack is small, and the surface is stepped instead.** A comparison has to
 forgive something or a surface stripes itself, and this one forgives depth in
 the light's clip space. Its box is forty across by default, so the old 0.004
-came to about a fifth of a unit on the ground, and forgiving depth says a
-surface is nearer the light than it is: a cube in the cubes example stood on a
-white strip of lit floor between itself and its own shadow.
+came to a fifth of a unit on the ground, and forgiving depth says a surface is
+nearer the light than it is. A cube in the cubes example stood on a white strip
+of floor between itself and its own shadow.
 
 The surface is moved along its own normal before the map is asked about it,
 by a texel or two of the map at that place, which moves where the question is

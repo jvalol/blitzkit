@@ -27,9 +27,9 @@ as a read-only depth attachment and samples it as well, which wgpu allows
 without a copy.
 
 The pass exists because a fragment shader cannot read the depth buffer it is
-writing. It costs a second walk over the geometry and gives some of it back: the
-mesh pass is the expensive one, and with depth already settled it stops shading
-fragments that something in front of them will cover.
+writing. It costs a second walk over the geometry and gives some back. The mesh
+pass is the expensive one, and with depth already settled it stops shading
+fragments that something in front will cover.
 
 **A short march towards the light.** From the point being shaded, step along the
 direction to the light, project each step into the depth buffer, and compare.
@@ -41,12 +41,12 @@ covers what the map cannot resolve and stops, which keeps it cheap and keeps it
 from arguing with the map about distances the map is right about.
 
 **Every pixel takes its steps at a different phase.** All of them stepping at
-exactly the same distances puts the edge of what the march finds on the same few
-surfaces for every one of them, and the boundary comes out as a stipple of lit
-and shadowed pixels rather than a line. Each pixel's march is nudged by a
-fraction of a step, from interleaved gradient noise on its own position: a
-different number for every pixel and the same one every frame, so it does not
-crawl. The edge is spread over the step instead of landing on it.
+exactly the same distances puts the edge of what the march finds on the same
+few surfaces for every one of them, and the boundary comes out as a stipple of
+lit and shadowed pixels rather than a line. Each pixel's march is nudged by a
+fraction of a step, from interleaved gradient noise on its own position. A
+different number per pixel and the same one every frame, so it does not crawl.
+The edge is spread over the step instead of landing on it.
 
 **The darker of the two wins.** Neither overrides the other. The map knows about
 distance and is wrong about contact; the march is the other way round, so the
@@ -61,16 +61,16 @@ live with it should not turn this on.
 **How thick a thing is reckoned grows with distance.** Where a march crosses a
 silhouette it lands on the near face of what it crossed, and the gap between
 that face and the surface behind it grows with how far off the pair is and how
-obliquely the camera sees them. Fixed at a third of a unit, that gap outgrew the
-number a few units out: the march decided it had come out the back of something
-and reported lit, and a white line appeared at the foot of a cube from some
-angles and not from others.
+obliquely the camera sees them. Fixed at a third of a unit, that gap outgrew
+the number a few units out. The march decided it had come out the back of
+something and reported lit, and a white line appeared at the foot of a cube
+from some angles.
 
 **A step that falls off the buffer is lit**, the same forgiving direction spec
 0015 takes when a fragment lands outside the sun's map. So is a step that lands
 so far behind the recorded depth that it is through the back of something
-rather than inside it, which is what stops a thin wall in the foreground
-casting a shadow across everything behind it.
+rather than inside it. That is what stops a thin foreground wall shadowing
+everything behind it.
 
 **Each casting light marches for itself**: the sun, and spec 0022's two lamps,
 so three in the worst frame.

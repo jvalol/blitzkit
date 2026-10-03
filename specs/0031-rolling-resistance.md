@@ -24,10 +24,10 @@ only place the gap is written down at all.
 
 marble has hidden it since. Its coast friction takes a fixed amount off the
 speed every second when the player lets go, which looks exactly like rolling
-resistance and is not: it is part of a drive model, it only applies on the
-ground, and it belongs to that game's feel rather than to the ball. A game where
-nothing is driven cannot borrow it. carom's spec 0001 is that game, and a shot
-there would never end.
+resistance and is not. It is part of a drive model, it only applies on the
+ground, and it belongs to that game's feel. A game where nothing is driven
+cannot borrow it. carom's spec 0001 is that game, and a shot there would never
+end.
 
 ## Behavior
 

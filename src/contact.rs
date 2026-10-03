@@ -30,22 +30,21 @@ pub const CONTACT_THICKNESS: f32 = 0.35;
 
 /// And how much more of it each unit of distance from the camera buys.
 ///
-/// A flat number is wrong at the far end. Where a march crosses a silhouette it
-/// lands on the near face of the thing, and the gap between that face and the
-/// surface behind it grows with distance and with how obliquely the camera sees
-/// them. Fixed at 0.35 that gap outgrew it a few units out, the march decided it
-/// had come out the back of something, and a white line appeared at the foot of
-/// a cube from some angles and not others.
+/// A flat number is wrong at the far end. Where a march crosses a silhouette
+/// it lands on the near face of the thing, and the gap between that face and
+/// the surface behind it grows with distance and with how obliquely the camera
+/// sees them. Fixed at 0.35, that gap outgrew it a few units out and the march
+/// decided it had come out the back of something. A white line appeared at the
+/// foot of a cube from some angles.
 pub const CONTACT_THICKNESS_PER_UNIT: f32 = 0.06;
 
 /// And where that growth stops.
 ///
 /// Unbounded, it stops being about thickness. Twenty units out it reckons
 /// everything within 1.2 units in front of the march as something the march is
-/// inside, and marble's gems float 0.3 above their platform: each one laid a
-/// second, hard edged shadow beside the one the map casts. Nothing in contact
-/// is further in front of the surface than the march is long, so past a point
-/// more tolerance only buys false hits.
+/// inside. Marble's gems float 0.3 above their platform, and each laid a
+/// second shadow. Nothing in contact is further in front of the surface than
+/// the march is long, so past a point more tolerance only buys false hits.
 pub const CONTACT_THICKEST: f32 = 0.6;
 
 /// How thick a thing has to be reckoned at this distance from the camera.
@@ -94,10 +93,10 @@ pub fn step_at(n: u32) -> f32 {
 
 /// The same, with the whole march nudged by a fraction of a step.
 ///
-/// Every pixel taking its steps at exactly the same distances puts the edge of
-/// what the march finds on the same few surfaces for all of them, and the
-/// boundary comes out as a stipple of lit and shadowed pixels rather than a
-/// line. A different nudge per pixel spreads that over the step instead.
+/// Every pixel taking its steps at the same distances puts the edge of what
+/// the march finds on the same few surfaces, and the boundary comes out as a
+/// stipple rather than a line. A different nudge per pixel spreads that over
+/// the step instead.
 ///
 /// `jitter` runs from just above zero to one. Matches `contact_shadow` in
 /// `mesh.wgsl`. Keep the two in step.
@@ -121,21 +120,20 @@ pub fn step_is_shadow(here: f32, recorded: f32, marched: f32) -> bool {
 ///
 /// `here` is how far off the camera the surface doing the marching is. A thing
 /// in contact with it is within a march of it, so it cannot be much further
-/// towards the camera than that. Anything that is, is in the foreground and has
-/// no business shadowing what is behind it: marble's gems float 0.3 above their
-/// platform and each laid a second, hard edged shadow next to the one the map
-/// casts, because the march found the gem in front of itself and called it
-/// contact.
+/// towards the camera than that. Anything that is, is in the foreground and
+/// has no business shadowing what is behind it. Marble's gems float 0.3 above
+/// their platform, and each laid a second hard edged shadow beside the one the
+/// map casts.
 pub fn close_enough(here: f32, recorded: f32) -> bool {
     here - recorded <= CONTACT_REACH + CONTACT_THICKNESS
 }
 
 /// One march, as a light factor: one lit, zero shadowed.
 ///
-/// `look_up` is given how far along the march a step is and answers with what
-/// the depth buffer holds there and how far off that step is, or nothing at all
-/// when the step lands outside the buffer. Outside is lit, the same forgiving
-/// direction spec 0015 takes for a fragment outside the sun's map.
+/// `look_up` takes how far along the march a step is and answers with what the
+/// depth buffer holds there and how far off the step is, or nothing when the
+/// step lands outside the buffer. Outside is lit, the same forgiving direction
+/// spec 0015 takes for a fragment outside the sun's map.
 pub fn march(here: f32, look_up: impl Fn(f32) -> Option<(f32, f32)>) -> f32 {
     for n in 1..=CONTACT_STEPS {
         let Some((recorded, marched)) = look_up(step_at(n)) else {

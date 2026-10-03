@@ -237,13 +237,13 @@ pub fn sweep_sphere(sphere: &Sphere, movement: Vec3, box_: &Aabb) -> Option<Hit>
 
     let grown = box_.expanded(Vec3::splat(sphere.radius));
 
-    // Already in contact, which is what resting on a floor is, and also what
-    // sitting at its edge is: the sphere can be clear of the box while its
-    // center is still inside the grown one. A ray from in there reports a hit
-    // at no distance with whichever axis the slab test looked at first, which
-    // would block rolling along a floor, and off the end of it, as surely as
-    // falling through it. Decide by direction instead: into the surface is
-    // blocked, away from it or along it is free.
+    // Already in contact, which is what resting on a floor is, and what
+    // sitting at its edge is. The sphere can be clear of the box while its
+    // center is inside the grown one. A ray from in there reports a hit at no
+    // distance, on whichever axis the slab test looked at first. That blocks
+    // rolling along a floor as surely as falling through it. Decide by
+    // direction instead: into the surface is blocked, away from it or along it
+    // is free.
     if grown.contains_point(sphere.center) {
         let away = nearest_face(&grown, sphere.center);
 
@@ -264,9 +264,9 @@ pub fn sweep_sphere(sphere: &Sphere, movement: Vec3, box_: &Aabb) -> Option<Hit>
         return None;
     }
 
-    // Which faces of the grown box the entry point sits beyond tells us what
-    // the sphere is really about to meet: one axis is a flat face, two is a
-    // rounded edge, three is a rounded corner.
+    // Which faces of the grown box the entry point sits beyond says what the
+    // sphere is about to meet: one axis a flat face, two a rounded edge, three
+    // a rounded corner.
     let point = ray.at(entry.distance);
     let mut beyond = [false; 3];
     let mut count = 0;
@@ -389,9 +389,9 @@ fn nearest_end(corner: Vec3, free: usize, box_: &Aabb, along: f32) -> Vec3 {
 ///
 /// This is the contact normal for a sphere already touching a box, taken from
 /// the box grown by its radius. Taking it from the nearest point on the box
-/// itself looks reasonable and is wrong: a ball resting level with the top of a
-/// box reads as pressed into its side, so rolling from one platform onto
-/// another at the same height gets blocked at the seam.
+/// itself looks reasonable and is wrong. A ball resting level with the top of
+/// a box reads as pressed into its side, so rolling from one platform to
+/// another at the same height blocks at the seam.
 fn nearest_face(box_: &Aabb, point: Vec3) -> Vec3 {
     let to_min = point - box_.min;
     let to_max = box_.max - point;
@@ -459,9 +459,8 @@ pub fn move_and_slide(sphere: Sphere, velocity: Vec3, dt: f32, colliders: &[Aabb
 
 /// A box that can be turned, which an `Aabb` cannot. Spec 0035.
 ///
-/// The static world is made of `Aabb`s and they are read as these with no
-/// rotation, so a block against a wall and a block against a block are the same
-/// test rather than two that have to be kept agreeing.
+/// The static world is made of `Aabb`s, read as these with no rotation, so a
+/// block against a wall and a block against a block are the same test.
 #[derive(Debug, Clone, Copy)]
 pub struct Obb {
     pub at: Vec3,
@@ -543,8 +542,8 @@ impl Touch {
 
 /// Only take a cross-product axis over a face axis when it is clearly better.
 /// Two boxes lying square on each other have nine cross axes that tie with the
-/// face, and a tie broken the wrong way gives one contact point where four were
-/// wanted, which is a resting box that rocks.
+/// face. A tie broken the wrong way gives one contact point where four were
+/// wanted, and the box rocks.
 const PREFER_A_FACE: f32 = 1.01;
 
 /// Whether two boxes overlap, and where, by separating axes. Spec 0035.

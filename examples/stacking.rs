@@ -2,13 +2,18 @@
 //! floor. Two specs in one scene. 0033, because a contact worked once holds
 //! nothing up and a stack sinks through itself. 0035, because a block resting
 //! on a face needs the four places it touches, and a single point lets it see-
-//! saw. `cargo run --release --example stacking` Click a sphere to shove it
-//! away from the camera, K takes the pyramid's rails out and puts them back,
-//! space builds the whole thing again, drag with the right button to swing the
-//! camera around, scroll to zoom, and escape quits. The readout counts each
-//! pile in spheres and blocks rather than units, since five high and one row
-//! say at a glance what 4.54 and 0.50 do not. It also carries the number these
-//! specs exist to keep near zero: how far the lowest body has sunk.
+//! saw.
+//!
+//! `cargo run --release --example stacking`
+//!
+//! Click a sphere to shove it away from the camera, K takes the pyramid's rails
+//! out and puts them back, space builds the whole thing again, drag with the
+//! right button to swing the camera around, scroll to zoom, and escape quits.
+//!
+//! The readout counts each pile in spheres and blocks rather than units, since
+//! five high and one row say at a glance what 4.54 and 0.50 do not. It also
+//! carries the number these specs exist to keep near zero: how far the lowest
+//! body has sunk.
 
 use blitzkit::camera::Camera;
 use blitzkit::collision::{Aabb, Ray};
@@ -45,14 +50,23 @@ const LOST: f32 = -20.0;
 /// What a roll costs, per spec 0031. The default is zero, meaning a rolling
 /// ball rolls for ever, and these left at zero crossed the whole floor when
 /// the rails came out. A four row pyramid going flat has two and a half units
-/// of height to spend, and nothing was charging for it. Measured on this
-/// floor, a shove of 4.0 against how far it gets, and the pyramid with its
-/// rails pulled against how wide it ends up: ```text 0.0 travels 71.5 spreads
-/// 58.6 0.05 11.8 7.3 0.1 6.0 5.1 0.15 4.0 4.2 0.5 1.4 3.6 ``` 0.5 is carom's
-/// number for a ring a few units across, and here it stopped a shoved sphere
-/// inside three of its own widths. 0.1 is poolhall's: a shove crosses a good
-/// third of the floor and the loose pile still ends up a long way short of the
-/// column.
+/// of height to spend, and nothing was charging for it.
+///
+/// Measured on this floor, a shove of 4.0 against how far it gets, and the
+/// pyramid with its rails pulled against how wide it ends up:
+///
+/// ```text
+/// 0.0   travels 71.5   spreads 58.6
+/// 0.05          11.8            7.3
+/// 0.1            6.0            5.1
+/// 0.15           4.0            4.2
+/// 0.5            1.4            3.6
+/// ```
+///
+/// 0.5 is carom's number for a ring a few units across, and here it stopped a
+/// shoved sphere inside three of its own widths. 0.1 is poolhall's: a shove
+/// crosses a good third of the floor and the loose pile still ends up a long way
+/// short of the column.
 const ROLLING: f32 = 0.1;
 /// What a shove is worth let go at once, and wound to the end. Neither is the
 /// speed a sphere leaves at: the strike lands on the surface, so friction spends
