@@ -9,6 +9,14 @@ I built these on it. Each one is its own repo and each takes
 blitzkit from crates.io rather than a local checkout, so I'm using the engine
 the same way you would.
 
+## arcade
+
+An arcade with games built on this engine.
+
+[github.com/jvalol/arcade](https://github.com/jvalol/arcade)
+
+![Looking down an aisle in a dark room, a row of arcade cabinets on either side, each with a game's screenshot lit on its screen](https://raw.githubusercontent.com/jvalol/arcade/main/media/screenshot.png)
+
 ## pong
 
 In which i develop a pong game in rust using blitzkit, also an open repo
