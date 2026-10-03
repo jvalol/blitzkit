@@ -105,9 +105,8 @@ pulled on top until it comes down.
 
 ## cascada
 
-In which one stands dominoes up on a floor, one at a time, and then pushes the
-first of them over.
+In which one plays with dominoes.
 
 [github.com/jvalol/cascada](https://github.com/jvalol/cascada)
 
-![A line of fourteen pale dominoes on a dark grey floor, the two nearest already flat and the third tipping into the fourth, the rest still standing](https://raw.githubusercontent.com/jvalol/cascada/main/media/screenshot.png)
+![A yin and yang drawn in pale dominoes on a dark grey floor, the S down the middle and one of its two dots already flat, the far side of the outer ring and the other dot still standing](https://raw.githubusercontent.com/jvalol/cascada/main/media/screenshot.png)
