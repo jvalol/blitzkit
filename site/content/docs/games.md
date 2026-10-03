@@ -110,4 +110,4 @@ first of them over.
 
 [github.com/jvalol/cascada](https://github.com/jvalol/cascada)
 
-![A line of fourteen pale dominoes standing on edge across a dark grey floor, evenly spaced and casting shadows away from the light](https://raw.githubusercontent.com/jvalol/cascada/main/media/screenshot.png)
+![A line of fourteen pale dominoes on a dark grey floor, the two nearest already flat and the third tipping into the fourth, the rest still standing](https://raw.githubusercontent.com/jvalol/cascada/main/media/screenshot.png)
