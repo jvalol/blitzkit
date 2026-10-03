@@ -60,3 +60,7 @@ turns it to glass.
 `cargo run --example tunnel` flies down the inside of one: a tube and a string
 of rings, both from 0016's formulas, wearing 0011's checker all the way to the
 vanishing point.
+
+---
+
+I asked AI to draft this for me. I've edited it. Any surviving AI smells are my oversight.

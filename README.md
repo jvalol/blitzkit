@@ -8,6 +8,8 @@ Feel free to follow along!
 
 ## Games built on it
 
+The [arcade](https://github.com/jvalol/arcade) is, well, an arcade. It has the games built with this engine in a room to explore them.
+
 - [pong](https://github.com/jvalol/pong)
 - [snake](https://github.com/jvalol/snake)
 - [tessera](https://github.com/jvalol/tessera)
