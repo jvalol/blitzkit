@@ -39,7 +39,29 @@ const SLIDES: usize = 4;
 /// Fixed, not "until it settles". An unbounded loop is unbounded work, a frame
 /// time that depends on the scene, and the end of the determinism this spec
 /// promises. A count that is written down is a cost that can be budgeted.
-pub const PASSES: usize = 8;
+///
+/// Thirty two, which is where spec 0033 measured a five high column converging
+/// and where a heap stops twitching. It was eight, chosen against a tower, and
+/// a tower is not a heap: eight holds a stack up and leaves a fallen pile
+/// shivering for a minute. Measured, blocks tipped into a heap and left:
+///
+/// ```text
+///              8 passes   16 passes   32 passes   48 passes
+/// 24 bodies      12.0s        3.7s        3.7s        4.6s
+/// 54 bodies      58.8s        7.2s        6.2s        5.7s
+/// ```
+///
+/// And on cascada's figure of 92, which is a fallen run one layer deep rather
+/// than a pile, eight never settles it at all: 75 of the 92 go on stirring over
+/// the sleep threshold, so the group's clock never reaches half a second.
+/// Sixteen leaves 19 of them stirring and it sleeps at 33.8 seconds. Thirty two
+/// leaves none, and it sleeps at 20.2, which is as soon as the figure has
+/// stopped moving.
+///
+/// It is bought rather than free, and cheaply: a busy step on 54 bodies goes
+/// from 126 to 216 microseconds, against a frame of 8333 at 120 a second. The
+/// work all told goes down, not up, because the scene stops being awake.
+pub const PASSES: usize = 32;
 
 /// How close counts as touching when the contacts are gathered.
 ///
@@ -2591,7 +2613,22 @@ mod tests {
 
     /// Spec 0036: and the whole reason for any of it. Without carrying the
     /// impulse over, the passes needed to find the load grow with the height,
-    /// and twenty levels is further than eight passes reach.
+    /// so a cold solver holds a tower only as far as its passes reach.
+    ///
+    /// How much it buys depends sharply on the pass count, and the default
+    /// crossed the cliff when it went from eight to thirty two. The top level
+    /// still standing after five seconds, of twenty:
+    ///
+    /// ```text
+    ///              warm   cold
+    ///  8 passes    19.3    5.7
+    /// 16 passes    19.3    5.4
+    /// 32 passes    19.3   17.2
+    /// 48 passes    19.3   18.9
+    /// ```
+    ///
+    /// So this is no longer standing against collapsing. It is two levels of
+    /// sag, and the warm one is the one that does not move at all.
     #[test]
     fn warm_starting_earns_its_keep() {
         let mut warm = tower();
@@ -2608,9 +2645,10 @@ mod tests {
 
         assert!(warm_top > 19.0, "the warm one came down to {}", warm_top);
         assert!(
-            cold_top < 10.0,
-            "the cold one stayed up at {}, so this proves nothing",
-            cold_top
+            cold_top < warm_top - 1.0,
+            "the cold one stayed up at {} against the warm one's {}, so this proves nothing",
+            cold_top,
+            warm_top
         );
     }
 

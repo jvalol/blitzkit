@@ -118,8 +118,34 @@ the passes and the step together:
  60 a second, 32 passes   stands, leaning 0.005
 ```
 
-So eight is still the default, which is what spec 0032's numbers were measured
-against, and a game taking bigger steps asks for more.
+Eight was the default on the strength of that, and it was the wrong reading of
+it. A tower is the easy case for a low pass count, because warm starting carries
+the load and the passes only have to hold it. A heap has no load to carry over
+and eight leaves it shivering: a pile of fifty four blocks goes on moving for 58
+seconds where sixteen settles it in 7, and cascada's fallen figure of ninety two
+never goes quiet at all, because 75 of them keep crossing the sleep threshold
+and the group's clock never reaches half a second.
+
+So the default is thirty two now, which is where spec 0033 measured a five high
+column converging and where a heap stops twitching. A busy step on fifty four
+bodies costs 216 microseconds against a frame of 8333, and the work all told
+goes down rather than up, because the scene stops being awake.
+
+**Which costs warm starting most of its drama.** Carrying the impulse over was
+the difference between a twenty level tower standing and collapsing at eight
+passes. At thirty two a cold solver holds it nearly as well:
+
+```text
+             warm   cold
+ 8 passes    19.3    5.7
+16 passes    19.3    5.4
+32 passes    19.3   17.2
+48 passes    19.3   18.9
+```
+
+It still earns its keep, and the margin is two levels of sag rather than the
+whole tower. It is also what keeps the warm one from moving at all, which is
+what sleeping needs.
 
 **A tower settles and has to.** Every contact is allowed its slop and a tower has
 one at every level, so the sag gathers all the way up: 0.22 over twenty levels,

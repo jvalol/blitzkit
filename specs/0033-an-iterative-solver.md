@@ -117,10 +117,14 @@ the one this exists for.
 
 ## What it cost
 
-Eight passes. A five high column needs about sixteen to hold still to a tenth of
-a unit and converges by thirty two, so eight plus the overlap push is where this
-sits: the push is what fixes the settled depth and the passes are what stop it
-getting there.
+Thirty two passes. A five high column needs about sixteen to hold still to a
+tenth of a unit and converges by thirty two: the push is what fixes the settled
+depth and the passes are what stop it getting there.
+
+This said eight for a while, on the strength of a tower standing at eight. A
+tower is the easy case, because warm starting carries its load from frame to
+frame and the passes only have to hold it, and a heap has nothing to carry over.
+Spec 0036 has the measurements and the cost.
 
 Draw is weaker than it was. Friction now converges towards no slip over the
 passes instead of taking one instalment, so a ball struck low keeps less of its
