@@ -40,11 +40,11 @@ pub fn hilbert(order: u32) -> Vec<Vec3> {
 /// a sign for each.
 ///
 /// Not a table anyone should take on trust, and not one that was recalled. It
-/// is the only set satisfying one invariant: a curve through a cube of side `s`
-/// enters at cell `(0, 0, 0)` and leaves at cell `(s - 1, 0, 0)`, and the cell
-/// a child leaves at touches the cell the next child enters at. Stated that way
-/// it is a search over signed permutations with one answer, and the tests below
-/// are that answer being checked rather than assumed.
+/// is the only set satisfying one invariant. A curve through a cube of side
+/// `s` enters at cell `(0, 0, 0)` and leaves at cell `(s - 1, 0, 0)`, and the
+/// cell a child leaves at touches the cell the next child enters at. Stated
+/// that way it is a search over signed permutations with one answer, and the
+/// tests below are that answer being checked rather than assumed.
 ///
 /// Three earlier attempts at this were wrong because they mixed up cell centres
 /// with octant corners. Every one of them still visited each cell exactly once,

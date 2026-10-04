@@ -123,9 +123,9 @@ impl Game for Cubes {
         // The sun's map covers this box and no more, so a box the size of what
         // is actually here spends its texels on the cubes rather than on empty
         // floor. The default is forty across for a scene five across, which
-        // made a texel wide enough to see: the soft edge the samples give was
+        // made a texel wide enough to see. The soft edge the samples give was
         // two of them across, and at the foot of a cube that reads as light
-        // getting in between it and its own shadow.
+        // getting in under it.
         renderer.set_scene_bounds(Aabb::from_center_size(Vec3::ZERO, Vec3::splat(12.0)));
 
         self.cube = Some(renderer.add_mesh(&MeshData::cube()));

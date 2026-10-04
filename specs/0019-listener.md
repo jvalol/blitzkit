@@ -55,10 +55,10 @@ The check, for whichever game takes it up: put a sound somewhere off to one
 side, turn the view to face it, and hear it come round to the front.
 
 `marble` is the game that wants it. Its landing thud plays flat rather than
-positionally, and spec 0005 there says why in as many words: the ears cannot be
+positionally, and spec 0005 there says why in as many words. The ears cannot be
 moved and its course runs out to a hundred units, so a positional thud at the
-goal would be panned hard and faded to nothing. That is this gap, described from
-the other side, by a different session on the same day.
+goal would be panned hard and faded to nothing. That is this gap, described
+from the other side, by a different session on the same day.
 
 **The spatial output fades a sound by the square of its distance from the ears**,
 in the units the ears are spaced in, which is one. That is rodio's doing and not

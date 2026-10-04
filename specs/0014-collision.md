@@ -47,7 +47,7 @@ off.
 The contact normal is the nearest face of that grown box, not the direction to
 the nearest point on the box itself. A ball resting level with the top of a box
 is at the boundary of the grown box's top face, and measuring from the box
-instead reads it as pressed against the side: rolling from one platform onto
+instead reads it as pressed against the side. Rolling from one platform onto
 another at the same height then stops dead at the seam.
 
 **Move and slide** is the one piece of movement the engine provides: given a

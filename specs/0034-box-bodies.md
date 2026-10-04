@@ -18,10 +18,9 @@ or a block with three half extents, and the orientation is a quaternion carried
 beside the position. `Body::new` still makes a sphere, so a game that only ever
 called it keeps the body it had.
 
-It is `Shape::Block` rather than `Shape::Box`, because `Box` is one of the few
-names in Rust that everyone already has, and a physics body that has to be
-disambiguated from a heap pointer at every use is a poor trade for matching the
-word in this spec's title.
+It is `Shape::Block` rather than `Shape::Box`. `Box` is one of the few names in
+Rust that everyone already has, and a body that has to be told apart from a
+heap pointer at every use is a poor trade for matching this spec's own title.
 
 **`radius` stops being a field and becomes a method.** It is now a question about
 the shape rather than a number stored beside it, and for a block it answers the

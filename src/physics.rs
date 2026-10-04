@@ -51,12 +51,12 @@ const SLIDES: usize = 4;
 /// 54 bodies      58.8s        7.2s        6.2s        5.7s
 /// ```
 ///
-/// And on cascada's figure of 92, which is a fallen run one layer deep rather
-/// than a pile, eight never settles it at all: 75 of the 92 go on stirring over
-/// the sleep threshold, so the group's clock never reaches half a second.
-/// Sixteen leaves 19 of them stirring and it sleeps at 33.8 seconds. Thirty two
-/// leaves none, and it sleeps at 20.2, which is as soon as the figure has
-/// stopped moving.
+/// And on cascada's figure of 92, a fallen run one layer deep rather than a
+/// pile, eight never settles it at all. 75 of them go on stirring over the
+/// sleep threshold, so the group's clock never reaches half a second. Sixteen
+/// leaves 19 of them stirring and it sleeps at 33.8 seconds. Thirty two leaves
+/// none, and it sleeps at 20.2, which is as soon as the figure has stopped
+/// moving.
 ///
 /// It is bought rather than free, and cheaply: a busy step on 54 bodies goes
 /// from 126 to 216 microseconds, against a frame of 8333 at 120 a second. The
@@ -84,11 +84,11 @@ pub const SPIN_SETTLES_AT: f32 = 0.05;
 /// shivering into a surface. This stops the engine paying for one doing
 /// nothing, and stops a stack gathering error into a lean. This is only the
 /// floor, for a scene with no gravity in it. The real one is worked out from
-/// the step, because a resting body cannot be stiller than the speed gravity
-/// gives it in one frame and the solver then takes back out: measured, a
-/// standing tower at 120 a second jitters between 0.09 and 0.14, where gravity
-/// alone adds 0.082 a frame. A fixed number tuned there would sit below the
-/// floor at 60 a second and nothing would ever sleep.
+/// the step. A resting body cannot be stiller than the speed gravity gives it
+/// in one frame and the solver takes back out: measured, a tower at 120 a
+/// second jitters between 0.09 and 0.14, where gravity alone adds 0.082. A
+/// fixed number tuned there would sit below the floor at 60 a second and
+/// nothing would ever sleep.
 pub const SLEEPS_UNDER: f32 = 0.05;
 /// How many frames of gravity still counts as still. Two: one for the increment
 /// itself and one for the room the solver needs to not quite cancel it.
@@ -185,7 +185,7 @@ pub struct Body {
     pub rolling: f32,
     /// Whether it has been put aside, per spec 0036. A sleeping body is not
     /// moved by gravity and not integrated, which is how a tower stops
-    /// leaning: a good solver still leaves a little error each frame, and a
+    /// leaning. A good solver still leaves a little error each frame, and a
     /// stack gathers it into a drift. Nothing moves it, so it does not drift.
     pub asleep: bool,
     /// How long it has been still enough to sleep. Public so a game can see
@@ -401,10 +401,10 @@ impl Body {
             return;
         }
 
-        // A game hitting something means it, so this wakes it. The solver's own
-        // impulses do not, because a sleeping body is a wall to them, per spec
-        // 0036: without this, clicking a block in a settled tower did nothing at
-        // all and the engine had no way to say why.
+        // A game hitting something means it, so this wakes it. The solver's
+        // own impulses do not, because a sleeping body is a wall to them, per
+        // spec 0036. Without this, clicking a block in a settled tower did
+        // nothing.
         self.wake();
 
         let on_the_surface = match self.shape {
@@ -609,12 +609,12 @@ fn contacts(bodies: &[Body], world: &[Aabb]) -> Vec<Contact> {
 /// than after them.
 ///
 /// A sleeping body is a wall to the solver, which is what makes sleeping worth
-/// anything: see `once`. But waking only ever happened at the end of the step,
-/// so the frame in which something ran into a sleeping body spent its impulse
-/// on an immovable wall and the wall woke up afterwards with nothing. Measured
-/// in cascada, a domino pushed into the end of a sleeping one shoved it half a
-/// unit along the floor and tilted it two degrees, where the same hit with the
-/// target already awake took it over.
+/// anything: see `once`. But waking only happened at the end of the step, so
+/// the frame something ran into a sleeping body spent its impulse on an
+/// immovable wall, and the wall woke afterwards with nothing. Measured in
+/// cascada, a domino pushed into the end of a sleeping one shoved it half a
+/// unit and tilted it two degrees, where the same hit on a waking one took it
+/// over.
 ///
 /// Spec 0036 fixed the same shape of thing for `strike`, which wakes what a
 /// game hits. This is what the thing it hits then runs into.
@@ -665,9 +665,8 @@ fn sleep(bodies: &mut [Body], found: &[Contact], gravity: Vec3, dt: f32) {
         })
         .collect();
 
-    // Nothing sleeps on nothing: a body touching the world or another body is
-    // held up by it, and one touching nothing at all is in mid air however
-    // still it looks at the top of its arc.
+    // Nothing sleeps on nothing. A body touching the world or another is held
+    // up by it, and one touching nothing is in mid air however still it looks.
     let mut held = vec![false; bodies.len()];
     for contact in found {
         held[contact.one] = true;
@@ -742,8 +741,7 @@ fn met(one: &Body, other: &Body) -> Option<Meeting> {
             sphere_meets_obb(&Sphere::new(one.position, radius), &boxy(other, half))
         }
         // asked the other way round and turned back, so a block against a
-        // sphere is the same answer as a sphere against a block rather than a
-        // second piece of arithmetic that has to be kept agreeing
+        // sphere is the same answer as a sphere against a block
         (Shape::Block { half }, Shape::Sphere { radius }) => {
             sphere_meets_obb(&Sphere::new(other.position, radius), &boxy(one, half)).map(|met| {
                 Meeting {
@@ -842,13 +840,13 @@ fn once(bodies: &mut [Body], contact: &mut Contact) {
     }
 
     // A sphere's contact is one radius out along the normal, so the normal
-    // passes through its middle and pushing on it cannot turn it: the effective
-    // mass is the masses and nothing else, which is what spec 0030 worked out
-    // and what every number measured since rests on. A block is touched off to
-    // one side and the lever arm is real, so the general form is used, and only
-    // for contacts that have a block in them. Running the general form on
-    // spheres too would be right in algebra and would put floating point crumbs
-    // through the one place this engine has been bitten twice.
+    // passes through its middle and pushing on it cannot turn it: the
+    // effective mass is the masses and nothing else, per spec 0030. A block is
+    // touched off to one side and the lever arm is real, so the general form
+    // is used, and only for contacts that have a block in them. Running the
+    // general form on spheres too would be right in algebra and would put
+    // floating point crumbs through the one place this engine has been bitten
+    // twice.
     let cornered = bodies[one].sphere().is_none()
         || other.is_some_and(|other| bodies[other].sphere().is_none());
 
@@ -1561,9 +1559,9 @@ mod tests {
     #[test]
     fn a_column_stands() {
         // one pass could not hold this. The floor under the bottom ball was
-        // decided before anything was known to be standing on it, four pair
-        // contacts then pushed it down, and the whole column went through the
-        // floor at about a third of a unit a second.
+        // decided before anything was known to stand on it, four pair contacts
+        // pushed it down, and the column went through at a third of a unit a
+        // second.
         let mut bodies = column(5);
         let was: Vec<f32> = bodies.iter().map(|b| b.position.y).collect();
 

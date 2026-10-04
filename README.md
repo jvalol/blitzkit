@@ -50,14 +50,12 @@ pile and says how far the lowest body has gone below where it should rest.
 cargo run --release --example stacking
 ```
 
-Hold the left button on a sphere to wind it up and let go to shove it away from
-the camera, which is how to knock the column over. It runs to red as it winds,
-and it comes on late: half a second in it rolls a few units, three quarters of a
-second and it reaches the edge, and wound right to the end it goes bright red and
-leaves the frame inside half a second. Aim is taken when you let go, so one can be wound up and
-then pointed. `K` pulls the rails out from either side of the pyramid and puts
-them back, space builds the whole thing again, dragging with the right button
-turns the camera, and scrolling zooms.
+Hold the left button on a sphere to wind it up, let go to shove it
+away from the camera. That is how to knock the column over. The longer the hold
+the harder the shove, up to bright red and out of the frame. Aim is taken when
+you let go, so wind it up first and then point it. `K` pulls the rails out from
+either side of the pyramid and puts them back. Space builds the whole thing
+again. Drag with the right button to turn the camera, scroll to zoom.
 
 The rails are there because loose spheres will not hold a pyramid up on their
 own: each ball sitting in a valley shoves the two beneath it apart, and only the
