@@ -4,6 +4,9 @@ In which I develop a wrapper around wgpu-rs to create a graphics development eng
 
 2d _and_ 3d. I've got a few games built on it so far.
 
+I hand built this engine, and I built my versions of pong and snake using it. After those
+two I started working with AI to take it further. Most of the 3d mechanics were already there. (Thanks past me)
+
 Feel free to follow along!
 
 ## Games built on it

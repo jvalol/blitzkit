@@ -105,6 +105,9 @@ const WINDING: f32 = 1.5;
 /// long, 0.4 thick and 0.8 wide: clearly not a cube, so which way up it lands
 /// is something you can see.
 const BLOCK: Vec3 = vec3(0.6, 0.2, 0.4);
+
+/// How many blocks are in the stack.
+const BLOCKS: usize = 6;
 const HEAP_AT: f32 = -1.0;
 const COLUMN_AT: f32 = -6.5;
 const PYRAMID_AT: f32 = 4.5;
@@ -122,9 +125,15 @@ const RISE: f32 = (RADIUS * 2.0 + GAP) * 0.866;
 enum Pile {
     Column,
     Pyramid,
-    /// Blocks, which spec 0035 lets touch things. Dropped rather than placed,
-    /// because the thing worth watching is that they land on their faces and
-    /// settle into a heap instead of a smear.
+    /// Blocks, which spec 0035 lets touch things. Stacked, each course turned
+    /// across the one under it, so the contact is face on face at four points
+    /// and the stack is a thing the solver has to hold up rather than a thing
+    /// that has already fallen over.
+    ///
+    /// They were dropped from staggered heights with a turn each, to watch them
+    /// land on their faces and settle. That is a second of the demonstration
+    /// and then a clump for ever, and a clump is what the readme's picture of
+    /// this engine showed.
     Heap,
 }
 
@@ -248,21 +257,18 @@ fn build() -> (Vec<Body>, Vec<Pile>) {
         }
     }
 
-    // and a heap of blocks, dropped from a little way up and turned a bit each,
-    // so they land on each other rather than in a neat pile
-    for n in 0..6 {
-        let turn = n as f32 * 0.9;
+    // and a stack of blocks, squared up and each course across the one under
+    // it, resting from the first frame rather than dropped into place
+    for n in 0..BLOCKS {
         bodies.push(
             Body::block(
-                vec3(
-                    HEAP_AT + (n % 2) as f32 * 0.25 - 0.12,
-                    0.6 + n as f32 * 0.6,
-                    (n % 3) as f32 * 0.25 - 0.25,
-                ),
+                vec3(HEAP_AT, BLOCK.y + n as f32 * (BLOCK.y * 2.0 + GAP), 0.0),
                 BLOCK,
                 1.0,
             )
-            .facing(Quat::from_rotation_y(turn))
+            .facing(Quat::from_rotation_y(
+                (n % 2) as f32 * std::f32::consts::FRAC_PI_2,
+            ))
             .with_restitution(0.0)
             .with_friction(0.7),
         );
