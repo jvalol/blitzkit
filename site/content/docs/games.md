@@ -32,7 +32,7 @@ In which I develop a snake game using blitzkit.
 
 [github.com/jvalol/snake](https://github.com/jvalol/snake)
 
-![Snake: a nine segment snake winding through two turns in the lower left of the board, with a pellet away to the upper right](https://raw.githubusercontent.com/jvalol/snake/main/media/screenshot.png)
+![Snake: a nine segment snake winding through two turns in the middle of the board, with a pellet away to the lower left](https://raw.githubusercontent.com/jvalol/snake/main/media/screenshot.png)
 
 ## tessera
 
