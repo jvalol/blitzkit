@@ -9,6 +9,8 @@ two I started working with AI to take it further. Most of the 3d mechanics were 
 
 Feel free to follow along!
 
+There's a guide at [blitzkit.jva.lol](https://blitzkit.jva.lol).
+
 ## Games built on it
 
 The [arcade](https://github.com/jvalol/arcade) is, well, an arcade. It has the games built with this engine in a room to explore them.
