@@ -1,0 +1,228 @@
+//! A string drawn into a texture, so a word can go on a thing in the world
+//! rather than on the glass in front of it. See `specs/0037-a-word-on-a-surface.md`.
+//!
+//! Every word this engine drew before this one was in screen space. The arcade
+//! asked for it: a cabinet's neon band in its own game's colour is a coloured
+//! bar until the game's name is lit across it.
+//!
+//! White letters on black, because colour here is an unclamped multiplier.
+//! Black stays black however it is tinted and white becomes whatever the caller
+//! asks for, which is how the arcade's bands take their colour already. Alpha
+//! would mean a quad to be sorted against everything else in the scene, and a
+//! sign is not worth that.
+//!
+//! All of it is on the CPU and none of it needs a window, so it is checked the
+//! way the mesh builders are rather than by eye.
+
+use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
+
+use crate::texture::TextureData;
+
+/// The one copy of the font in this crate, so a label and the readout above it
+/// are the same typeface and the bytes are in the binary once.
+///
+/// The renderer had its own `include_bytes!` of this file. Two of them is the
+/// font twice over in anything that links this.
+pub(crate) const FONT_BYTES: &[u8] = include_bytes!("../res/fonts/PressStart2P-Regular.ttf");
+
+/// How much room a line is given above and below the letters themselves, as a
+/// fraction of the line.
+///
+/// The font's own ascent and descent, not the tallest glyph in this particular
+/// string, so "arcade" and "Arcade" come back the same height and two labels
+/// side by side line up.
+const BREATHING: f32 = 0.08;
+
+/// Draws a string, white on black, `tall` texels from the top of a line to the
+/// bottom of it.
+///
+/// Comes back with something in it whatever it is given. An empty string, one
+/// of spaces, or a character this font never heard of is a sign with nothing on
+/// it, which is a sign. A panic in a draw call is a crash.
+pub fn drawn(words: &str, tall: f32) -> TextureData {
+    let tall = tall.max(1.0);
+    let Ok(font) = FontRef::try_from_slice(FONT_BYTES) else {
+        return TextureData::white();
+    };
+
+    let scaled = font.as_scaled(PxScale::from(tall * (1.0 - BREATHING * 2.0)));
+    let baseline = scaled.ascent() + tall * BREATHING;
+
+    // where each glyph sits along the line, and how far the whole run reaches
+    let mut pen = 0.0f32;
+    let mut placed = Vec::new();
+    let mut last = None;
+    for letter in words.chars() {
+        let id = font.glyph_id(letter);
+        if let Some(before) = last {
+            pen += scaled.kern(before, id);
+        }
+        placed.push((id, pen));
+        pen += scaled.h_advance(id);
+        last = Some(id);
+    }
+
+    let wide = pen.ceil().max(1.0) as u32;
+    let high = tall.ceil().max(1.0) as u32;
+    let mut pixels = vec![0u8; (wide * high * 4) as usize];
+    for texel in pixels.chunks_exact_mut(4) {
+        texel[3] = 255;
+    }
+
+    for (id, at) in placed {
+        let glyph = id.with_scale_and_position(scaled.scale(), ab_glyph::point(at, baseline));
+        let Some(outline) = font.outline_glyph(glyph) else {
+            continue;
+        };
+        let bounds = outline.px_bounds();
+
+        outline.draw(|x, y, covered| {
+            let x = bounds.min.x as i32 + x as i32;
+            let y = bounds.min.y as i32 + y as i32;
+            if x < 0 || y < 0 || x >= wide as i32 || y >= high as i32 {
+                return;
+            }
+
+            let ink = (covered.clamp(0.0, 1.0) * 255.0) as u8;
+            let n = ((y as u32 * wide + x as u32) * 4) as usize;
+            for channel in 0..3 {
+                pixels[n + channel] = pixels[n + channel].max(ink);
+            }
+        });
+    }
+
+    TextureData::from_pixels(wide, high, pixels)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// How much ink a texture carries, as a fraction of how much it could.
+    fn ink(drawn: &TextureData) -> f32 {
+        let level = &drawn.levels[0];
+        let lit = level
+            .pixels
+            .chunks_exact(4)
+            .filter(|texel| texel[0] > 32)
+            .count();
+
+        lit as f32 / (level.pixels.len() / 4).max(1) as f32
+    }
+
+    /// Spec 0037: a word comes back as a texture with ink in it.
+    #[test]
+    fn a_word_is_drawn() {
+        let sign = drawn("poolhall", 32.0);
+
+        assert!(sign.width() > 0 && sign.height() > 0);
+        assert!(
+            ink(&sign) > 0.02,
+            "only {:.3} of it is lit, which is a blank sign",
+            ink(&sign)
+        );
+    }
+
+    /// Spec 0037: as wide as the word and as tall as a line was asked for.
+    #[test]
+    fn it_is_tight_to_the_words() {
+        for tall in [16.0f32, 32.0, 64.0] {
+            let sign = drawn("cairn", tall);
+
+            assert_eq!(
+                sign.height(),
+                tall as u32,
+                "a line of {} came back wrong",
+                tall
+            );
+            assert!(
+                sign.width() > sign.height(),
+                "five letters at {} came back {} wide",
+                tall,
+                sign.width()
+            );
+        }
+    }
+
+    /// Spec 0037: a longer word is a wider texture.
+    #[test]
+    fn more_letters_are_wider() {
+        let short = drawn("pong", 32.0);
+        let long = drawn("securitysweep", 32.0);
+
+        assert!(
+            long.width() > short.width(),
+            "{} against {}",
+            long.width(),
+            short.width()
+        );
+        assert_eq!(long.height(), short.height(), "the lines are not the same");
+    }
+
+    /// Spec 0037: letters are white and the ground is black, so a tint can
+    /// colour them the way everything else in this engine is coloured.
+    #[test]
+    fn it_is_white_on_black() {
+        let sign = drawn("snake", 32.0);
+        let level = &sign.levels[0];
+
+        for texel in level.pixels.chunks_exact(4) {
+            assert_eq!(
+                (texel[0], texel[1], texel[2]),
+                (texel[0], texel[0], texel[0]),
+                "a texel is coloured rather than grey"
+            );
+            assert_eq!(texel[3], 255, "a texel is not opaque");
+        }
+
+        let darkest = level
+            .pixels
+            .chunks_exact(4)
+            .map(|texel| texel[0])
+            .min()
+            .unwrap_or(255);
+        let brightest = level
+            .pixels
+            .chunks_exact(4)
+            .map(|texel| texel[0])
+            .max()
+            .unwrap_or(0);
+
+        assert_eq!(darkest, 0, "nothing in it is black");
+        assert!(brightest > 200, "the brightest texel is only {}", brightest);
+    }
+
+    /// Spec 0037: the same words twice give the same texture.
+    #[test]
+    fn the_same_words_draw_the_same() {
+        assert_eq!(
+            drawn("tessera", 24.0).levels[0],
+            drawn("tessera", 24.0).levels[0]
+        );
+    }
+
+    /// Spec 0037: an empty string is a texture rather than a panic.
+    #[test]
+    fn nothing_still_comes_back() {
+        for words in ["", "   ", "\n"] {
+            let sign = drawn(words, 32.0);
+
+            assert!(
+                sign.width() > 0 && sign.height() > 0,
+                "{:?} came back {} by {}",
+                words,
+                sign.width(),
+                sign.height()
+            );
+        }
+    }
+
+    /// Spec 0037: and so is a character this font has never heard of.
+    #[test]
+    fn an_unknown_character_does_not_panic() {
+        let sign = drawn("cascada \u{1F3AE}\u{4E2D}", 32.0);
+
+        assert!(sign.width() > 0 && sign.height() > 0);
+        assert!(ink(&sign) > 0.01, "the letters it does have went missing");
+    }
+}

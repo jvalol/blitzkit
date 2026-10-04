@@ -10,6 +10,7 @@ pub mod physics;
 pub mod renderer;
 pub mod shadow;
 pub mod sound;
+pub mod text;
 pub mod texture;
 
 use camera::Camera;

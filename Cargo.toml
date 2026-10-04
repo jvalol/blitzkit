@@ -61,6 +61,9 @@ env_logger = "0.11"
 log = "0.4"
 wgpu = "30"
 wgpu_text = "30"
+# Already here through wgpu_text; named directly so spec 0037 can rasterise a
+# string without a second copy of a font in some other repo.
+ab_glyph = "0.2"
 pollster = "1"
 bytemuck = "1.4"
 rodio = { version = "0.22", default-features = false, features = ["playback"] }

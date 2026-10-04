@@ -43,7 +43,7 @@ use wgpu_text::glyph_brush::{HorizontalAlign, Layout, Section, Text};
 use wgpu_text::{BrushBuilder, TextBrush};
 use winit::window::Window;
 
-const FONT_BYTES: &[u8] = include_bytes!("../../res/fonts/PressStart2P-Regular.ttf");
+use crate::text::FONT_BYTES;
 
 pub struct Renderer {
     /// Kept so a game can lock or hide the cursor, per spec 0013. The surface

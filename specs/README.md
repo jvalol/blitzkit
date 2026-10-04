@@ -44,6 +44,7 @@ not a priority, and it never changes once a spec exists.
 | [0034](0034-box-bodies.md) | A body that is a box, and knows which way it faces |
 | [0035](0035-boxes-that-touch.md) | Boxes against the world and each other |
 | [0036](0036-a-tower-that-stands.md) | Warm starting and sleeping, so a lattice tower stays put |
+| [0037](0037-a-word-on-a-surface.md) | A string drawn into a texture, for a label in the world |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.
