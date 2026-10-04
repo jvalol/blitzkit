@@ -117,4 +117,4 @@ In which one plays with dominoes.
 
 [github.com/jvalol/cascada](https://github.com/jvalol/cascada)
 
-![A yin and yang drawn in pale dominoes on a dark grey floor, the S down the middle and one of its two dots already flat, the far side of the outer ring and the other dot still standing](https://raw.githubusercontent.com/jvalol/cascada/main/media/screenshot.png)
+![A yin and yang drawn in pale dominoes on a dark grey floor, the far half of the outer ring flat and the S half over, the near half and the lower dot still standing](https://raw.githubusercontent.com/jvalol/cascada/main/media/screenshot.png)
