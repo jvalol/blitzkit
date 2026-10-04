@@ -146,17 +146,6 @@ the wall costs you speed. Press space to lock the cursor. Press R to start over.
 ![Looking down a tunnel of dark and light checks receding to a vanishing point,
 with a gold ring hanging off centre partway down it](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/tunnel.png)
 
-## License
-
-MIT or Apache-2.0, whichever suits you.
-
-The font, Press Start 2P, isn't mine. It's under the SIL Open Font License 1.1,
-and that license travels with it in `res/fonts/OFL.txt`.
-
----
-
-I asked AI to draft this for me. I've edited it. Any surviving AI smells are my oversight.
-
 **sierpinski**, If you know, you know.
 
 ```
@@ -186,3 +175,14 @@ cargo run --release --example hilbert
 
 
 ![A Hilbert curve of order three drawn as a tube, winding through a cube without touching itself](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/hilbert.png)
+
+## License
+
+MIT or Apache-2.0, whichever suits you.
+
+The font, Press Start 2P, isn't mine. It's under the SIL Open Font License 1.1,
+and that license travels with it in `res/fonts/OFL.txt`.
+
+---
+
+I asked AI to draft this for me. I've edited it. Any surviving AI smells are my oversight.
