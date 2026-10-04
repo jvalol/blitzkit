@@ -76,7 +76,7 @@ In which one walks a dark maze carrying two lamps. Put one down and it stays lit
 
 [github.com/jvalol/lantern](https://github.com/jvalol/lantern)
 
-![A candle standing in a corridor, lighting the walls and casting its own shadow, a second candle carried in the foreground, and a dark side passage to the left](https://raw.githubusercontent.com/jvalol/lantern/main/media/screenshot.png)
+![A candle standing in a corridor, lighting the walls and casting its own shadow, a second candle carried in the foreground, and a dark side passage to the right](https://raw.githubusercontent.com/jvalol/lantern/main/media/screenshot.png)
 
 ## securitysweep
 
@@ -84,7 +84,7 @@ In which one crosses an open yard while four security lights sweep it.
 
 [github.com/jvalol/securitysweep](https://github.com/jvalol/securitysweep)
 
-![The yard from above: crates scattered across it, two red tripwires strung the whole way over, a green line at the far end, and two pools of light where the beams fall](https://raw.githubusercontent.com/jvalol/securitysweep/main/media/screenshot.png)
+![The yard from above: crates scattered across it, two red tripwires reaching two thirds of the way over, a green line at the far end, and four pools of light where the beams fall](https://raw.githubusercontent.com/jvalol/securitysweep/main/media/screenshot.png)
 
 ## carom
 
@@ -92,7 +92,7 @@ In which one shoots a marble at thirteen others to knock them out of a ring.
 
 [github.com/jvalol/carom](https://github.com/jvalol/carom)
 
-![A ring drawn on a green table with thirteen pale marbles racked in a cross inside it, an amber shooter against the near arm, and one grey marble come to rest outside the ring](https://raw.githubusercontent.com/jvalol/carom/main/media/screenshot.png)
+![A ring drawn on a green table with eleven pale marbles racked in a cross inside it, an amber shooter against the near arm, and two grey marbles come to rest outside the ring](https://raw.githubusercontent.com/jvalol/carom/main/media/screenshot.png)
 
 ## poolhall
 
