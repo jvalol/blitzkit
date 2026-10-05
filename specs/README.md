@@ -45,6 +45,8 @@ not a priority, and it never changes once a spec exists.
 | [0035](0035-boxes-that-touch.md) | Boxes against the world and each other |
 | [0036](0036-a-tower-that-stands.md) | Warm starting and sleeping, so a lattice tower stays put |
 | [0037](0037-a-word-on-a-surface.md) | A string drawn into a texture, for a label in the world |
+| [0038](0038-a-line-worth-reading.md) | A dark panel with a pale edge, so a line reads over a busy game |
+| [0039](0039-a-light-casts-no-shadow.md) | A surface drawn brighter than white throws nothing |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.
