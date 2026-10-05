@@ -118,3 +118,11 @@ In which one plays with dominoes.
 [github.com/jvalol/cascada](https://github.com/jvalol/cascada)
 
 ![A yin and yang drawn in pale dominoes on a dark grey floor, the far half of the outer ring flat and the S half over, the near half and the lower dot still standing](https://raw.githubusercontent.com/jvalol/cascada/main/media/screenshot.png)
+
+## monty
+
+In which one argues about three doors, and settles it by changing the host.
+
+[github.com/jvalol/monty](https://github.com/jvalol/monty)
+
+![Three doors in a grey wall, all swung open to the left, with a pale blue tab on the lintel over the middle one. A glowing ball sits in the middle alcove and the other two are dark and empty. Two bars across the top left: a short red one marked stayed at 30 percent of 500, and a longer green one marked switched at 67 percent of 501](https://raw.githubusercontent.com/jvalol/monty/main/media/screenshot.png)
