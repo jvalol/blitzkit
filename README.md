@@ -169,6 +169,16 @@ cargo run --release --example menger
 
 ![A Menger sponge at depth three, passages going right through it, a square hole in its shadow](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/menger.png)
 
+**chain**, A wrecking ball, which the engine could not have held up last week.
+
+```
+cargo run --release --example chain
+```
+
+
+
+![A heavy grey ball on a chain of sixteen beads hanging over a grey floor, with a tan brick wall to its right half knocked down, loose blocks lying out across the floor and the standing part leaning](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/chain.png)
+
 **hilbert**, I didn't know what this was until I got into this space of weird 3d geometries. I just think it's neat.
 
 ```

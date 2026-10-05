@@ -184,3 +184,22 @@ cargo run --release --example hilbert
 Up and down change how deep it goes. Drag to turn it, scroll to move closer, R puts it back.
 
 ![A Hilbert curve of order three drawn as a tube, winding through a cube without touching itself](/media/hilbert.png)
+
+## chain
+
+In which a ball on a chain is swung at a wall.
+
+```
+cargo run --release --example chain
+```
+
+Left and right haul the ball, space builds the wall again. Drag with the right
+button to swing the camera, scroll to zoom.
+
+The chain is sixteen ropes between sixteen beads, and a rope that has gone slack
+holds nothing, which is what lets it fold as the ball comes back rather than
+shoving it. The readout carries how long the chain is against how long it should
+be: a heavy ball on light beads stretches it, because the solver passes the
+weight up one link at a time.
+
+![A heavy grey ball on a chain of sixteen beads hanging over a grey floor, with a tan brick wall to its right half knocked down, loose blocks lying out across the floor and the standing part leaning](/media/chain.png)
