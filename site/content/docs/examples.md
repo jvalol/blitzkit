@@ -193,13 +193,11 @@ In which a ball on a chain is swung at a wall.
 cargo run --release --example chain
 ```
 
-Left and right haul the ball, space builds the wall again. Drag with the right
-button to swing the camera, scroll to zoom.
+The arrows haul the ball, W and S wind the chain, space rebuilds the wall. Drag
+with the right button to swing the camera, scroll to zoom.
 
-The chain is sixteen ropes between sixteen beads, and a rope that has gone slack
-holds nothing, which is what lets it fold as the ball comes back rather than
-shoving it. The readout carries how long the chain is against how long it should
-be: a heavy ball on light beads stretches it, because the solver passes the
-weight up one link at a time.
+A slack rope holds nothing, which is what lets the chain fold rather than shove.
+The readout carries how far it has stretched: a heavy ball on light beads
+stretches further, because the solver passes the weight up one link a pass.
 
 ![A heavy grey ball on a chain of sixteen beads hanging over a grey floor, with a tan brick wall to its right half knocked down, loose blocks lying out across the floor and the standing part leaning](/media/chain.png)

@@ -169,7 +169,7 @@ cargo run --release --example menger
 
 ![A Menger sponge at depth three, passages going right through it, a square hole in its shadow](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/menger.png)
 
-**chain**, A wrecking ball, which the engine could not have held up last week.
+**chain**, Play with a ball on a chain.
 
 ```
 cargo run --release --example chain
