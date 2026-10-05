@@ -94,6 +94,36 @@ pub fn drawn(words: &str, tall: f32) -> TextureData {
     TextureData::from_pixels(wide, high, pixels)
 }
 
+/// How much of the window a line takes at `size`, in pixels: the widest line's
+/// letters across, and the font's own line height down, once per line.
+///
+/// The same font and the same scale the renderer draws with, so a frame built
+/// from this agrees with the letters that land inside it. Lines break on `\n`
+/// and nowhere else, so a string the renderer wraps itself will measure wider
+/// than it draws.
+///
+/// Advances only. This font is monospaced and kerns nothing, so a pair's width
+/// is its two advances; a font that kerned would measure a hair wide here.
+pub fn room_for(words: &str, size: f32) -> glam::Vec2 {
+    let font = FontRef::try_from_slice(FONT_BYTES).expect("the font is in this binary");
+    let scaled = font.as_scaled(PxScale::from(size));
+
+    let lines = words.split('\n');
+    let mut widest: f32 = 0.0;
+    let mut count = 0;
+
+    for line in lines {
+        let width: f32 = line
+            .chars()
+            .map(|letter| scaled.h_advance(font.glyph_id(letter)))
+            .sum();
+        widest = widest.max(width);
+        count += 1;
+    }
+
+    glam::vec2(widest, scaled.height() * count as f32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,5 +254,49 @@ mod tests {
 
         assert!(sign.width() > 0 && sign.height() > 0);
         assert!(ink(&sign) > 0.01, "the letters it does have went missing");
+    }
+
+    #[test]
+    fn a_line_takes_the_room_its_letters_need() {
+        let font = FontRef::try_from_slice(FONT_BYTES).unwrap();
+        let scaled = font.as_scaled(PxScale::from(32.0));
+        let letter = scaled.h_advance(font.glyph_id('A'));
+
+        let room = room_for("AAAA", 32.0);
+
+        assert!((room.x - letter * 4.0).abs() < 1e-3, "{}", room.x);
+        assert!((room.y - scaled.height()).abs() < 1e-3, "{}", room.y);
+    }
+
+    #[test]
+    fn more_letters_need_more_room() {
+        assert!(room_for("Game Over  206", 32.0).x > room_for("Game Over", 32.0).x);
+    }
+
+    #[test]
+    fn room_scales_with_the_size() {
+        let small = room_for("Game Over", 16.0);
+        let large = room_for("Game Over", 32.0);
+
+        assert!((large.x - small.x * 2.0).abs() < 1e-2, "{} {}", small.x, large.x);
+        assert!((large.y - small.y * 2.0).abs() < 1e-2, "{} {}", small.y, large.y);
+    }
+
+    #[test]
+    fn a_second_line_adds_a_line_of_height() {
+        let one = room_for("Game Over", 32.0);
+        let two = room_for("Game Over\n206", 32.0);
+
+        assert!((two.y - one.y * 2.0).abs() < 1e-3);
+        // the wider of the two lines, not their sum
+        assert!((two.x - one.x).abs() < 1e-3);
+    }
+
+    #[test]
+    fn an_empty_line_still_has_a_height() {
+        let room = room_for("", 32.0);
+
+        assert_eq!(room.x, 0.0);
+        assert!(room.y > 0.0);
     }
 }
