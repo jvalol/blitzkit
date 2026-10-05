@@ -12,6 +12,7 @@
 use glam::{vec3, Mat3, Quat, Vec3};
 
 use crate::collision::{obbs_meet, sphere_meets_obb, sweep_sphere, Aabb, Meeting, Obb, Sphere};
+use crate::link::Link;
 
 /// Below this closing speed a bounce is dropped and the body simply stops
 /// moving into the surface.
@@ -355,7 +356,7 @@ impl Body {
     /// wakes it: pushed while it sleeps it would gather velocity it never
     /// integrates, and jump the moment it woke. Measured, every block in a
     /// sleeping tower was holding 0.45 of speed it was never going to spend.
-    fn shoved_by(&self) -> f32 {
+    pub(crate) fn shoved_by(&self) -> f32 {
         if self.asleep {
             0.0
         } else {
@@ -369,6 +370,19 @@ impl Body {
         } else {
             self.inverse_inertia()
         }
+    }
+
+    /// The same as `apply`, for the links next door. Not public: a game hits
+    /// something with `strike`, which knows where a surface is and wakes what
+    /// it hits. This is the solver's own impulse and does neither.
+    pub(crate) fn shove(&mut self, impulse: Vec3, at: Vec3) {
+        self.apply(impulse, at);
+    }
+
+    /// What a link can turn it by. A sleeping body is a wall to one, the same
+    /// way it is to a contact.
+    pub(crate) fn turned_by_link(&self) -> Mat3 {
+        self.turned_by()
     }
 
     fn apply(&mut self, impulse: Vec3, at: Vec3) {
@@ -647,7 +661,7 @@ fn shaken(bodies: &mut [Body], found: &[Contact]) {
 /// hangs in the air the moment its support moves. So stillness is spread
 /// through the contacts until it stops changing: anything touching something
 /// that is moving is counted as moving too.
-fn sleep(bodies: &mut [Body], found: &[Contact], gravity: Vec3, dt: f32) {
+fn sleep(bodies: &mut [Body], found: &[Contact], links: &[Link], gravity: Vec3, dt: f32) {
     let under = SLEEPS_UNDER.max(gravity.length() * dt * SLEEPS_UNDER_FRAMES);
     let mut still: Vec<f32> = bodies
         .iter()
@@ -667,7 +681,9 @@ fn sleep(bodies: &mut [Body], found: &[Contact], gravity: Vec3, dt: f32) {
 
     // Nothing sleeps on nothing. A body touching the world or another is held
     // up by it, and one touching nothing is in mid air however still it looks.
-    let mut held = vec![false; bodies.len()];
+    // a body on a rope is held by the rope, the same as one on the floor is
+    // held by the floor
+    let mut held = crate::link::held(bodies.len(), links);
     for contact in found {
         held[contact.one] = true;
         if let Some(other) = contact.other {
@@ -797,11 +813,17 @@ fn closing(bodies: &[Body], one: usize, other: Option<usize>, here: Vec3, there:
 }
 
 /// Works the contacts over, several times, per spec 0033.
-fn work(bodies: &mut [Body], found: &mut [Contact], passes: usize) {
+fn work(bodies: &mut [Body], found: &mut [Contact], links: &[Link], passes: usize, dt: f32) {
     for _ in 0..passes {
         for contact in found.iter_mut() {
             once(bodies, contact);
         }
+
+        // the links in with the contacts, pass for pass, rather than before or
+        // after them. A chain worked to convergence and then shoved by a
+        // contact stretches on every hit; one worked after the contacts throws
+        // what it is holding into the thing it has just hit.
+        crate::link::once(bodies, links, dt);
     }
 }
 
@@ -1290,10 +1312,26 @@ impl Solver {
     }
 
     pub fn step(&mut self, bodies: &mut [Body], world: &[Aabb], gravity: Vec3, dt: f32) {
-        self.run(bodies, world, gravity, dt);
+        self.run(bodies, &[], world, gravity, dt);
     }
 
-    fn run(&mut self, bodies: &mut [Body], world: &[Aabb], gravity: Vec3, dt: f32) {
+    /// The same step, with bodies held together by links, per spec 0041.
+    ///
+    /// Links are handed in each step rather than kept, for the same reason
+    /// bodies are: both are addressed by index, and a game that adds or drops
+    /// one renumbers everything after it.
+    pub fn step_linked(
+        &mut self,
+        bodies: &mut [Body],
+        links: &[Link],
+        world: &[Aabb],
+        gravity: Vec3,
+        dt: f32,
+    ) {
+        self.run(bodies, links, world, gravity, dt);
+    }
+
+    fn run(&mut self, bodies: &mut [Body], links: &[Link], world: &[Aabb], gravity: Vec3, dt: f32) {
         if dt <= 0.0 {
             return;
         }
@@ -1319,11 +1357,14 @@ impl Solver {
         // both ways round so the same run twice is the same run
         let mut found = contacts(bodies, world);
         shaken(bodies, &found);
+        crate::link::shaken(bodies, links);
         self.carry_over(bodies, &mut found);
-        work(bodies, &mut found, self.passes);
+
+        work(bodies, &mut found, links, self.passes, dt);
+
         self.put_away(&found);
         if self.sleeps {
-            sleep(bodies, &found, gravity, dt);
+            sleep(bodies, &found, links, gravity, dt);
         }
 
         // and the overlap pushed apart afterwards, once, rather than inside

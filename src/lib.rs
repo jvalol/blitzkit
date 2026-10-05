@@ -4,6 +4,7 @@ pub mod contact;
 pub mod geometry;
 pub mod keyboard;
 pub mod lighting;
+pub mod link;
 pub mod mesh;
 pub mod mouse;
 pub mod notice;

@@ -47,6 +47,7 @@ not a priority, and it never changes once a spec exists.
 | [0037](0037-a-word-on-a-surface.md) | A string drawn into a texture, for a label in the world |
 | [0038](0038-a-line-worth-reading.md) | A dark panel with a pale edge, so a line reads over a busy game |
 | [0039](0039-a-light-casts-no-shadow.md) | A surface drawn brighter than white throws nothing |
+| [0041](0041-held-together.md) | Two bodies held a fixed distance apart: ropes, rods and chains |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.
