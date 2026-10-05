@@ -70,6 +70,16 @@ impl Instance {
         self.color[3] < 1.0
     }
 
+    /// Whether this one is drawn brighter than white, which in this engine is
+    /// how a thing is made to glow: colour is an unclamped multiplier, so a
+    /// channel past one is a surface giving off more than it is given.
+    ///
+    /// Such a thing is a light's own body, a flame or a bulb or a neon tube,
+    /// and a light does not cast its own shadow. See spec 0039.
+    pub fn glows(&self) -> bool {
+        self.color[0] > 1.0 || self.color[1] > 1.0 || self.color[2] > 1.0
+    }
+
     pub fn new(transform: &Transform, color: Vec4, shininess: f32) -> Self {
         let normal = transform.normal_matrix();
 
@@ -449,5 +459,41 @@ mod tests {
         scene.push_light(lamp(1.0).casting());
         scene.push_light(lamp(2.0).casting());
         assert_eq!(scene.casting_lamps().len(), 2);
+    }
+
+    #[test]
+    fn a_colour_past_white_glows() {
+        let flame = Instance::new(
+            &Transform::default(),
+            glam::vec4(170.0, 130.0, 60.0, 1.0),
+            32.0,
+        );
+        assert!(flame.glows());
+
+        // one channel over is enough, because one channel over is a glow
+        let barely = Instance::new(&Transform::default(), glam::vec4(0.2, 1.01, 0.2, 1.0), 32.0);
+        assert!(barely.glows());
+    }
+
+    #[test]
+    fn an_ordinary_colour_does_not_glow() {
+        let wall = Instance::new(
+            &Transform::default(),
+            glam::vec4(0.92, 0.88, 0.76, 1.0),
+            32.0,
+        );
+        assert!(!wall.glows());
+
+        // white itself is the brightest a surface gets without giving off
+        let white = Instance::new(&Transform::default(), glam::vec4(1.0, 1.0, 1.0, 1.0), 32.0);
+        assert!(!white.glows());
+    }
+
+    #[test]
+    fn a_glow_can_be_see_through() {
+        let lit_glass = Instance::new(&Transform::default(), glam::vec4(4.0, 4.0, 1.0, 0.5), 32.0);
+
+        assert!(lit_glass.glows());
+        assert!(lit_glass.is_translucent());
     }
 }

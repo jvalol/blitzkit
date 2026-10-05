@@ -793,10 +793,10 @@ impl Renderer {
                 label: Some("Renderer Encoder"),
             });
 
-        let (opaque, translucent) = self.upload_instances(scene);
-        // the light sees translucent things as solid: a shadow map holds a
-        // depth and has nowhere to put an alpha
-        let batches: Vec<Batch> = opaque.iter().chain(translucent.iter()).copied().collect();
+        // the light sees translucent things as solid, because a shadow map
+        // holds a depth and has nowhere to put an alpha. It does not see a
+        // glowing thing at all, per spec 0039.
+        let (opaque, translucent, batches) = self.upload_instances(scene);
 
         // what the light can see, first of all. Skipped when nothing is drawn in
         // 3D: the instance buffer is empty then, and slicing an empty buffer is
@@ -1041,11 +1041,16 @@ impl Renderer {
     /// Packs every instance into one buffer and says where each mesh's run
     /// starts, so each mesh is one instanced draw. The opaque runs come back
     /// separately from the translucent ones, because they are drawn in
-    /// different passes, per spec 0018.
-    fn upload_instances(&mut self, scene: &Scene) -> (Vec<Batch>, Vec<Batch>) {
+    /// different passes, per spec 0018, and the casting runs separately again,
+    /// because a glowing thing is drawn but throws nothing, per spec 0039.
+    ///
+    /// A run is one of four kinds, so the instances of a kind lie together and
+    /// a kind is a span rather than a list of indices.
+    fn upload_instances(&mut self, scene: &Scene) -> (Vec<Batch>, Vec<Batch>, Vec<Batch>) {
         let mut instances: Vec<Instance> = Vec::new();
         let mut opaque = Vec::new();
         let mut translucent = Vec::new();
+        let mut casting = Vec::new();
 
         for (mesh, texture, mesh_instances) in scene.batches() {
             if mesh.0 >= self.meshes.len() {
@@ -1060,25 +1065,36 @@ impl Renderer {
                 continue;
             }
 
-            // one mesh can be drawn solid here and see-through there, so the
-            // split is per instance and each half gets its own run
-            for (list, wanted) in [(&mut opaque, false), (&mut translucent, true)] {
+            // one mesh can be drawn solid here and see-through there and
+            // glowing somewhere else, so the split is per instance and each
+            // quarter gets its own run
+            for (see_through, glowing) in
+                [(false, false), (false, true), (true, false), (true, true)]
+            {
                 let first = instances.len() as u32;
-                instances.extend(
-                    mesh_instances
-                        .iter()
-                        .filter(|instance| instance.is_translucent() == wanted),
-                );
+                instances.extend(mesh_instances.iter().filter(|instance| {
+                    instance.is_translucent() == see_through && instance.glows() == glowing
+                }));
 
                 let count = instances.len() as u32 - first;
-                if count > 0 {
-                    list.push((mesh, texture, first, count));
+                if count == 0 {
+                    continue;
+                }
+
+                let run = (mesh, texture, first, count);
+                if see_through {
+                    translucent.push(run);
+                } else {
+                    opaque.push(run);
+                }
+                if !glowing {
+                    casting.push(run);
                 }
             }
         }
 
         if instances.is_empty() {
-            return (opaque, translucent);
+            return (opaque, translucent, casting);
         }
 
         let bytes: &[u8] = bytemuck::cast_slice(&instances);
@@ -1089,7 +1105,7 @@ impl Renderer {
             self.queue.write_buffer(&self.instance_buffer, 0, bytes);
         }
 
-        (opaque, translucent)
+        (opaque, translucent, casting)
     }
 
     /// Writes this frame's quads into the vertex and index buffers, growing them when they are too small.
