@@ -278,8 +278,18 @@ mod tests {
         let small = room_for("Game Over", 16.0);
         let large = room_for("Game Over", 32.0);
 
-        assert!((large.x - small.x * 2.0).abs() < 1e-2, "{} {}", small.x, large.x);
-        assert!((large.y - small.y * 2.0).abs() < 1e-2, "{} {}", small.y, large.y);
+        assert!(
+            (large.x - small.x * 2.0).abs() < 1e-2,
+            "{} {}",
+            small.x,
+            large.x
+        );
+        assert!(
+            (large.y - small.y * 2.0).abs() < 1e-2,
+            "{} {}",
+            small.y,
+            large.y
+        );
     }
 
     #[test]
