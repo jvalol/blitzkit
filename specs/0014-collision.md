@@ -58,6 +58,23 @@ to four times per step, so a corner slides into a stop rather than jittering.
 **`MeshData::bounds`** gives a mesh's `Aabb`, so a game can build colliders from
 what it draws instead of typing numbers twice.
 
+**Resting on a thing is decided against the thing.** A sweep has a shortcut for
+a sphere already in contact, which is what resting on a floor is and what the
+whole of rolling along one depends on, and it has to say which way is out. It
+took the nearest face of the box grown by the sphere's radius. That is the same
+answer as the box's own nearest point against a face and a different one against
+every edge, because the grown box has square corners where the reach of a sphere
+is round.
+
+Beside a step 0.05 high, a sphere 0.45 across sits a quarter of a unit inside the
+grown side and a twentieth under the grown top, so the nearest grown face is the
+top. It answered "you are standing on this", moving sideways counted as moving
+along the surface, and the sphere walked through the step. The lower the step the
+more certain it was, which is backwards: the one riser too small to be in
+anybody's way was the one riser nothing could get over. The direction comes from
+the box's own closest point now, which gives that sphere a normal leaning up and
+back, which is what the top edge of a step is.
+
 Everything here is pure maths on the CPU, with no GPU and no allocation in the
 hot path.
 
@@ -82,6 +99,7 @@ hot path.
 - A ball still lands on a platform from above. — `collision::tests::a_ball_still_lands_on_a_platform_from_above`
 - A wall still stops a ball that faces it. — `collision::tests::a_ball_is_still_stopped_by_a_wall_it_faces`
 - A corner stops a ball at its rounded surface, not its square one. — `collision::tests::a_corner_is_rounded_rather_than_square`
+- A low step is something you meet, not a floor you are standing on. — `collision::tests::a_low_step_is_not_a_floor_you_are_standing_on`
 
 ### Verified by hand
 

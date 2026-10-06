@@ -244,29 +244,77 @@ pub fn sweep_sphere(sphere: &Sphere, movement: Vec3, box_: &Aabb) -> Option<Hit>
     // rolling along a floor as surely as falling through it. Decide by
     // direction instead: into the surface is blocked, away from it or along it
     // is free.
-    if grown.contains_point(sphere.center) {
-        let away = nearest_face(&grown, sphere.center);
+    // Whether that is true is decided against the box itself, not the grown
+    // one. A center inside the grown box only means the sphere is near, and
+    // near is not touching: beside a step 0.05 high, a walking sphere sits 0.40
+    // under the grown top and well inside the grown side, so the nearest face
+    // of the grown box is its top. That reads as resting on the step, sideways
+    // counts as along the surface, and the sphere walks through it. The lower
+    // the step the more certainly it happens, so the one riser too small to be
+    // in the way was the one nothing could climb.
+    let touching = sphere
+        .center
+        .distance_squared(box_.closest_point(sphere.center))
+        <= (sphere.radius + SKIN * 2.0) * (sphere.radius + SKIN * 2.0);
+
+    if touching && grown.contains_point(sphere.center) {
+        // Which way out is the way out of the box, not the way out of the grown
+        // one. Those agree against a face and disagree against every edge, and
+        // the grown box's answer is the one that was wrong: beside a step 0.05
+        // high a walking sphere is a quarter of a unit inside the grown side
+        // and a twentieth under the grown top, so the nearest grown face is the
+        // top. It answered "you are standing on this", sideways counted as
+        // along the surface, and the sphere walked through the step.
+        //
+        // From the box's own closest point the same sphere gets a normal
+        // leaning up and back, which blocks it and lifts it, which is what the
+        // top edge of a step is.
+        let closest = box_.closest_point(sphere.center);
+        let offset = sphere.center - closest;
+        let away = if offset.length_squared() > 1e-12 {
+            offset.normalize()
+        } else {
+            // dead centre inside it, where there is no direction out
+            nearest_face(&grown, sphere.center)
+        };
 
         return if movement.dot(away) >= 0.0 {
             None
         } else {
             Some(Hit {
                 distance: 0.0,
-                point: box_.closest_point(sphere.center),
+                point: closest,
                 normal: away,
             })
         };
     }
 
     let ray = Ray::new(sphere.center, movement);
-    let entry = ray.hit_aabb(&grown)?;
+
+    // From inside the grown box the slab test has nothing to report: there is
+    // no entry, the sphere is already past it. That is what the shortcut above
+    // was covering for, and covering for it by answering "resting on the
+    // nearest grown face" is what let a sphere walk through a low step. A
+    // sphere in there is in one of the rounded off corners of the grown box, so
+    // what it is heading for is worked out from where it stands rather than
+    // from where it came in.
+    let inside = grown.contains_point(sphere.center);
+    let entry = match ray.hit_aabb(&grown) {
+        Some(entry) => entry,
+        None if inside => Hit {
+            distance: 0.0,
+            point: sphere.center,
+            normal: Vec3::ZERO,
+        },
+        None => return None,
+    };
     if entry.distance > travel {
         return None;
     }
 
-    // Which faces of the grown box the entry point sits beyond says what the
-    // sphere is about to meet: one axis a flat face, two a rounded edge, three
-    // a rounded corner.
+    // Which faces of the grown box that point sits beyond says what the sphere
+    // is about to meet: one axis a flat face, two a rounded edge, three a
+    // rounded corner.
     let point = ray.at(entry.distance);
     let mut beyond = [false; 3];
     let mut count = 0;
@@ -1087,6 +1135,55 @@ mod tests {
         assert!(end.x > 13.0, "it stopped at the edge: {:?}", end);
     }
 
+    /// A low step is something you meet, not something you are standing on.
+    ///
+    /// The shortcut for "already in contact" decided that from the center being
+    /// inside the box grown by the radius, and took the nearest face of the
+    /// grown box as the surface under you. Beside a step 0.05 high a walking
+    /// sphere sits 0.40 under the grown top and well inside the grown side, so
+    /// the nearest grown face is the top: it read as resting on the step,
+    /// sideways read as along the surface, and the sphere walked through it.
+    ///
+    /// The lower the step the more certain it was, which is the wrong way
+    /// round: the one riser too small to be in anybody's way was the one riser
+    /// nothing could get over.
+    #[test]
+    fn a_low_step_is_not_a_floor_you_are_standing_on() {
+        for riser in [0.05f32, 0.1, 0.2, 0.3] {
+            let step = Aabb::from_center_size(
+                vec3(8.0, riser * 0.5 - 1.0, 0.0),
+                vec3(12.0, 2.0 + riser, 40.0),
+            );
+            let floor = Aabb::from_center_size(vec3(0.0, -1.0, 0.0), vec3(40.0, 2.0, 40.0));
+
+            // walked at it one small step at a time, the way a frame does
+            let radius = 0.45;
+            let mut at = vec3(0.0, radius, 0.0);
+            for _ in 0..240 {
+                at = move_and_slide(
+                    Sphere::new(at, radius),
+                    Vec3::X * 4.2,
+                    1.0 / 60.0,
+                    &[floor, step],
+                );
+            }
+
+            // over it or stopped at it, but never through it. Through is what
+            // it did: the feet stayed at nought the whole way across, which is
+            // a quarter of a unit inside a step 0.05 high.
+            let feet = at.y - radius;
+            if at.x > 2.0 {
+                assert!(
+                    feet > riser - 1e-2,
+                    "a sphere is inside a step {} high: x {}, feet {}",
+                    riser,
+                    at.x,
+                    feet
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_ball_rolls_from_one_platform_onto_the_next() {
         // two platforms whose tops are level, meeting at z = 0
@@ -1094,8 +1191,20 @@ mod tests {
         let second = Aabb::from_center_size(vec3(0.0, -0.5, -6.0), vec3(5.0, 1.0, 12.0));
         let ball = Sphere::new(vec3(0.0, 0.5, 0.5), 0.5);
 
-        // rolling toward the seam is not rolling into a wall
-        assert!(sweep_sphere(&ball, vec3(0.0, 0.0, -2.0), &second).is_none());
+        // rolling toward the seam is not rolling into a wall. Stated as what
+        // the sweep must not do rather than as nothing at all: a ball level
+        // with the next platform's top does graze its edge, and a graze whose
+        // normal points up is a floor, not a wall. Asked for no hit of any kind
+        // this read as a test about the seam and was a test about which branch
+        // the sweep happened to take.
+        let way = vec3(0.0, 0.0, -2.0);
+        if let Some(hit) = sweep_sphere(&ball, way, &second) {
+            assert!(
+                hit.normal.dot(way.normalize()) > -0.1,
+                "the seam stopped it, with a normal of {:?}",
+                hit.normal
+            );
+        }
 
         let end = move_and_slide(ball, vec3(0.0, 0.0, -6.0), 1.0, &[first, second]);
         assert!(end.z < -4.0, "it stopped at the seam: {:?}", end);
