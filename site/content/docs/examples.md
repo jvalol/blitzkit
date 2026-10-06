@@ -185,6 +185,18 @@ Up and down change how deep it goes. Drag to turn it, scroll to move closer, R p
 
 ![A Hilbert curve of order three drawn as a tube, winding through a cube without touching itself](/media/hilbert.png)
 
+## ripple
+
+In which a pool of water is given something to think about.
+
+```
+cargo run --release --example ripple
+```
+
+Space drops a ball, 1 and 2 choose cork or granite, R empties it. Drag to turn the camera, scroll to move closer.
+
+![A rectangular pool of blue water in a grey basin, waves running across the surface, a pale ball floating at one end and two dark ones under the water, one of them still going in](/media/ripple.png)
+
 ## chain
 
 In which a ball on a chain is swung at a wall.

@@ -14,6 +14,7 @@ pub mod shadow;
 pub mod sound;
 pub mod text;
 pub mod texture;
+pub mod water;
 
 use camera::Camera;
 use geometry::Geometry;

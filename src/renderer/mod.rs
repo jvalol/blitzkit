@@ -628,13 +628,13 @@ impl Renderer {
             &self.device,
             "Mesh Vertices",
             bytemuck::cast_slice(&data.vertices),
-            wgpu::BufferUsages::VERTEX,
+            VERTICES,
         );
         let indices = mesh_buffer(
             &self.device,
             "Mesh Indices",
             bytemuck::cast_slice(&data.indices),
-            wgpu::BufferUsages::INDEX,
+            INDICES,
         );
 
         self.meshes.push(GpuMesh {
@@ -644,6 +644,47 @@ impl Renderer {
         });
 
         MeshId(self.meshes.len() - 1)
+    }
+
+    /// Moves the vertices of a mesh already uploaded, per spec 0042.
+    ///
+    /// A mesh is one upload shared by every instance of it, so this changes
+    /// every push of that handle. A game wanting two shapes wants two meshes.
+    ///
+    /// An id no mesh was ever given is ignored. It can only come from
+    /// `add_mesh`, so it is a handle kept from a renderer that is gone, and
+    /// losing a shape is better than losing the frame.
+    pub fn update_mesh(&mut self, id: MeshId, data: &MeshData) {
+        // the device and the queue are read while a mesh is held mutably, which
+        // is three fields of one struct rather than the whole of it
+        let Renderer {
+            device,
+            queue,
+            meshes,
+            ..
+        } = self;
+        let Some(mesh) = meshes.get_mut(id.0) else {
+            return;
+        };
+
+        refill(
+            device,
+            queue,
+            &mut mesh.vertices,
+            "Mesh Vertices",
+            bytemuck::cast_slice(&data.vertices),
+            VERTICES,
+        );
+        refill(
+            device,
+            queue,
+            &mut mesh.indices,
+            "Mesh Indices",
+            bytemuck::cast_slice(&data.indices),
+            INDICES,
+        );
+
+        mesh.index_count = data.indices.len() as u32;
     }
 
     /// What the shadow map covers. A world bigger than this gets no shadows
@@ -1573,6 +1614,40 @@ fn create_mesh_pipeline(
 /// A vertex or index buffer for a mesh. Empty contents get four zero bytes
 /// instead, because `create_buffer_init` panics on nothing at all and an empty
 /// mesh is something a game is allowed to hand over.
+/// What a mesh's two buffers are for. `COPY_DST` is what lets spec 0042 write
+/// new vertices into a buffer already there rather than making another.
+const VERTICES: wgpu::BufferUsages = wgpu::BufferUsages::VERTEX.union(wgpu::BufferUsages::COPY_DST);
+const INDICES: wgpu::BufferUsages = wgpu::BufferUsages::INDEX.union(wgpu::BufferUsages::COPY_DST);
+
+/// How big a buffer must become to take `want` bytes when it holds `have` now,
+/// or `None` when the one already there will do.
+///
+/// Never shrinks. A surface stepped every frame is the same size every frame,
+/// so the first upload is the only allocation; a mesh that grows and shrinks
+/// keeps the largest buffer it ever needed, which is a little memory against
+/// never allocating twice for the same shape.
+fn room(have: u64, want: u64) -> Option<u64> {
+    (want > have).then_some(want)
+}
+
+/// Puts `contents` in `buffer`, replacing it when it is too small.
+fn refill(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    buffer: &mut wgpu::Buffer,
+    label: &str,
+    contents: &[u8],
+    usage: wgpu::BufferUsages,
+) {
+    match room(buffer.size(), contents.len() as u64) {
+        // nothing to write is not nothing to do: the mesh keeps its buffer and
+        // the caller drops its index count to zero, which draws nothing
+        None if contents.is_empty() => (),
+        None => queue.write_buffer(buffer, 0, contents),
+        Some(_) => *buffer = mesh_buffer(device, label, contents, usage),
+    }
+}
+
 fn mesh_buffer(
     device: &wgpu::Device,
     label: &str,
@@ -1831,6 +1906,51 @@ mod text_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Spec 0042: a buffer that can take the new bytes is written into rather
+    /// than replaced, which is what makes a surface stepped every frame cost
+    /// no allocation at all after the first.
+    #[test]
+    fn a_buffer_that_fits_is_kept() {
+        assert_eq!(
+            room(4096, 4096),
+            None,
+            "an exact fit asked for a new buffer"
+        );
+        assert_eq!(room(4096, 2048), None);
+    }
+
+    /// Spec 0042: and one too small is replaced with one big enough.
+    #[test]
+    fn a_buffer_too_small_is_replaced() {
+        assert_eq!(room(2048, 4096), Some(4096));
+        assert_eq!(room(0, 4), Some(4));
+    }
+
+    /// Spec 0042: a buffer is never shrunk.
+    ///
+    /// A mesh that grows and shrinks would otherwise allocate twice for every
+    /// shape it has already had, which is the common case for anything built
+    /// from a count that moves.
+    #[test]
+    fn a_buffer_is_never_shrunk() {
+        assert_eq!(
+            room(1 << 20, 16),
+            None,
+            "a big buffer was given up for a small write"
+        );
+    }
+
+    /// Spec 0042: and nothing to write asks for no buffer.
+    ///
+    /// An empty mesh is legal to upload, so it is legal to update to. wgpu
+    /// refuses a buffer with nothing in it, so the mesh keeps the placeholder
+    /// it was built with and draws nothing by its index count.
+    #[test]
+    fn empty_data_asks_for_nothing() {
+        assert_eq!(room(4, 0), None);
+        assert_eq!(MeshData::new(Vec::new(), Vec::new()).indices.len(), 0);
+    }
 
     #[test]
     fn the_2d_pipeline_ignores_depth() {

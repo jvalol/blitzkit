@@ -189,6 +189,16 @@ cargo run --release --example hilbert
 
 ![A Hilbert curve of order three drawn as a tube, winding through a cube without touching itself](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/hilbert.png)
 
+**ripple**, A pool of water with things dropped into it. The surface is one mesh written over every frame, and the balls float or sink by nothing but the mass they were given.
+
+```
+cargo run --release --example ripple
+```
+
+
+
+![A rectangular pool of blue water in a grey basin, waves running across the surface, a pale ball floating at one end and two dark ones under the water, one of them still going in](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/ripple.png)
+
 ## License
 
 MIT or Apache-2.0, whichever suits you.
