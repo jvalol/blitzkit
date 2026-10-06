@@ -23,9 +23,27 @@ direction. Point lights light things and cast nothing. A scene with no point
 lights at all is lit exactly as it was before, which is what keeps every
 existing game looking the way it looked.
 
-**Up to eight**, because they travel in a fixed-size block in the uniform. A
-game that pushes more gets the first eight and a warning in the log; it does not
-lose the frame and it does not silently drop them without saying so.
+**Up to sixty four**, because they travel in a fixed-size block in the uniform.
+A game that pushes more gets the first sixty four and a warning in the log; it
+does not lose the frame and it does not silently drop them without saying so.
+
+It was eight, and eight was never a number about hardware. A lamp is two vec4s,
+so eight of them is 256 bytes of a block a uniform binding has kilobytes of room
+for. The number came from the first scene that wanted more than one light.
+
+A building is not a scene. The arcade has thirteen sconces, thirteen lit
+marquees and a pendant over a sign, which is twenty seven before anybody opens
+another room, and under eight it was spending six of them on one room's walls
+whether or not you were standing in that room. Rationing light between rooms is
+not a thing a renderer should make anybody do.
+
+**A lamp that does not reach a surface is not paid for.** What a lamp costs is
+the loop in the shader rather than the block it sits in, and the loop now
+compares the squared distance against the squared range and moves on before it
+does any other work. The falloff is zero at the range rather than merely small,
+so a lamp in another room contributes exactly nothing and is charged nothing.
+That is what makes the count a number about how big a world is rather than a
+budget.
 
 **They are pushed per frame**, like instances, and cleared with the rest of the
 scene. The sun is a field that persists, because a sun does. A lamp that should
@@ -58,7 +76,7 @@ checks are what cover the gap.
 - Two lights add up rather than one winning. — `lighting::tests::point_lights_add_together`
 - A scene with no point lights shades exactly as spec 0012 did. — `lighting::tests::no_point_lights_is_the_old_shading`
 - Lights are pushed per frame and cleared with the scene. — `renderer::scene::tests::point_lights_are_cleared_with_the_scene`
-- The ninth light is dropped, not the first. — `renderer::scene::tests::only_the_first_eight_lights_are_kept`
+- A lamp past the count is dropped, and the first ones kept. — `renderer::scene::tests::only_the_lamps_that_fit_are_kept`
 - The uniform matches the shader's block, field by field. — `renderer::uniform_tests::the_scene_uniform_is_laid_out_for_the_gpu`
 - A lamp is two vec4s, so an array of them is not silently padded apart. — `renderer::uniform_tests::a_lamp_is_two_vec4s_and_nothing_else`
 - The lamps a scene gives reach the uniform, and the rest stay dark. — `renderer::uniform_tests::the_uniform_carries_the_lamps_it_is_given`

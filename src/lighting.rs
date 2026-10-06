@@ -63,7 +63,23 @@ impl Default for Light {
 }
 
 /// How many lamps fit in the block the shader reads. See spec 0020.
-pub const MAX_POINT_LIGHTS: usize = 8;
+///
+/// It was eight, which was never a number about hardware. A lamp is two vec4s,
+/// so eight of them is 256 bytes of a block that a uniform binding has
+/// kilobytes of room for, and the number came from the first scene that wanted
+/// more than one light rather than from anything measured.
+///
+/// Sixty four, because a building is not a scene. The arcade alone has thirteen
+/// sconces, thirteen lit marquees and a pendant over a sign, which is twenty
+/// seven before anybody opens another room, and it was spending six of its eight
+/// on one room's walls whether or not you were standing in it.
+///
+/// What a lamp costs is the loop in the shader, not the block it sits in, and
+/// that loop now skips a lamp whose range does not reach the surface before it
+/// does any work. The falloff is zero at the range rather than merely small, so
+/// a lamp in another room contributes exactly nothing and is charged exactly
+/// nothing for it.
+pub const MAX_POINT_LIGHTS: usize = 64;
 
 /// How many lamps may cast a shadow, out of the [`MAX_POINT_LIGHTS`] that may
 /// light. Each one is six passes over the scene, which is why it is two and not

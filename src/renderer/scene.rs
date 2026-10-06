@@ -312,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn only_the_first_eight_lights_are_kept() {
+    fn only_the_lamps_that_fit_are_kept() {
         let mut scene = Scene::new();
         for index in 0..MAX_POINT_LIGHTS + 4 {
             scene.push_light(lamp(index as f32));

@@ -1,6 +1,6 @@
 // How many lamps and spots fit. Matches lighting::MAX_POINT_LIGHTS and
 // MAX_SPOT_LIGHTS. Keep the three in step.
-const MAX_POINT_LIGHTS: u32 = 8u;
+const MAX_POINT_LIGHTS: u32 = 64u;
 const MAX_SPOT_LIGHTS: u32 = 4u;
 
 // One lamp: two vec4s exactly, because a uniform block aligns every array
@@ -603,6 +603,18 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let lamps = min(uniforms.point_light_count.x, MAX_POINT_LIGHTS);
     for (var index = 0u; index < lamps; index++) {
         let lamp = uniforms.point_lights[index];
+
+        // a lamp whose range does not reach here contributes exactly nothing,
+        // because the falloff is zero at the range rather than merely small.
+        // Skipped before any work rather than inside `point_light` after the
+        // shadow lookups, so a building's worth of lamps costs what the few
+        // reaching this pixel cost. Compared squared, to save the root.
+        let offset = lamp.position_range.xyz - in.world_position;
+        let range = lamp.position_range.w;
+        if range <= 0.0 || dot(offset, offset) >= range * range {
+            continue;
+        }
+
         let slot = point_shadow_slot(index);
         var reaching = 1.0;
         if slot >= 0 {

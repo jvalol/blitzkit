@@ -1861,12 +1861,27 @@ mod uniform_tests {
         assert_eq!(std::mem::offset_of!(SceneUniform, ambient), 112);
         assert_eq!(std::mem::offset_of!(SceneUniform, point_light_count), 192);
         assert_eq!(std::mem::offset_of!(SceneUniform, point_lights), 208);
-        assert_eq!(std::mem::offset_of!(SceneUniform, spot_light_count), 464);
-        assert_eq!(std::mem::offset_of!(SceneUniform, spot_lights), 480);
-        assert_eq!(std::mem::offset_of!(SceneUniform, point_shadow), 992);
-        assert_eq!(std::mem::offset_of!(SceneUniform, contact), 1008);
 
-        for offset in [0, 64, 80, 96, 112, 128, 192, 208, 464, 480, 992] {
+        // everything past the lamps moves when there is room for more of them,
+        // so these follow the count rather than restating it. Written out as
+        // numbers they said the block was laid out for eight lamps and nothing
+        // else, which is a test that fails the day the answer changes rather
+        // than the day it goes wrong.
+        let lamps = 32 * MAX_POINT_LIGHTS;
+        let spot_count = 208 + lamps;
+        let spots = spot_count + 16;
+        let shadow = spots + 128 * MAX_SPOT_LIGHTS;
+        let contact = shadow + 16;
+
+        assert_eq!(
+            std::mem::offset_of!(SceneUniform, spot_light_count),
+            spot_count
+        );
+        assert_eq!(std::mem::offset_of!(SceneUniform, spot_lights), spots);
+        assert_eq!(std::mem::offset_of!(SceneUniform, point_shadow), shadow);
+        assert_eq!(std::mem::offset_of!(SceneUniform, contact), contact);
+
+        for offset in [0, 64, 80, 96, 112, 128, 192, 208, spot_count, spots, shadow] {
             assert_eq!(offset % 16, 0, "{} is not on sixteen bytes", offset);
         }
     }
