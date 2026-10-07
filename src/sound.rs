@@ -47,6 +47,83 @@ const PRIMING_RATE: rodio::SampleRate = match std::num::NonZeroU32::new(44_100) 
 };
 const PRIMING_SAMPLES: usize = 4_410;
 
+/// A sound a game has worked out itself: one channel of samples, and how many
+/// of them a second. Spec 0044.
+///
+/// Cheap to clone, because the buffer is shared rather than copied. A game
+/// works a sound out once, keeps it, and plays it as often as it likes: a
+/// footstep that allocated a buffer every time somebody took a step would be a
+/// game that allocated on every step.
+#[derive(Clone, Debug)]
+pub struct Samples {
+    rate: std::num::NonZeroU32,
+    samples: std::sync::Arc<[f32]>,
+    at: usize,
+}
+
+impl Samples {
+    /// A run of samples at `rate` a second.
+    ///
+    /// A rate of nought is taken as one rather than divided by. Nothing is
+    /// clamped: a game that hands in samples past one has asked for clipping,
+    /// the way a colour past one is a thing that glows rather than an error.
+    pub fn new(rate: u32, samples: Vec<f32>) -> Self {
+        Self {
+            rate: std::num::NonZeroU32::new(rate.max(1)).expect("one at the least"),
+            samples: samples.into(),
+            at: 0,
+        }
+    }
+
+    /// How long it lasts.
+    pub fn seconds(&self) -> f32 {
+        self.samples.len() as f32 / self.rate.get() as f32
+    }
+
+    /// How many samples there are.
+    pub fn len(&self) -> usize {
+        self.samples.len()
+    }
+
+    /// Whether there are none, which plays nothing and is how a game says no
+    /// sound without branching.
+    pub fn is_empty(&self) -> bool {
+        self.samples.is_empty()
+    }
+}
+
+impl Iterator for Samples {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<f32> {
+        let sample = self.samples.get(self.at).copied();
+        self.at += usize::from(sample.is_some());
+
+        sample
+    }
+}
+
+impl rodio::Source for Samples {
+    fn current_span_len(&self) -> Option<usize> {
+        Some(self.samples.len() - self.at.min(self.samples.len()))
+    }
+
+    fn channels(&self) -> rodio::ChannelCount {
+        match std::num::NonZeroU16::new(1) {
+            Some(one) => one,
+            None => unreachable!(),
+        }
+    }
+
+    fn sample_rate(&self) -> rodio::SampleRate {
+        self.rate
+    }
+
+    fn total_duration(&self) -> Option<std::time::Duration> {
+        Some(std::time::Duration::from_secs_f32(self.seconds()))
+    }
+}
+
 /// Plays sounds on the default output device. When no output device can be
 /// opened, every sound is silently dropped instead.
 pub struct SoundSystem {
@@ -137,6 +214,27 @@ impl SoundSystem {
             .set_right_ear_position(right.to_array());
     }
 
+    /// Plays a sound the game made, per spec 0044.
+    ///
+    /// By reference and copied, so the game's own stays as it was and can be
+    /// played again before this one has finished.
+    pub fn play(&self, sound: &Samples) {
+        if sound.is_empty() {
+            return;
+        }
+
+        self.queue(sound.clone());
+    }
+
+    /// The same, from somewhere in the world.
+    pub fn play_at(&self, sound: &Samples, position: [f32; 3]) {
+        if sound.is_empty() {
+            return;
+        }
+
+        self.queue_spatial(sound.clone(), position);
+    }
+
     #[allow(dead_code)]
     #[inline]
     pub fn queue_spatial<S>(&self, sound: S, position: [f32; 3])
@@ -154,6 +252,111 @@ impl SoundSystem {
 mod tests {
     use super::*;
     use glam::vec3;
+    use rodio::Source as _;
+
+    /// Spec 0044: samples play in the order they were given, and then end.
+    #[test]
+    fn samples_play_in_order_and_stop() {
+        let mut run = Samples::new(8, vec![0.0, 0.5, -0.5, 1.0]);
+
+        assert_eq!(run.next(), Some(0.0));
+        assert_eq!(run.next(), Some(0.5));
+        assert_eq!(run.next(), Some(-0.5));
+        assert_eq!(run.next(), Some(1.0));
+        assert_eq!(run.next(), None);
+        assert_eq!(run.next(), None, "it came back from the dead");
+    }
+
+    /// Spec 0044: and a run lasts its own length.
+    #[test]
+    fn a_run_lasts_its_own_length() {
+        let run = Samples::new(100, vec![0.0; 250]);
+
+        assert!(
+            (run.seconds() - 2.5).abs() < 1e-6,
+            "{} seconds",
+            run.seconds()
+        );
+        assert_eq!(
+            run.total_duration(),
+            Some(std::time::Duration::from_secs_f32(2.5))
+        );
+    }
+
+    /// Spec 0044: it says one channel and the rate it was given.
+    ///
+    /// One channel because where a sound is heard from is the listener's
+    /// business, per spec 0019, and not the sound's.
+    #[test]
+    fn a_run_knows_its_own_rate() {
+        let run = Samples::new(22_050, vec![0.0; 8]);
+
+        assert_eq!(run.channels().get(), 1);
+        assert_eq!(run.sample_rate().get(), 22_050);
+        assert_eq!(run.current_span_len(), Some(8));
+    }
+
+    /// Spec 0044: an empty run is over before it starts.
+    ///
+    /// Which is how a game says "no sound" without branching: it hands over the
+    /// run it has and nothing happens.
+    #[test]
+    fn an_empty_run_plays_nothing() {
+        let mut run = Samples::new(44_100, Vec::new());
+
+        assert!(run.is_empty());
+        assert_eq!(run.len(), 0);
+        assert_eq!(run.next(), None);
+        assert_eq!(run.seconds(), 0.0);
+    }
+
+    /// Spec 0044: a rate of nothing is taken as one.
+    ///
+    /// A source that reports nought samples a second is a division by nought
+    /// somewhere downstream, and the somewhere is not this engine.
+    #[test]
+    fn a_rate_of_nothing_is_taken_as_one() {
+        let run = Samples::new(0, vec![0.0; 3]);
+
+        assert_eq!(run.sample_rate().get(), 1);
+        assert_eq!(run.seconds(), 3.0);
+    }
+
+    /// Spec 0044: cloning shares the samples rather than copying them.
+    ///
+    /// The whole reason a game can afford to play a footstep on every step.
+    #[test]
+    fn cloning_shares_the_samples() {
+        let run = Samples::new(44_100, vec![0.25; 64]);
+        let other = run.clone();
+
+        assert!(
+            std::ptr::eq(
+                std::sync::Arc::as_ptr(&run.samples),
+                std::sync::Arc::as_ptr(&other.samples)
+            ),
+            "the clone took its own copy of the buffer"
+        );
+        assert_eq!(std::sync::Arc::strong_count(&run.samples), 2);
+    }
+
+    /// Spec 0044: and playing one leaves the game's own untouched.
+    ///
+    /// Without an audio device `play` does nothing, which is spec 0004, so what
+    /// this really holds is that it takes the sound by reference and the game
+    /// can play it again.
+    #[test]
+    fn playing_does_not_consume_it() {
+        let sound = SoundSystem::new();
+        let mut run = Samples::new(44_100, vec![0.1, 0.2, 0.3]);
+
+        sound.play(&run);
+        sound.play_at(&run, [1.0, 2.0, 3.0]);
+        sound.play(&run);
+
+        assert_eq!(run.len(), 3);
+        assert_eq!(run.next(), Some(0.1), "the game's own run was played from");
+    }
 
     #[test]
     fn the_priming_silence_is_a_tenth_of_a_second() {

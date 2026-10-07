@@ -41,6 +41,16 @@ as that many, which loses time rather than the frame. A game that stalls for a
 second gets a pool that has moved less than a second's worth, not a pool that
 has exploded.
 
+**A brim.** The surface cannot get further off still than `BRIM` of its own
+depth, and a node held there loses its speed with it. Water does not climb out
+of its own basin and does not fall through the floor of it.
+
+This is a bound and not a fix. A heightfield stepped explicitly can run away,
+not often and not from anything this spec can name, but the damage when it does
+is total: the surface reaches thousands of units, every normal goes to nothing,
+and what a game shows is a wall of streaks the height of the room. Holding it
+costs one compare a node and turns that into a ripple that is briefly too big.
+
 **Edges** reflect. A node on the boundary takes its missing neighbour to be
 itself, which is a wall that waves bounce off rather than drain into. A pool is
 a box, so this is the right wall rather than a convenient one.
@@ -109,6 +119,7 @@ not carried: a wall does not float.
 - A long step is substepped rather than let go unstable. — `water::tests::a_long_step_stays_bounded`
 - A step longer than the cap loses time rather than the pool. — `water::tests::a_stalled_frame_loses_time`
 - Edges reflect, and a push moves water rather than taking it away. — `water::tests::the_walls_hold_it_in`
+- The surface cannot leave its basin, whatever is done to it, and comes back down. — `water::tests::the_surface_cannot_leave_the_basin`
 - Height is exact at a node and between its neighbours off one. — `water::tests::height_reads_between_nodes`
 - Outside the pool is the still height. — `water::tests::outside_the_pool_is_flat`
 - A body lighter than water rises. — `water::tests::a_light_body_floats_up`

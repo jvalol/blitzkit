@@ -61,6 +61,23 @@ pub const CHOP: f32 = 0.45;
 /// exploded.
 pub const MOST_STEPS: u32 = 8;
 
+/// How far off still the surface is allowed to get, as a share of how deep the
+/// water is.
+///
+/// A heightfield stepped explicitly can run away: not often, and not from
+/// anything a spec can name, but the damage when it does is total. The surface
+/// reaches thousands of units, every normal goes to nothing, and what you get is
+/// a wall of streaks the height of the room.
+///
+/// So there is a brim. Water does not climb out of its own basin and it does not
+/// fall through the floor of it, and a surface past either is not water that has
+/// been got wrong, it is not water. Holding it there costs one compare a node
+/// and turns a catastrophe into a ripple that is briefly too big.
+///
+/// This is a bound and not a fix. It is here because a game should not be able
+/// to show somebody a wall of streaks, whatever anybody got wrong upstream.
+pub const BRIM: f32 = 0.9;
+
 /// How much of the Courant limit a substep is allowed to be.
 ///
 /// The explicit wave equation goes unstable the moment a wave crosses a cell in
@@ -183,8 +200,18 @@ impl Water {
             }
         }
 
+        // and the brim, which is what stops a heightfield that has started to
+        // run away from taking the whole frame with it
+        let brim = (self.deep * BRIM).max(1e-3);
         for n in 0..self.height.len() {
-            self.height[n] += self.rate[n] * dt;
+            self.height[n] = (self.height[n] + self.rate[n] * dt).clamp(-brim, brim);
+
+            // a node held at the brim has nowhere left to go, so its speed goes
+            // with it: left alone it would push against the lid for ever and
+            // the water would stay there.
+            if self.height[n].abs() >= brim - 1e-6 {
+                self.rate[n] = 0.0;
+            }
         }
     }
 
@@ -818,6 +845,64 @@ mod tests {
             water.rise_at(0.0, 0.0) < 0.0,
             "the surface rose to {} as something fell into it",
             water.rise_at(0.0, 0.0)
+        );
+    }
+
+    /// Spec 0043: the surface cannot leave its own basin, whatever is done to
+    /// it.
+    ///
+    /// A heightfield stepped explicitly can run away, and the damage when it
+    /// does is total: thousands of units, every normal gone, and a wall of
+    /// streaks the height of the room. This is a bound and not a fix. It is
+    /// here because no game built on this should be able to show somebody that,
+    /// whatever anybody got wrong upstream.
+    #[test]
+    fn the_surface_cannot_leave_the_basin() {
+        let mut water = pool();
+        let brim = water.deep * BRIM;
+
+        // hit it far harder than anything could, over and over
+        for _ in 0..400 {
+            water.push(Vec3::ZERO, 1.0, 400.0);
+            water.push(Vec3::new(0.7, 0.0, -0.4), 0.5, -900.0);
+            water.step(STEP);
+
+            for height in &water.height {
+                assert!(
+                    height.is_finite(),
+                    "the surface went to {} and stopped being a number",
+                    height
+                );
+                assert!(
+                    height.abs() <= brim + 1e-4,
+                    "the surface reached {} out of a basin {} deep",
+                    height,
+                    water.deep
+                );
+            }
+        }
+
+        // and the mesh that comes off it is still a mesh: every vertex
+        // somewhere, every normal a unit
+        for vertex in &water.surface().vertices {
+            let normal = Vec3::from_array(vertex.normal);
+
+            assert!(vertex.position.iter().all(|at| at.is_finite()));
+            assert!(
+                (normal.length() - 1.0).abs() < 1e-3,
+                "a normal of {:?}",
+                normal
+            );
+        }
+
+        // left alone it comes back down rather than staying at the brim
+        for _ in 0..4_000 {
+            water.step(STEP);
+        }
+        assert!(
+            stirring(&water) < brim * 0.5,
+            "it stayed at the brim, at {}",
+            stirring(&water)
         );
     }
 
