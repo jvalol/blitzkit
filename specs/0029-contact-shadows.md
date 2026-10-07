@@ -66,6 +66,22 @@ the number a few units out. The march decided it had come out the back of
 something and reported lit, and a white line appeared at the foot of a cube
 from some angles.
 
+**Where the march starts grows with distance too, and for the same reason the
+thickness does.** The start is what keeps a march from finding the surface it
+set out from, since the depth buffer holds that surface. A hundredth of a unit
+clears it near the camera and does not clear it far away: the buffer holds clip
+depth, so what one of its steps is worth in world units grows as you go out, and
+eighty units from the camera a hundredth of a unit is inside the rounding. The
+first sample lands back on the surface, and whether it says lit or shadowed
+comes down to which way the last bit went. That is a stipple over every flat
+surface in the frame, and it is not the sun's: it survived with the sun's own
+map clean, which is how it was told apart.
+
+It is held to a share of the whole march, because the march reaches only a
+quarter of a unit and a start left to grow steps clean past everything it was
+meant to find. Beyond that distance a contact shadow loses its near half, where
+the whole of one is a couple of pixels.
+
 **A step that falls off the buffer is lit**, the same forgiving direction spec
 0015 takes when a fragment lands outside the sun's map. So is a step that lands
 so far behind the recorded depth that it is through the back of something
@@ -114,6 +130,7 @@ that had no business being unbounded.
 - The prepass writes what the mesh pass tests. — `renderer::depth::tests::the_prepass_writes_what_the_mesh_pass_tests`
 - The mesh pass tests depth without writing it. — `renderer::depth::tests::the_mesh_pass_does_not_write_depth`
 - The march starts off the surface, or it finds the surface. — `contact::tests::the_march_starts_off_the_surface`
+- And further off the further away, without stepping past the whole march. — `contact::tests::the_march_starts_further_off_further_away`
 - Clip depth is turned into distance first. — `contact::tests::the_ends_of_the_buffer_are_the_planes_of_the_camera`
 - Because clip depth is nothing like distance. — `contact::tests::clip_depth_is_not_distance`
 - The steps reach the whole way and no further. — `contact::tests::the_steps_reach_all_the_way_and_no_further`

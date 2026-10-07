@@ -60,6 +60,37 @@ pub fn thickness_at(distance: f32) -> f32 {
 /// depth buffer holds it there, and every lit pixel would shadow itself.
 pub const CONTACT_START: f32 = 0.01;
 
+/// And how much further off per unit of distance from the camera.
+///
+/// A hundredth of a unit is clear of the surface near the camera and nowhere
+/// near clear of it far away. The depth buffer holds clip depth, so what one
+/// of its steps is worth in world units grows with distance: eighty units out,
+/// a hundredth is inside the rounding, the march's first sample lands back on
+/// the surface it started from, and whether it reports a hit comes down to
+/// which way the last bit went. That is a stipple, and it is the one that
+/// survived the sun's own fix: a table fifty units across, seen from the far
+/// end, came up speckled with the shadow map already clean.
+///
+/// This follows the thickness above, which grew with distance for the same
+/// reason.
+pub const CONTACT_START_PER_UNIT: f32 = 0.004;
+
+/// And no further off than this share of the whole march.
+///
+/// The march reaches a quarter of a unit in all, so left to grow the start
+/// steps clean past everything it was meant to find: at eighty units out it
+/// came to a third of a unit, which turns the pass off rather than fixing it.
+/// Held here, what is lost is the near half of a contact shadow at a distance
+/// where the whole of one is a couple of pixels.
+pub const CONTACT_START_MOST: f32 = 0.4;
+
+/// How far off the surface to start, that far from the camera.
+pub fn start_at(distance: f32) -> f32 {
+    CONTACT_START
+        .max(distance.max(0.0) * CONTACT_START_PER_UNIT)
+        .min(CONTACT_REACH * CONTACT_START_MOST)
+}
+
 /// Turns what the depth buffer holds into a distance from the camera.
 ///
 /// The buffer holds clip depth, which is nothing like linear, so two values a
@@ -350,6 +381,26 @@ mod tests {
         assert!(
             !step_is_shadow(5.0, 5.0, 5.0),
             "a surface exactly where the buffer holds it shadowed itself"
+        );
+    }
+
+    /// Spec 0029: and further off the further away it is, because a step of the
+    /// depth buffer is worth more in world units out there.
+    #[test]
+    fn the_march_starts_further_off_further_away() {
+        assert_eq!(start_at(0.0), CONTACT_START, "it moved close up");
+        assert!(
+            start_at(80.0) > start_at(8.0),
+            "eighty units out it starts no further off than eight: {} against {}",
+            start_at(80.0),
+            start_at(8.0)
+        );
+        // and never so far off that it steps past what it was looking for
+        assert!(
+            start_at(1000.0) < step_length() * CONTACT_STEPS as f32,
+            "it starts {} out, past the whole march of {}",
+            start_at(1000.0),
+            step_length() * CONTACT_STEPS as f32
         );
     }
 

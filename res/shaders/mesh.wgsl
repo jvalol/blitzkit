@@ -81,6 +81,8 @@ const CONTACT_THICKNESS: f32 = 0.35;
 const CONTACT_THICKNESS_PER_UNIT: f32 = 0.06;
 const CONTACT_THICKEST: f32 = 0.6;
 const CONTACT_START: f32 = 0.01;
+const CONTACT_START_PER_UNIT: f32 = 0.004;
+const CONTACT_START_MOST: f32 = 0.4;
 
 // What the depth buffer holds, as a distance from the camera. Matches
 // contact::linear_depth in Rust.
@@ -118,8 +120,16 @@ fn contact_shadow(
     let reach = uniforms.contact.w;
     let size = vec2<f32>(textureDimensions(scene_depth));
 
-    // off the surface, or it finds itself: the buffer holds this very fragment
-    let start = world_position + normal * CONTACT_START;
+    // off the surface, or it finds itself: the buffer holds this very fragment,
+    // and by more the further off it is, because what one step of the depth
+    // buffer is worth in world units grows with distance. Matches
+    // contact::start_at.
+    let away = length(world_position - uniforms.camera_position.xyz);
+    let off = min(
+        max(CONTACT_START, away * CONTACT_START_PER_UNIT),
+        reach * CONTACT_START_MOST,
+    );
+    let start = world_position + normal * off;
     let nudge = max(march_nudge(pixel), 0.05);
 
     // how far off the camera this surface itself is, to measure what the march
@@ -175,7 +185,7 @@ fn contact_shadow(
 
 const MIN_BIAS: f32 = 0.00005;
 const MAX_BIAS: f32 = 0.0002;
-const NORMAL_STEP: f32 = 1.0;
+const NORMAL_STEP: f32 = 2.0;
 
 // The spots keep the numbers the sun used to have. The sun can afford small
 // ones because it steps along the surface instead; a spot does not do that yet,

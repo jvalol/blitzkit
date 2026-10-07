@@ -50,7 +50,18 @@ pub fn spot_bias(normal: Vec3, to_light: Vec3) -> f32 {
 /// own wall, and stepping along the surface moves where the question is asked
 /// without moving the answer. It is what pays for the slack above being small
 /// enough not to show.
-pub const NORMAL_STEP: f32 = 1.0;
+///
+/// It was one texel, which was enough for a room and not for a field.
+/// poolhall's table is fifty units across where the sun's box is forty by
+/// default, and every flat surface in it came up speckled: not a texture, not
+/// the cloth, but the map's own coarseness read as shadow. One texel of a map
+/// stretched over a bigger scene no longer clears the error in it.
+///
+/// Two is the ceiling the test above sets, and the ceiling is the point.
+/// Stepping towards the light shrinks a shadow, so several texels pulls one off
+/// the foot of what casts it. Checked at two against the cubes example, which
+/// is where that was caught before, and against the arcade.
+pub const NORMAL_STEP: f32 = 2.0;
 
 /// How wide a texel of the sun's map is, in world units.
 ///

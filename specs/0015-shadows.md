@@ -56,6 +56,13 @@ asked without moving the answer. That is what pays for the slack going from
 A texel's width is read off the matrix rather than the bounds, because a game
 can set its own and the shader only ever sees the matrix.
 
+Two texels and not one. One was enough for a room and not for a field: a game
+whose table is fifty units across, against a sun's box of forty, came up
+speckled on every flat surface in it, which is the map's own coarseness read as
+shadow rather than anything in the scene. Two is as far as this can go, because
+stepping towards the light shrinks a shadow and several texels pull one off the
+foot of what casts it, which is the fault this whole section exists to answer.
+
 **The spots keep the numbers this used to have.** They do not step along the
 surface yet, so they still need the slack, and sharing constants with the sun
 would have taken it away from them. Spec 0021's own are separate now.
