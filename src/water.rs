@@ -38,7 +38,19 @@ pub const DRAG: f32 = 1.7;
 pub const DRAG_SQUARED: f32 = 1.1;
 
 /// How hard a body moving through the surface pushes it.
-pub const STIR: f32 = 0.9;
+///
+/// A ball dropped into the ripple example barely marked the water, and a pool
+/// that does not answer a ball is a blue rectangle. It can afford to be this
+/// much now: the brim below is what stops a number like this running away, and
+/// before there was one it was the only thing holding the surface down.
+pub const STIR: f32 = 20.0;
+
+/// How far a body's splash reaches, in its own radii: the trench it digs runs
+/// out to this, and the water it displaces piles up just beyond. Buoyancy reads
+/// the surface over the whole of it, which is the only reason a body does not
+/// ride its own splash, so the push and the reading take it from here rather
+/// than each carrying their own number.
+pub const SPLASH: f32 = 2.0;
 
 /// How much the surface is roughened by ripples the grid cannot carry.
 ///
@@ -252,10 +264,124 @@ impl Water {
         }
     }
 
+    /// Pushes a ring of water rather than a disc of it.
+    ///
+    /// This is the shape anything in the water makes: a body wading, a ball
+    /// going in, a swimmer. `push` is for a disturbance that really is a disc,
+    /// which is to say one with nothing sitting in the middle of it.
+    ///
+    /// What a body entering displaces goes outwards: the surface under it is
+    /// where the body is. Pushed as a disc, the water directly beneath a
+    /// floating body is held down, which takes away the buoyancy holding it up,
+    /// which drops it further and pushes harder. A cork dropped in a pool was
+    /// still bobbing half a minute later off nothing but that.
+    ///
+    /// Nought at the middle, most at `inner`, and nothing by `outer`.
+    pub fn ring(&mut self, at: Vec3, inner: f32, outer: f32, by: f32) {
+        let inner = inner.max(1e-4);
+        let outer = outer.max(inner * 1.2);
+        let mut spent = 0.0;
+
+        for i in 0..self.across {
+            for j in 0..self.along {
+                let (x, z) = self.node_at(i, j);
+                let away = ((x - at.x).powi(2) + (z - at.z).powi(2)).sqrt();
+                if away >= outer {
+                    continue;
+                }
+
+                let fade = if away < inner {
+                    away / inner
+                } else {
+                    let out = (away - inner) / (outer - inner);
+
+                    0.5 + 0.5 * (out * std::f32::consts::PI).cos()
+                };
+                let n = self.at_node(i, j);
+
+                self.rate[n] -= by * fade;
+                spent += by * fade;
+            }
+        }
+
+        // and the same amount back just outside the ring, which is where water
+        // pushed aside actually goes. Spread over the whole pool instead it
+        // lands under the body as well, and the body rides up on the very water
+        // it displaced.
+        let (from, to) = (outer, outer * 1.35);
+        let mut nodes = 0u32;
+        for i in 0..self.across {
+            for j in 0..self.along {
+                let (x, z) = self.node_at(i, j);
+                let away = ((x - at.x).powi(2) + (z - at.z).powi(2)).sqrt();
+
+                nodes += u32::from(away >= from && away < to);
+            }
+        }
+
+        // nothing out there to put it in, at the edge of a small pool, so it
+        // goes back the only way left
+        let (where_, share) = if nodes == 0 {
+            (None, spent / self.rate.len() as f32)
+        } else {
+            (Some((from, to)), spent / nodes as f32)
+        };
+
+        for i in 0..self.across {
+            for j in 0..self.along {
+                let n = self.at_node(i, j);
+                match where_ {
+                    None => self.rate[n] += share,
+                    Some((from, to)) => {
+                        let (x, z) = self.node_at(i, j);
+                        let away = ((x - at.x).powi(2) + (z - at.z).powi(2)).sqrt();
+
+                        if away >= from && away < to {
+                            self.rate[n] += share;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// The world height of the surface over a point, bilinear between the four
     /// nodes around it. Outside the pool it is the still height.
     pub fn height_at(&self, x: f32, z: f32) -> f32 {
         self.at.y + self.rise_at(x, z)
+    }
+
+    /// The surface over a round footprint, averaged.
+    ///
+    /// What a floating body sits on. Taken at one point instead, a body floats
+    /// on its own splash: the push it makes raises the water under it, which
+    /// lifts it, which makes a bigger push, and a cork dropped in a pool climbs
+    /// a mound of its own making and never settles. Buoyancy in life is over a
+    /// whole hull, and an average over the hull turns down a narrow spike of
+    /// the body's own making while still following a wave wider than the body.
+    pub fn height_over(&self, x: f32, z: f32, radius: f32) -> f32 {
+        let radius = radius.max(self.step);
+        let reach = (radius / self.step).ceil() as i32;
+        let (i, _) = self.cell(x, self.at.x, self.size.x, self.across);
+        let (j, _) = self.cell(z, self.at.z, self.size.y, self.along);
+
+        let (mut sum, mut count) = (0.0f32, 0u32);
+        for di in -reach..=reach {
+            for dj in -reach..=reach {
+                if (di * di + dj * dj) > reach * reach {
+                    continue;
+                }
+
+                let on = (
+                    (i as i32 + di).clamp(0, self.across as i32 - 1) as usize,
+                    (j as i32 + dj).clamp(0, self.along as i32 - 1) as usize,
+                );
+                sum += self.height[self.at_node(on.0, on.1)];
+                count += 1;
+            }
+        }
+
+        self.at.y + sum / count.max(1) as f32
     }
 
     /// How far the water stands above the floor over a point.
@@ -356,6 +482,40 @@ impl Water {
             }
         }
 
+        // and a skirt round the rim, hanging from the edge down to the floor.
+        //
+        // A heightfield is a sheet and a sheet has no sides: the moment the
+        // edge dips below the basin's rim you are looking past the water at the
+        // wall behind it, through a gap that opens and closes with every wave.
+        // The skirt is what a surface in a container always needs and is why
+        // this is here rather than in a game.
+        let skirt = vertices.len() as u32;
+        let floor = self.at.y - self.deep;
+        // a hair inside the pool, not on its edge. On the edge it is in the
+        // same plane as whatever holds the water, the two fight for every
+        // pixel, and a basin comes out streaked from rim to floor. Inside by
+        // this much, a dipping edge shows a sliver of wall a sixth of a cell
+        // wide, which is nothing, and nothing is ever coplanar.
+        let in_by = self.step * 0.15;
+        for (i, j, out) in self.rim() {
+            let (x, z) = self.node_at(i, j);
+            let up = self.at.y + self.height[self.at_node(i, j)];
+            // pulled in on both axes and not only the one this node faces: a
+            // corner node faces one way, and inset that way alone it is still
+            // sitting on the other wall
+            let half = self.size * 0.5 - in_by;
+            let x = (x - self.at.x).clamp(-half.x, half.x) + self.at.x;
+            let z = (z - self.at.z).clamp(-half.y, half.y) + self.at.z;
+
+            for at in [up, floor] {
+                vertices.push(Vertex::new(
+                    [x, at, z],
+                    out.to_array(),
+                    [(x + z) * 0.5, (up - at).abs()],
+                ));
+            }
+        }
+
         let mut indices = Vec::with_capacity((self.across - 1) * (self.along - 1) * 6);
         for i in 0..self.across.saturating_sub(1) {
             for j in 0..self.along.saturating_sub(1) {
@@ -371,7 +531,45 @@ impl Water {
             }
         }
 
+        // the skirt's own quads, each between one rim node and the next. Wound
+        // to face out of the pool, which is the side anybody looking in over
+        // the rim sees.
+        let round = self.rim().len() as u32;
+        for n in 0..round {
+            let (one, two) = (skirt + n * 2, skirt + n * 2 + 1);
+            let next = skirt + ((n + 1) % round) * 2;
+            let (three, four) = (next, next + 1);
+
+            indices.extend([one, two, four, one, four, three]);
+        }
+
         MeshData::new(vertices, indices)
+    }
+
+    /// The nodes round the rim, once round and in order, each with the way out
+    /// of the pool at that node.
+    ///
+    /// In order because the skirt is a ring of quads and a ring needs its nodes
+    /// in the order they sit, not in the order a nested loop happens to reach
+    /// them.
+    fn rim(&self) -> Vec<(usize, usize, Vec3)> {
+        let (last_x, last_z) = (self.across - 1, self.along - 1);
+        let mut out = Vec::with_capacity((self.across + self.along) * 2);
+
+        for i in 0..last_x {
+            out.push((i, 0, Vec3::NEG_Z));
+        }
+        for j in 0..last_z {
+            out.push((last_x, j, Vec3::X));
+        }
+        for i in (1..=last_x).rev() {
+            out.push((i, last_z, Vec3::Z));
+        }
+        for j in (1..=last_z).rev() {
+            out.push((0, j, Vec3::NEG_X));
+        }
+
+        out
     }
 
     /// How many steps wide the slope at a node is: two inside, one at a wall.
@@ -392,7 +590,13 @@ impl Water {
             return;
         }
 
-        let surface = self.height_at(body.position.x, body.position.z);
+        let reach = match body.shape {
+            Shape::Sphere { radius } => radius,
+            Shape::Block { half } => half.x.max(half.z),
+        };
+        // over the body's own footprint and not at a point under its middle,
+        // because a body does not float on its own splash
+        let surface = self.height_over(body.position.x, body.position.z, reach * SPLASH * 1.35);
         let (under, whole) = displaced(body, surface);
         if under <= 0.0 || whole <= 0.0 {
             return;
@@ -412,20 +616,42 @@ impl Water {
 
         // and what the body does back to the water, which is the whole reason
         // this takes a body rather than a position
-        let reach = match body.shape {
-            Shape::Sphere { radius } => radius,
-            Shape::Block { half } => half.x.max(half.z),
-        };
         // scaled by the step, because `push` adds speed and this one is applied
         // every frame. Unscaled, a body digs a hole as fast as the game draws,
         // falls into it, displaces less, digs faster, and goes through the
         // floor: the first ball dropped in this pool reached -3.2 in a basin
         // 1.5 deep.
-        let going = -body.velocity.y * STIR * wet * dt;
+        // scaled by how much water it is actually shoving aside, which is the
+        // area it cuts through the surface times how fast it is going through
+        // it. That area is nought when the body is clear of the water and
+        // nought again when it is under: the splash is the going in.
+        //
+        // Scaled by how wet it was instead, the push went on for as long as the
+        // body was in the water at all, so a cork bobbing for five seconds
+        // pumped the pool the whole time. One ball made a ring a twentieth of
+        // the pool's depth and it took forty of them to see a wave.
+        let cut = match body.shape {
+            Shape::Sphere { radius } => {
+                let out = (surface - body.position.y).abs();
+
+                std::f32::consts::PI * (radius * radius - out * out).max(0.0)
+            }
+            Shape::Block { half } => {
+                let out = (surface - body.position.y).abs();
+
+                if out < half.y {
+                    4.0 * half.x * half.z
+                } else {
+                    0.0
+                }
+            }
+        };
+        let going = -body.velocity.y * cut * STIR * dt;
         if going.abs() > 1e-4 {
-            self.push(
+            self.ring(
                 vec3(body.position.x, surface, body.position.z),
-                reach * 2.0,
+                reach,
+                reach * SPLASH,
                 going,
             );
         }
@@ -831,31 +1057,61 @@ mod tests {
         assert_eq!(wall.velocity, Vec3::ZERO, "the wall took off");
     }
 
-    /// Spec 0043: a body going in pushes the surface down.
+    /// Spec 0043: a ring pushes the water around a point and not the water at
+    /// it, and what it pushes down comes back just outside rather than being
+    /// spread over the pool or lost.
+    #[test]
+    fn a_ring_leaves_the_middle_alone() {
+        let mut water = pool();
+        let (inner, outer) = (0.5, 1.0);
+        let before: f32 = water.height.iter().sum();
+
+        water.ring(Vec3::ZERO, inner, outer, 0.4);
+        water.step(STEP);
+
+        assert_eq!(water.rise_at(0.0, 0.0), 0.0, "the middle of the ring moved");
+        assert!(
+            water.rise_at(inner, 0.0) < 0.0,
+            "the ring did not go down: {}",
+            water.rise_at(inner, 0.0)
+        );
+        assert!(
+            water.rise_at(outer * 1.15, 0.0) > 0.0,
+            "the water it shoved aside did not pile up outside: {}",
+            water.rise_at(outer * 1.15, 0.0)
+        );
+
+        let after: f32 = water.height.iter().sum();
+        assert!(
+            (after - before).abs() < 1e-3,
+            "the pool gained or lost water: {} against {}",
+            after,
+            before
+        );
+    }
+
+    /// Spec 0043: a body going in pushes the surface down, around itself rather
+    /// than under itself. Dead under the middle is the one place the push does
+    /// not reach, because the water there is where the body is: measured at the
+    /// centre node this reads exactly nought however hard the thing lands.
     #[test]
     fn something_going_in_makes_a_wave() {
         let mut water = pool();
-        let mut body = ball(Vec3::new(0.0, 0.0, 0.0), 0.25, 900.0);
+        let radius = 0.25;
+        let mut body = ball(Vec3::new(0.0, 0.0, 0.0), radius, 900.0);
         body.velocity = Vec3::new(0.0, -4.0, 0.0);
 
         water.carry(&mut body, GRAVITY, STEP);
         water.step(STEP);
 
+        let trench = water.rise_at(radius, 0.0);
         assert!(
-            water.rise_at(0.0, 0.0) < 0.0,
+            trench < 0.0,
             "the surface rose to {} as something fell into it",
-            water.rise_at(0.0, 0.0)
+            trench
         );
     }
 
-    /// Spec 0043: the surface cannot leave its own basin, whatever is done to
-    /// it.
-    ///
-    /// A heightfield stepped explicitly can run away, and the damage when it
-    /// does is total: thousands of units, every normal gone, and a wall of
-    /// streaks the height of the room. This is a bound and not a fix. It is
-    /// here because no game built on this should be able to show somebody that,
-    /// whatever anybody got wrong upstream.
     #[test]
     fn the_surface_cannot_leave_the_basin() {
         let mut water = pool();
@@ -954,17 +1210,22 @@ mod tests {
             plain.vertices.len()
         );
 
-        // every one of them still a unit, and still broadly upward: a normal
-        // that has rolled past the horizontal is a surface lit from beneath
-        for vertex in &rough.vertices {
+        // every one of them still a unit, and the surface's own still broadly
+        // upward: a normal that has rolled past the horizontal is a surface lit
+        // from beneath. The skirt's point sideways on purpose, so this asks the
+        // grid rather than the whole mesh.
+        let (across, along) = water.nodes();
+        for (n, vertex) in rough.vertices.iter().enumerate() {
             let normal = Vec3::from_array(vertex.normal);
 
             assert!((normal.length() - 1.0).abs() < 1e-4, "{:?}", normal);
-            assert!(
-                normal.y > 0.2,
-                "a normal rolled onto its side: {:?}",
-                normal
-            );
+            if n < across * along {
+                assert!(
+                    normal.y > 0.2,
+                    "a normal rolled onto its side: {:?}",
+                    normal
+                );
+            }
         }
     }
 
@@ -977,22 +1238,57 @@ mod tests {
         let (across, along) = water.nodes();
         let mesh = water.surface();
 
-        assert_eq!(mesh.vertices.len(), across * along);
-        assert_eq!(mesh.indices.len(), (across - 1) * (along - 1) * 6);
+        // the grid, and then the skirt round its rim: two vertices a rim node
+        // and six indices a step round it
+        let round = (across - 1) * 2 + (along - 1) * 2;
+        assert_eq!(mesh.vertices.len(), across * along + round * 2);
+        assert_eq!(
+            mesh.indices.len(),
+            (across - 1) * (along - 1) * 6 + round * 6
+        );
 
-        // still and unroughened, every normal points straight up
-        for vertex in &mesh.vertices {
+        // still and unroughened, every normal on the surface points straight up
+        for vertex in &mesh.vertices[..across * along] {
             assert!((vertex.normal[1] - 1.0).abs() < 1e-5, "{:?}", vertex.normal);
         }
 
-        // and every triangle is wound counter-clockwise seen from above
-        for triangle in mesh.indices.chunks(3) {
+        // and every triangle of it is wound counter-clockwise seen from above
+        let grid = (across - 1) * (along - 1) * 6;
+        for triangle in mesh.indices[..grid].chunks(3) {
             let at = |n: u32| Vec3::from_array(mesh.vertices[n as usize].position);
             let (one, two, three) = (at(triangle[0]), at(triangle[1]), at(triangle[2]));
 
             assert!(
                 (two - one).cross(three - one).y > 0.0,
                 "a triangle faces down"
+            );
+        }
+
+        // the skirt hangs from the rim down to the floor and looks out of the
+        // pool, which is what stops a dipping edge showing you the wall behind
+        let floor = water.at.y - water.deep;
+        for pair in mesh.vertices[across * along..].chunks(2) {
+            assert!(
+                (pair[1].position[1] - floor).abs() < 1e-5,
+                "a skirt reaches {} and the floor is at {}",
+                pair[1].position[1],
+                floor
+            );
+
+            let out = Vec3::from_array(pair[0].normal);
+            assert!(out.y.abs() < 1e-5, "a skirt looks up or down: {:?}", out);
+            assert!((out.length() - 1.0).abs() < 1e-5);
+
+            // and it hangs inside the pool rather than on its edge, because on
+            // the edge it shares a plane with whatever holds the water and the
+            // two fight for every pixel
+            let (x, z) = (pair[0].position[0], pair[0].position[2]);
+            assert!(
+                (x - water.at.x).abs() < water.size.x * 0.5 - 1e-4
+                    && (z - water.at.z).abs() < water.size.y * 0.5 - 1e-4,
+                "a skirt at {}, {} sits on the pool's own edge",
+                x,
+                z
             );
         }
 

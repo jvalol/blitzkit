@@ -61,8 +61,17 @@ struct Ripple {
 
 impl Ripple {
     fn new() -> Self {
+        // a ring has to cross the pool and come back for anybody to see it was
+        // a ring. The engine's own numbers settle in about the time it takes to
+        // notice something happened, which is right for a puddle and wrong for
+        // a pool. At the engine's damping one ball left a ring a twentieth of
+        // the pool's depth and it took dropping forty of them to see a wave.
+        let mut water = Water::new(Vec3::ZERO, vec2(WIDE, LONG), DEEP, CELLS);
+        water.damping = 0.3;
+        water.speed = 3.0;
+
         Self {
-            water: Water::new(Vec3::ZERO, vec2(WIDE, LONG), DEEP, CELLS),
+            water,
             balls: Vec::new(),
             light: true,
             next: 0,

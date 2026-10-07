@@ -61,13 +61,26 @@ adds speed and not height: water that something has entered is water that has
 been pushed, and setting the height instead teleports the surface and rings like
 a struck bell. A push outside the pool does nothing.
 
+`ring(at, inner, outer, by)` is the same thing in the shape anything standing in
+the water makes, and is what `carry` uses. `push` is for a disturbance that
+really is a disc: a stir, a jet of bubbles, rain. Anything with something of its
+own sitting in the middle wants the ring, because the water there is where that
+something is.
+
 **Reading it** is `height_at(x, z)`, the surface height at any point, bilinear
 between the four nodes around it and the still height outside the pool.
 `deep_at(x, z)` is how far that point's surface stands above the floor, which is
 what tells a body how much of it is under.
 
 **Drawing it** is `surface()`, a `MeshData` whose vertices are the nodes and
-whose normals come from the slope between neighbours, roughened by `chop`.
+whose normals come from the slope between neighbours, roughened by `chop`, with
+a skirt hanging from the rim down to the floor.
+
+The skirt is there because a heightfield is a sheet and a sheet has no sides.
+The moment its edge dips below the rim of whatever holds it, you are looking
+past the water at the wall behind it, through a gap that opens and closes with
+every wave. Every game putting water in a container needs this, so it is here
+rather than in one of them.
 
 A heightfield holds no wave shorter than two cells, and the ripples that make
 water glitter are a centimetre across: carrying those as height needs a grid
@@ -84,6 +97,17 @@ hand it to `update_mesh` each frame after.
 and the body pushes back on the fourth.
 
 Buoyancy is the weight of the water it displaces, up: `ρ · V · −gravity`, where
+V is the part of the body under the surface. The surface it reads is an average
+over the whole reach of the body's own splash, not the height at a point under
+its middle, and that is `height_over`. Read at a point, a body floats on its own
+splash: the push it makes moves the water under it, which moves the body, which
+makes a bigger push. Read over too narrow a window it is no better, because the
+window then straddles the trench the body digs and misses the ridge that trench
+came from. A window spanning the lot averages the body's own work to about
+nothing while still following any wave wider than the splash, which is why
+`SPLASH` is one constant read by both the push and the reading rather than a
+number each.
+
 V is the part of the body under the surface. A sphere's is the exact spherical
 cap. A block's is the fraction of its height that is under, times its volume,
 which is exact while it is level and near enough while it is not, since a block
@@ -98,10 +122,29 @@ jittering for ever; the linear term is what settles it.
 Spin is damped the same way, so a ball dropped spinning does not go on spinning
 for ever under water.
 
-And the body pushes the surface: a `push` at where it meets the waterline,
-scaled by how fast it is going through it. This is what makes the water answer
-rather than merely hold things up, and it is the reason `carry` takes the whole
-body rather than a position.
+And the body pushes the surface. This is what makes the water answer rather than
+merely hold things up, and it is the reason `carry` takes the whole body rather
+than a position. Two things about it are not obvious.
+
+It is a ring and not a disc, `ring(at, inner, outer, by)`, nought at the middle
+and most at the body's own radius. The water directly under a body is where the
+body is; there is nothing there to push down. Pushed as a disc the same strength
+of splash is spread over the body's footprint as well, where it does nothing
+visible and everything to the body's own buoyancy.
+
+And it is scaled by the rate at which the body displaces water, meaning the area
+it cuts through the surface times how fast it is going through it. That area is
+nought when the body is clear of the water and nought again once it is under, so
+the splash is the going in. Scaled by how wet the body is instead, the push ran
+for as long as the body was in the water at all: a cork bobbing for five seconds
+pumped the pool the whole time, one ball left a ring a twentieth of the pool's
+depth, and it took forty of them to see a wave.
+
+The water a ring pushes aside goes back just outside the ring, which is where
+water pushed aside actually goes. Spread evenly over the pool it also lands
+under the body, and in a small pool an even return is the shape of the pool's
+own slosh, so a falling body drives that mode and then rides it: a ball dropped
+in a basin 1.5 deep heaved the whole surface through ±1.0 and never settled.
 
 **Density.** `Water::density` is 1000 by default, in whatever mass unit the
 game's bodies use per cubic world unit. A body's own density is its mass over
@@ -128,8 +171,9 @@ not carried: a wall does not float.
 - A body out of the water is left alone. — `water::tests::a_body_in_the_air_is_not_carried`
 - Drag slows a body moving through it. — `water::tests::water_slows_what_moves_through_it`
 - An immovable body is not carried. — `water::tests::a_wall_does_not_float`
-- A body entering pushes the surface down. — `water::tests::something_going_in_makes_a_wave`
-- The surface mesh has a vertex per node and normals that follow the slope. — `water::tests::the_surface_is_a_grid_with_normals`
+- A body entering pushes the surface down around itself. — `water::tests::something_going_in_makes_a_wave`
+- A ring pushes the water around a point and not at it, and what it shoves aside piles up just outside. — `water::tests::a_ring_leaves_the_middle_alone`
+- The surface mesh has a vertex per node, normals that follow the slope, and a skirt to the floor. — `water::tests::the_surface_is_a_grid_with_normals`
 - The chop changes how the surface shades and not where the water is. — `water::tests::the_chop_is_shading_and_not_water`
 
 ### Verified by hand
