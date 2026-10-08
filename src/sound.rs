@@ -92,6 +92,192 @@ impl Samples {
     }
 }
 
+/// Why a run of bytes is not a sound this can read.
+///
+/// One reason each rather than one failure. A file that will not load is a
+/// thing somebody has to fix, and "it did not work" does not say whether to
+/// convert it, re-export it or look for a different file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NotWav {
+    /// It does not begin with a RIFF WAVE header.
+    NotRiff,
+    /// It has no `fmt ` chunk, or its samples arrive before one.
+    NoFormat,
+    /// It has no `data` chunk.
+    NoData,
+    /// A format tag this does not read, as the tag.
+    Unread(u16),
+    /// A width in bits this does not read, as the width.
+    Width(u16),
+    /// No channels at all.
+    Silent,
+    /// A chunk says it is longer than what is left of the file.
+    Cut,
+}
+
+impl std::fmt::Display for NotWav {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotRiff => write!(out, "not a RIFF WAVE file"),
+            Self::NoFormat => write!(out, "no fmt chunk before the samples"),
+            Self::NoData => write!(out, "no data chunk"),
+            Self::Unread(tag) => write!(out, "WAVE format {} is not one this reads", tag),
+            Self::Width(bits) => write!(out, "{} bits a sample is not a width this reads", bits),
+            Self::Silent => write!(out, "no channels"),
+            Self::Cut => write!(out, "a chunk runs off the end of the file"),
+        }
+    }
+}
+
+impl std::error::Error for NotWav {}
+
+/// The WAVE format tags this reads: integer PCM, IEEE float, and the
+/// extensible header that carries one of the two in its sub-format.
+const PCM: u16 = 1;
+const FLOAT: u16 = 3;
+const EXTENSIBLE: u16 = 0xFFFE;
+
+/// Two bytes at `at`, little-endian.
+fn two(bytes: &[u8], at: usize) -> Option<u16> {
+    Some(u16::from_le_bytes([*bytes.get(at)?, *bytes.get(at + 1)?]))
+}
+
+/// Four bytes at `at`, little-endian.
+fn four(bytes: &[u8], at: usize) -> Option<u32> {
+    Some(u32::from_le_bytes([
+        *bytes.get(at)?,
+        *bytes.get(at + 1)?,
+        *bytes.get(at + 2)?,
+        *bytes.get(at + 3)?,
+    ]))
+}
+
+/// One sample, read from `width` bits at `at` and scaled so full deflection is
+/// one.
+///
+/// Eight bits is unsigned with its middle at 128, which is the one width that
+/// is; every wider one is signed little-endian. Divided by the positive end, so
+/// a file that hits the negative rail comes out a hair past minus one. That is
+/// the clipping the file asked for.
+fn sample(bytes: &[u8], at: usize, width: u16, float: bool) -> Option<f32> {
+    if float {
+        return Some(f32::from_le_bytes([
+            *bytes.get(at)?,
+            *bytes.get(at + 1)?,
+            *bytes.get(at + 2)?,
+            *bytes.get(at + 3)?,
+        ]));
+    }
+
+    Some(match width {
+        8 => (*bytes.get(at)? as f32 - 128.0) / 127.0,
+        16 => two(bytes, at)? as i16 as f32 / 32_767.0,
+        24 => {
+            // sign extended by hand, because there is no i24 to cast through
+            let raw = (*bytes.get(at)? as i32)
+                | ((*bytes.get(at + 1)? as i32) << 8)
+                | ((*bytes.get(at + 2)? as i32) << 16);
+            let signed = (raw << 8) >> 8;
+
+            signed as f32 / 8_388_607.0
+        }
+        32 => four(bytes, at)? as i32 as f32 / 2_147_483_647.0,
+        _ => return None,
+    })
+}
+
+impl Samples {
+    /// Reads a RIFF WAVE file out of memory, per spec 0045.
+    ///
+    /// Out of memory and not off disk: every other asset this engine bundles is
+    /// an `include_bytes!`, and a loader that opens files is a loader with
+    /// opinions about where a game keeps things.
+    ///
+    /// Integer PCM at 8, 16, 24 or 32 bits and 32-bit float, at any rate, with
+    /// any number of channels averaged down to the one this plays.
+    pub fn from_wav(bytes: &[u8]) -> Result<Self, NotWav> {
+        if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+            return Err(NotWav::NotRiff);
+        }
+
+        let mut format: Option<(u16, u16, u32, u16)> = None;
+        let mut at = 12;
+
+        while at + 8 <= bytes.len() {
+            let id = &bytes[at..at + 4];
+            let long = four(bytes, at + 4).ok_or(NotWav::Cut)? as usize;
+            let from = at + 8;
+            let to = from.checked_add(long).ok_or(NotWav::Cut)?;
+
+            if to > bytes.len() {
+                return Err(NotWav::Cut);
+            }
+
+            if id == b"fmt " {
+                let tag = two(bytes, from).ok_or(NotWav::Cut)?;
+                let channels = two(bytes, from + 2).ok_or(NotWav::Cut)?;
+                let rate = four(bytes, from + 4).ok_or(NotWav::Cut)?;
+                let width = two(bytes, from + 14).ok_or(NotWav::Cut)?;
+                // an extensible header keeps the real tag in the first two
+                // bytes of its sub-format, twenty-four bytes in
+                let tag = if tag == EXTENSIBLE {
+                    two(bytes, from + 24).ok_or(NotWav::Cut)?
+                } else {
+                    tag
+                };
+
+                if tag != PCM && tag != FLOAT {
+                    return Err(NotWav::Unread(tag));
+                }
+                if channels == 0 {
+                    return Err(NotWav::Silent);
+                }
+                if !(tag == FLOAT && width == 32) && !matches!(width, 8 | 16 | 24 | 32) {
+                    return Err(NotWav::Width(width));
+                }
+
+                format = Some((tag, channels, rate, width));
+            } else if id == b"data" {
+                let (tag, channels, rate, width) = format.ok_or(NotWav::NoFormat)?;
+                let step = (width / 8) as usize;
+                let frame = step * channels as usize;
+                let float = tag == FLOAT;
+                let mut out = Vec::with_capacity(long / frame.max(1));
+
+                for start in (from..to).step_by(frame.max(1)) {
+                    if start + frame > to {
+                        break;
+                    }
+
+                    // averaged, not taken from the first channel. `Samples` is
+                    // one channel because these sounds are placed in the world,
+                    // and the far side of a stereo pair is not silence.
+                    let mut sum = 0.0;
+                    for channel in 0..channels as usize {
+                        sum += sample(bytes, start + channel * step, width, float)
+                            .ok_or(NotWav::Cut)?;
+                    }
+
+                    out.push(sum / channels as f32);
+                }
+
+                return Ok(Self::new(rate, out));
+            }
+
+            // chunks are word aligned: an odd length is followed by a pad byte
+            // which belongs to the file and not to the chunk, and a reader that
+            // forgets it is one chunk from reading nonsense
+            at = to + (long & 1);
+        }
+
+        Err(if format.is_none() {
+            NotWav::NoFormat
+        } else {
+            NotWav::NoData
+        })
+    }
+}
+
 impl Iterator for Samples {
     type Item = f32;
 
@@ -251,6 +437,313 @@ impl SoundSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Builds a WAV in memory: a header, a `fmt ` chunk, any chunks to step
+    /// over, and the samples.
+    ///
+    /// Written here rather than kept as a file, because a test that reads a
+    /// file off disk is a test of the file.
+    fn wav(
+        tag: u16,
+        extensible: bool,
+        channels: u16,
+        rate: u32,
+        width: u16,
+        extra: &[(&[u8; 4], Vec<u8>)],
+        data: Vec<u8>,
+    ) -> Vec<u8> {
+        let mut fmt = Vec::new();
+        fmt.extend_from_slice(&if extensible { 0xFFFEu16 } else { tag }.to_le_bytes());
+        fmt.extend_from_slice(&channels.to_le_bytes());
+        fmt.extend_from_slice(&rate.to_le_bytes());
+        fmt.extend_from_slice(&(rate * (width / 8) as u32 * channels as u32).to_le_bytes());
+        fmt.extend_from_slice(&(channels * width / 8).to_le_bytes());
+        fmt.extend_from_slice(&width.to_le_bytes());
+
+        if extensible {
+            // cbSize, the valid bits, the channel mask, and a sub-format whose
+            // first two bytes are the real tag
+            fmt.extend_from_slice(&22u16.to_le_bytes());
+            fmt.extend_from_slice(&width.to_le_bytes());
+            fmt.extend_from_slice(&3u32.to_le_bytes());
+            fmt.extend_from_slice(&tag.to_le_bytes());
+            fmt.extend_from_slice(&[0u8; 14]);
+        }
+
+        let mut body = Vec::new();
+        body.extend_from_slice(b"WAVE");
+
+        let put = |body: &mut Vec<u8>, id: &[u8; 4], bytes: &[u8]| {
+            body.extend_from_slice(id);
+            body.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+            body.extend_from_slice(bytes);
+            // the pad byte, which is part of the file and not of the chunk
+            if bytes.len() % 2 == 1 {
+                body.push(0);
+            }
+        };
+
+        put(&mut body, b"fmt ", &fmt);
+        for (id, bytes) in extra {
+            put(&mut body, id, bytes);
+        }
+        put(&mut body, b"data", &data);
+
+        let mut out = Vec::new();
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        out.extend_from_slice(&body);
+
+        out
+    }
+
+    /// Spec 0045: a sixteen bit mono file comes back sample for sample.
+    #[test]
+    fn a_sixteen_bit_wav_reads_back() {
+        let want: Vec<i16> = vec![0, 8_000, -8_000, 32_767, -32_767, 1];
+        let mut data = Vec::new();
+        for one in want.iter() {
+            data.extend_from_slice(&one.to_le_bytes());
+        }
+
+        let got = Samples::from_wav(&wav(1, false, 1, 44_100, 16, &[], data)).expect("a sound");
+        let read: Vec<f32> = got.clone().collect();
+
+        assert_eq!(read.len(), want.len());
+        for (n, (one, other)) in read.iter().zip(want.iter()).enumerate() {
+            assert!(
+                (one - *other as f32 / 32_767.0).abs() < 1e-6,
+                "sample {} came back {}",
+                n,
+                one
+            );
+        }
+        assert_eq!(got.rate.get(), 44_100);
+    }
+
+    /// Spec 0045: every width it claims to read, reads.
+    ///
+    /// The same full-scale run at each one, so a width that is read off by a
+    /// byte or signed the wrong way comes out as a different number and not as
+    /// a failure to load.
+    #[test]
+    fn it_reads_every_width_it_claims() {
+        // nought, half up, and full down, in each width
+        for (width, tag, data) in [
+            (8u16, 1u16, vec![128u8, 191, 1]),
+            (16, 1, {
+                let mut out = Vec::new();
+                for one in [0i16, 16_383, -32_767] {
+                    out.extend_from_slice(&one.to_le_bytes());
+                }
+                out
+            }),
+            (24, 1, {
+                let mut out = Vec::new();
+                for one in [0i32, 4_194_303, -8_388_607] {
+                    out.extend_from_slice(&one.to_le_bytes()[0..3]);
+                }
+                out
+            }),
+            (32, 1, {
+                let mut out = Vec::new();
+                for one in [0i32, 1_073_741_823, -2_147_483_647] {
+                    out.extend_from_slice(&one.to_le_bytes());
+                }
+                out
+            }),
+            (32, 3, {
+                let mut out = Vec::new();
+                for one in [0.0f32, 0.5, -1.0] {
+                    out.extend_from_slice(&one.to_le_bytes());
+                }
+                out
+            }),
+        ] {
+            let got: Vec<f32> = Samples::from_wav(&wav(tag, false, 1, 22_050, width, &[], data))
+                .unwrap_or_else(|why| panic!("{} bits, tag {}: {}", width, tag, why))
+                .collect();
+
+            assert_eq!(got.len(), 3, "{} bits, tag {}", width, tag);
+            assert!(
+                got[0].abs() < 0.01,
+                "{} bits: nought came back {}",
+                width,
+                got[0]
+            );
+            assert!(
+                (got[1] - 0.5).abs() < 0.01,
+                "{} bits: half came back {}",
+                width,
+                got[1]
+            );
+            assert!(
+                (got[2] + 1.0).abs() < 0.01,
+                "{} bits: the bottom came back {}",
+                width,
+                got[2]
+            );
+        }
+    }
+
+    /// Spec 0045: channels are averaged down to the one this plays.
+    ///
+    /// Averaged and not taken from the first. Taking the first is a stereo
+    /// recording with one side thrown away, and the side thrown away is half
+    /// the sound.
+    #[test]
+    fn it_mixes_the_channels_down() {
+        // left loud and right silent, then the other way about
+        let mut data = Vec::new();
+        for (left, right) in [(16_383i16, 0i16), (0, 16_383)] {
+            data.extend_from_slice(&left.to_le_bytes());
+            data.extend_from_slice(&right.to_le_bytes());
+        }
+
+        let got: Vec<f32> = Samples::from_wav(&wav(1, false, 2, 44_100, 16, &[], data))
+            .expect("a sound")
+            .collect();
+
+        assert_eq!(got.len(), 2, "two frames of two channels is two samples");
+        for one in got.iter() {
+            assert!(
+                (one - 0.25).abs() < 0.01,
+                "a channel loud and a channel silent averaged to {}",
+                one
+            );
+        }
+    }
+
+    /// Spec 0045: chunks it does not know are stepped over, pad byte and all.
+    ///
+    /// The odd-length one is the point. A reader that forgets the pad byte
+    /// lands one byte into the next chunk's name, finds no chunk it knows for
+    /// the rest of the file, and says there are no samples in a file full of
+    /// them.
+    #[test]
+    fn it_steps_over_chunks_it_does_not_know() {
+        let extra: Vec<(&[u8; 4], Vec<u8>)> = vec![
+            (b"LIST", b"INFOIART\x05\x00\x00\x00Jake\x00".to_vec()),
+            (b"fact", 7u32.to_le_bytes().to_vec()),
+            // odd on purpose
+            (b"cue ", vec![1, 2, 3]),
+        ];
+        let data = 1_000i16.to_le_bytes().repeat(4);
+
+        let got: Vec<f32> = Samples::from_wav(&wav(1, false, 1, 8_000, 16, &extra, data))
+            .expect("a sound")
+            .collect();
+
+        assert_eq!(got.len(), 4, "the samples were lost stepping over a chunk");
+    }
+
+    /// Spec 0045: an extensible header is read by its sub-format.
+    ///
+    /// Which is what anything recorded at 24 bits is written as, so refusing it
+    /// refuses most of what a library of sound effects ships.
+    #[test]
+    fn it_reads_an_extensible_header() {
+        let mut data = Vec::new();
+        for one in [0.0f32, 0.25, -0.25] {
+            data.extend_from_slice(&one.to_le_bytes());
+        }
+
+        let got: Vec<f32> = Samples::from_wav(&wav(3, true, 1, 48_000, 32, &[], data))
+            .expect("a sound")
+            .collect();
+
+        assert_eq!(got.len(), 3);
+        assert!((got[1] - 0.25).abs() < 1e-6, "it came back {}", got[1]);
+    }
+
+    /// Spec 0045: the rate comes off the file.
+    #[test]
+    fn it_takes_the_rate_from_the_file() {
+        for rate in [8_000u32, 22_050, 44_100, 48_000, 96_000] {
+            let got = Samples::from_wav(&wav(1, false, 1, rate, 16, &[], vec![0, 0, 0, 0]))
+                .expect("a sound");
+
+            assert_eq!(got.rate.get(), rate);
+            assert!((got.seconds() - 2.0 / rate as f32).abs() < 1e-9);
+        }
+    }
+
+    /// Spec 0045: each way of being wrong says which way it is wrong.
+    #[test]
+    fn a_file_that_is_not_a_sound_says_why() {
+        assert_eq!(Samples::from_wav(b"").unwrap_err(), NotWav::NotRiff);
+        assert_eq!(
+            Samples::from_wav(b"RIFF\x04\x00\x00\x00AVI ").unwrap_err(),
+            NotWav::NotRiff
+        );
+
+        // a tag this does not read: 0x0011 is IMA ADPCM
+        assert_eq!(
+            Samples::from_wav(&wav(0x0011, false, 1, 44_100, 4, &[], vec![0; 4])).unwrap_err(),
+            NotWav::Unread(0x0011)
+        );
+        // a width it does not read
+        assert_eq!(
+            Samples::from_wav(&wav(1, false, 1, 44_100, 12, &[], vec![0; 6])).unwrap_err(),
+            NotWav::Width(12)
+        );
+        assert_eq!(
+            Samples::from_wav(&wav(1, false, 0, 44_100, 16, &[], vec![0; 4])).unwrap_err(),
+            NotWav::Silent
+        );
+
+        // samples before a format
+        let mut loose = Vec::new();
+        loose.extend_from_slice(b"RIFFWAVE");
+        let mut body = b"WAVE".to_vec();
+        body.extend_from_slice(b"data");
+        body.extend_from_slice(&4u32.to_le_bytes());
+        body.extend_from_slice(&[0u8; 4]);
+        loose.truncate(4);
+        loose.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        loose.extend_from_slice(&body);
+        assert_eq!(Samples::from_wav(&loose).unwrap_err(), NotWav::NoFormat);
+
+        // a format and no samples at all
+        let mut alone = wav(1, false, 1, 44_100, 16, &[], Vec::new());
+        let cut = alone.len() - 8;
+        alone.truncate(cut);
+        assert_eq!(Samples::from_wav(&alone).unwrap_err(), NotWav::NoData);
+
+        // and no samples is not an error, it is a sound of no length
+        let quiet =
+            Samples::from_wav(&wav(1, false, 1, 44_100, 16, &[], Vec::new())).expect("a sound");
+        assert!(quiet.is_empty());
+    }
+
+    /// Spec 0045: a file cut short is refused rather than read half way.
+    ///
+    /// Cut at every length, because the interesting ones are not the obvious
+    /// ones: a header that stops inside the rate, a chunk length that says more
+    /// than is there, a frame that ends one byte early.
+    #[test]
+    fn a_file_cut_short_is_refused() {
+        let data = 1_000i16.to_le_bytes().repeat(8);
+        let whole = wav(1, false, 2, 44_100, 16, &[], data);
+
+        for cut in 0..whole.len() {
+            match Samples::from_wav(&whole[..cut]) {
+                Err(_) => {}
+                Ok(got) => assert!(
+                    got.len() * 4 <= cut,
+                    "a file cut to {} gave back {} samples",
+                    cut,
+                    got.len()
+                ),
+            }
+        }
+
+        assert!(
+            Samples::from_wav(&whole).is_ok(),
+            "the whole of it still reads"
+        );
+    }
+
     use glam::vec3;
     use rodio::Source as _;
 

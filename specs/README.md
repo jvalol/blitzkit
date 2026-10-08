@@ -51,6 +51,7 @@ not a priority, and it never changes once a spec exists.
 | [0042](0042-a-mesh-that-changes.md) | Moving the vertices of a mesh already uploaded |
 | [0043](0043-water.md) | A surface that moves, and what water does to a body in it |
 | [0044](0044-a-sound-a-game-makes.md) | Samples a game worked out itself, played where it likes |
+| [0045](0045-a-sound-a-game-was-given.md) | A WAV read out of memory, so a footstep can be a recording |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.
