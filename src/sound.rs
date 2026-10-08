@@ -59,6 +59,7 @@ pub struct Samples {
     rate: std::num::NonZeroU32,
     samples: std::sync::Arc<[f32]>,
     at: usize,
+    gain: f32,
 }
 
 impl Samples {
@@ -72,6 +73,52 @@ impl Samples {
             rate: std::num::NonZeroU32::new(rate.max(1)).expect("one at the least"),
             samples: samples.into(),
             at: 0,
+            gain: 1.0,
+        }
+    }
+
+    /// The same sound played faster or slower, which is the same sound higher
+    /// or lower. Per spec 0045.
+    ///
+    /// The rate, not the samples. A run played at twice the rate is the run at
+    /// an octave up and half the length, which is what moving a tape faster
+    /// does and is what a footstep wants: no two of anybody's steps are the
+    /// same pitch, and one sample played at one pitch every stride is the thing
+    /// that reads as a machine however well it was recorded.
+    ///
+    /// Free. The buffer is shared with what it came from rather than copied or
+    /// resampled, so a game can pitch a sound differently on every step without
+    /// allocating on every step.
+    ///
+    /// Nought or less is taken as the smallest step up from nothing, because a
+    /// rate of nought is not a sound, it is a division.
+    pub fn pitched(&self, by: f32) -> Self {
+        let was = self.rate.get() as f32;
+        let now = (was * by.max(f32::MIN_POSITIVE)).round().max(1.0);
+
+        Self {
+            rate: std::num::NonZeroU32::new(now as u32).unwrap_or(self.rate),
+            samples: std::sync::Arc::clone(&self.samples),
+            at: self.at,
+            gain: self.gain,
+        }
+    }
+
+    /// The same sound, louder or quieter. Per spec 0045.
+    ///
+    /// Also free, and for the same reason: the gain is carried and applied as
+    /// the samples go out rather than written into them. Past one is louder and
+    /// is not clamped, the way spec 0044 does not clamp the samples themselves.
+    ///
+    /// Multiplied rather than set, so `gain(0.5).gain(0.5)` is a quarter. A
+    /// sound that forgot what it had already been told would be a sound you
+    /// could only turn down once.
+    pub fn gain(&self, by: f32) -> Self {
+        Self {
+            rate: self.rate,
+            samples: std::sync::Arc::clone(&self.samples),
+            at: self.at,
+            gain: self.gain * by,
         }
     }
 
@@ -285,7 +332,7 @@ impl Iterator for Samples {
         let sample = self.samples.get(self.at).copied();
         self.at += usize::from(sample.is_some());
 
-        sample
+        sample.map(|one| one * self.gain)
     }
 }
 
@@ -495,6 +542,85 @@ mod tests {
         out.extend_from_slice(&body);
 
         out
+    }
+
+    /// Spec 0045: pitching a sound changes its rate and nothing else.
+    #[test]
+    fn pitching_moves_the_rate_and_keeps_the_samples() {
+        let run = Samples::new(22_050, vec![0.0, 0.5, -0.5, 1.0]);
+        let up = run.pitched(2.0);
+        let down = run.pitched(0.5);
+
+        assert_eq!(up.rate.get(), 44_100);
+        assert_eq!(down.rate.get(), 11_025);
+        assert_eq!(
+            up.clone().collect::<Vec<_>>(),
+            run.clone().collect::<Vec<_>>()
+        );
+        // and twice the rate is half as long, which is what a pitch is
+        assert!((up.seconds() - run.seconds() * 0.5).abs() < 1e-6);
+    }
+
+    /// Spec 0045: a pitch of nought is not a division.
+    #[test]
+    fn a_pitch_of_nothing_still_has_a_rate() {
+        for by in [0.0f32, -1.0, -0.0] {
+            let got = Samples::new(44_100, vec![0.0; 4]).pitched(by);
+
+            assert!(
+                got.rate.get() >= 1,
+                "pitching by {} gave rate {}",
+                by,
+                got.rate.get()
+            );
+        }
+    }
+
+    /// Spec 0045: gain scales what comes out and multiplies rather than sets.
+    ///
+    /// Multiplying is the point. Set, a sound could only be turned down once,
+    /// and the step this is for is pitched and quietened by two different
+    /// things that do not know about each other.
+    #[test]
+    fn gain_scales_what_comes_out_and_stacks() {
+        let run = Samples::new(8, vec![1.0, -1.0, 0.5]);
+
+        assert_eq!(run.gain(0.5).collect::<Vec<_>>(), vec![0.5, -0.5, 0.25]);
+        assert_eq!(
+            run.gain(0.5).gain(0.5).collect::<Vec<_>>(),
+            vec![0.25, -0.25, 0.125]
+        );
+        // and past one is louder, not clamped
+        assert_eq!(run.gain(2.0).collect::<Vec<_>>(), vec![2.0, -2.0, 1.0]);
+    }
+
+    /// Spec 0045: neither of them copies the buffer.
+    ///
+    /// Which is the whole reason they exist. A footstep that allocated a buffer
+    /// to be a tenth higher than the last one would be a game that allocated on
+    /// every step, which is what spec 0044 built `Samples` to avoid.
+    #[test]
+    fn pitching_and_gain_share_the_buffer() {
+        let run = Samples::new(44_100, vec![0.25; 64]);
+
+        for other in [run.pitched(1.1), run.gain(0.8), run.pitched(0.9).gain(1.2)] {
+            assert!(
+                std::sync::Arc::ptr_eq(&run.samples, &other.samples),
+                "it copied the samples"
+            );
+        }
+    }
+
+    /// Spec 0045: the two together are the two together.
+    #[test]
+    fn a_step_can_be_pitched_and_quietened_at_once() {
+        let run = Samples::new(1_000, vec![1.0, 0.5]);
+        let got = run.pitched(1.06).gain(0.9);
+
+        assert_eq!(got.rate.get(), 1_060);
+        let out = got.collect::<Vec<_>>();
+        assert!((out[0] - 0.9).abs() < 1e-6, "it came out {}", out[0]);
+        assert!((out[1] - 0.45).abs() < 1e-6, "it came out {}", out[1]);
     }
 
     /// Spec 0045: a sixteen bit mono file comes back sample for sample.

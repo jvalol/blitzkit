@@ -62,6 +62,24 @@ garbage.
 A `data` chunk holding no samples is not an error. It is a sound of no length,
 which spec 0044 already says plays nothing.
 
+**Pitch and gain**, because a recording is only half of the answer. One sample
+played at one pitch and one level every stride reads as a machine however well
+it was recorded, so `Samples::pitched(by)` gives the same sound played faster or
+slower and `Samples::gain(by)` gives it louder or quieter.
+
+Both are free: `pitched` moves the rate and `gain` is carried and applied as the
+samples go out, so the buffer is shared with what it came from rather than
+copied or resampled. A game can vary a footstep on every step without
+allocating on every step, which is the whole of why spec 0044 shares the buffer
+in the first place.
+
+The rate and not the samples, which means a pitch is a tape speed: twice the
+rate is an octave up and half the length. Nought or less is taken as the
+smallest step up from nothing, because a rate of nought is not a sound, it is a
+division. Gain multiplies rather than sets, so a sound told twice is quieter
+twice; set, a sound could only be turned down once. Past one is louder and is
+not clamped, the way spec 0044 does not clamp the samples themselves.
+
 ## Acceptance criteria
 
 - A 16-bit mono file comes back sample for sample. — `sound::tests::a_sixteen_bit_wav_reads_back`
@@ -72,6 +90,11 @@ which spec 0044 already says plays nothing.
 - The rate comes off the file. — `sound::tests::it_takes_the_rate_from_the_file`
 - Each way of being wrong says which way it is wrong. — `sound::tests::a_file_that_is_not_a_sound_says_why`
 - A file cut short is refused rather than read half way. — `sound::tests::a_file_cut_short_is_refused`
+- Pitching moves the rate and keeps the samples. — `sound::tests::pitching_moves_the_rate_and_keeps_the_samples`
+- A pitch of nothing still leaves a rate to play at. — `sound::tests::a_pitch_of_nothing_still_has_a_rate`
+- Gain scales what comes out, and stacks rather than replaces. — `sound::tests::gain_scales_what_comes_out_and_stacks`
+- Neither of them copies the buffer. — `sound::tests::pitching_and_gain_share_the_buffer`
+- The two together are the two together. — `sound::tests::a_step_can_be_pitched_and_quietened_at_once`
 
 ### Verified by hand
 
@@ -81,7 +104,9 @@ which spec 0044 already says plays nothing.
 ## Out of scope
 
 **No resampling.** `Samples` carries its own rate and rodio plays it at that
-rate. A file at 48 kHz stays at 48 kHz.
+rate. A file at 48 kHz stays at 48 kHz, and `pitched` moves the rate rather
+than the samples, so it changes the length along with the pitch. Holding the
+length while moving the pitch is a different thing and a much larger one.
 
 **No other container.** No OGG, no MP3, no FLAC. Those are decoders, not
 arithmetic, and each one is a dependency with a surface of its own.
