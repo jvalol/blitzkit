@@ -117,6 +117,66 @@ struct GpuMesh {
     index_count: u32,
 }
 
+/// What asking the surface for a frame came back with, as what to do about it.
+///
+/// Out of `render` so the rule can be checked without a window. Whether an
+/// answer draws, reconfigures or is worth a line in the log is arithmetic, and
+/// the one that matters is that every answer which does not draw still hands
+/// its staging back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Asked {
+    /// Whether there is a frame to draw into.
+    pub draws: bool,
+    /// Whether the surface wants setting up again.
+    pub reconfigure: bool,
+    /// Whether this is worth a line in the log.
+    pub complain: bool,
+}
+
+impl Asked {
+    pub(crate) fn at(got: &wgpu::CurrentSurfaceTexture) -> Self {
+        match got {
+            wgpu::CurrentSurfaceTexture::Success(_) => Self {
+                draws: true,
+                reconfigure: false,
+                complain: false,
+            },
+            wgpu::CurrentSurfaceTexture::Suboptimal(_) => Self {
+                draws: true,
+                reconfigure: true,
+                complain: false,
+            },
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => Self {
+                draws: false,
+                reconfigure: true,
+                complain: false,
+            },
+            // Not faults, and not worth a line each at a thousand frames a
+            // second. A window behind another window is occluded and a machine
+            // under load times out, and both of them come back on their own.
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => Self {
+                draws: false,
+                reconfigure: false,
+                complain: false,
+            },
+            _ => Self {
+                draws: false,
+                reconfigure: false,
+                complain: true,
+            },
+        }
+    }
+
+    /// Whether this frame has to hand its staging back before it gives up.
+    ///
+    /// Every answer that does not draw. `write_buffer` stages into memory that
+    /// only comes back on a submit, so a frame that uploads and then returns
+    /// keeps what it uploaded until the process ends.
+    pub(crate) fn must_flush(&self) -> bool {
+        !self.draws
+    }
+}
+
 impl Renderer {
     pub fn width(&self) -> f32 {
         self.config.width as f32
@@ -780,19 +840,41 @@ impl Renderer {
     }
 
     pub fn render(&mut self, scene: &Scene, geometry: &Geometry, text_renderer: &TextRenderer) {
-        let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(frame) => frame,
-            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
-                self.surface.configure(&self.device, &self.config);
-                frame
-            }
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                self.surface.configure(&self.device, &self.config);
-                return;
-            }
-            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => return,
-            other => {
-                log::error!("Failed to acquire surface texture: {:?}", other);
+        let got = self.surface.get_current_texture();
+        let asked = Asked::at(&got);
+
+        if asked.reconfigure {
+            self.surface.configure(&self.device, &self.config);
+        }
+        if asked.complain {
+            log::error!("Failed to acquire surface texture: {:?}", got);
+        }
+
+        let frame = match got {
+            wgpu::CurrentSurfaceTexture::Success(frame)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
+            _ => {
+                // Nothing will be drawn this frame, and the frame has already
+                // staged its uploads: every `write_buffer` since the last
+                // submit is sitting in wgpu's staging, and staging only comes
+                // back when something is submitted. Returning without
+                // submitting keeps all of it, for ever.
+                //
+                // Which is what a window behind another window did. Nothing
+                // presents, so nothing waits on a vsync either and the loop
+                // runs as fast as the machine will go: the arcade staged three
+                // water surfaces a frame at some thousands of frames a second
+                // and grew by the better part of half a gigabyte a second. It
+                // reached a hundred and sixty-six gigabytes and took the
+                // machine down with it, four times over six days, because it
+                // only ever happened while the window was not being looked at.
+                //
+                // An empty submit is the whole of the fix. It costs nothing and
+                // it hands the staging back.
+                if asked.must_flush() {
+                    self.queue.submit([]);
+                }
+
                 return;
             }
         };
@@ -2294,6 +2376,72 @@ mod uniform_tests {
                 lamp.position_range,
                 "slot {} points at a different lamp than its layers hold",
                 slot
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod asked {
+    use super::*;
+
+    /// Every answer that is not a frame to draw into.
+    fn no_frame() -> [wgpu::CurrentSurfaceTexture; 4] {
+        [
+            wgpu::CurrentSurfaceTexture::Outdated,
+            wgpu::CurrentSurfaceTexture::Lost,
+            wgpu::CurrentSurfaceTexture::Timeout,
+            wgpu::CurrentSurfaceTexture::Occluded,
+        ]
+    }
+
+    /// A frame that draws nothing still hands its staging back.
+    ///
+    /// The one that matters, and the one that was wrong. `write_buffer` stages
+    /// into memory that only comes back on a submit, so a frame that uploads
+    /// and then returns without submitting keeps what it uploaded for ever.
+    /// A window behind another window never presents, so nothing waits on a
+    /// vsync either and the loop runs flat out: the arcade grew by the better
+    /// part of half a gigabyte a second that way, reached a hundred and
+    /// sixty-six gigabytes, and took the machine down with it four times over
+    /// six days before anybody caught it.
+    ///
+    /// It only happened while nobody was looking at the window, which is why a
+    /// test is the only thing that can hold it: there is no screenshot of this.
+    #[test]
+    fn a_frame_that_draws_nothing_still_flushes() {
+        for got in no_frame() {
+            let asked = Asked::at(&got);
+
+            assert!(!asked.draws, "{:?} is not a frame to draw into", got);
+            assert!(
+                asked.must_flush(),
+                "{:?} gives up without handing its staging back",
+                got
+            );
+        }
+    }
+
+    /// Being occluded or timing out is not a fault and is not logged.
+    ///
+    /// At a thousand frames a second an occluded window writes a thousand lines
+    /// a second, which is its own way of filling a disk.
+    #[test]
+    fn a_hidden_window_is_not_an_error() {
+        for got in [
+            wgpu::CurrentSurfaceTexture::Timeout,
+            wgpu::CurrentSurfaceTexture::Occluded,
+        ] {
+            assert!(!Asked::at(&got).complain, "{:?} is logged as a fault", got);
+        }
+        for got in [
+            wgpu::CurrentSurfaceTexture::Outdated,
+            wgpu::CurrentSurfaceTexture::Lost,
+        ] {
+            assert!(
+                !Asked::at(&got).complain && Asked::at(&got).reconfigure,
+                "{:?} should be set up again rather than complained about",
+                got
             );
         }
     }
