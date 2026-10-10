@@ -57,6 +57,25 @@ impl TextureData {
         self.levels[0].height
     }
 
+    /// Whether any texel of it is see-through enough to be cut away, per
+    /// spec 0047.
+    ///
+    /// Read once when a texture is added rather than asked of a draw. What it
+    /// decides is which passes a thing drawn with it belongs in: a texture
+    /// with holes cannot write depth in a pass that has no texture bound,
+    /// because that pass would stop the holes being holes.
+    pub fn has_holes(&self) -> bool {
+        self.levels
+            .first()
+            .map(|level| {
+                level
+                    .pixels
+                    .chunks_exact(4)
+                    .any(|texel| (texel[3] as f32) / 255.0 < crate::text::CUTOUT)
+            })
+            .unwrap_or(false)
+    }
+
     pub fn mip_level_count(&self) -> u32 {
         self.levels.len() as u32
     }
@@ -111,6 +130,20 @@ fn halve(level: &MipLevel) -> MipLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Spec 0047: a stencilled word has holes and a drawn one does not.
+    #[test]
+    fn a_stencilled_texture_has_holes() {
+        assert!(
+            crate::text::stencilled("Utopia", 24.0).has_holes(),
+            "a stencilled word has nothing to cut away"
+        );
+        assert!(
+            !crate::text::drawn("Utopia", 24.0).has_holes(),
+            "a drawn word has holes in it, which would take it out of the \
+             passes spec 0037 wants it in"
+        );
+    }
 
     /// A small checkerboard, encoded however the caller asks. JPEG has no
     /// alpha channel, so that one is encoded without one; decoding gives RGBA

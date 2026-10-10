@@ -40,6 +40,12 @@ becomes whatever the caller asks for, which is the same way the arcade's bands
 take their colour. Alpha would mean a quad that has to be sorted against
 everything else in the scene, and a sign is not worth that.
 
+That still holds, and `drawn` still does it. What it rules out is blending,
+and spec 0047 adds `text::stencilled` for the other thing: a cutout, which
+needs no sorting because a dropped fragment writes nothing at all. A sign on
+a dark panel wants the black, because it is a plate behind the letters at no
+cost. A title on a coloured book spine wants the spine.
+
 **It is tight to the words.** The texture is as wide as the string and as tall
 as a line, so the caller can shape a quad from `width()` and `height()` and
 nothing is stretched. A caller who wants padding adds it to the quad.

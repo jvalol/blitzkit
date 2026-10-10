@@ -39,10 +39,52 @@ const BREATHING: f32 = 0.08;
 /// Comes back with something in it whatever it is given. An empty string, one
 /// of spaces, or a character this font never heard of is a sign with nothing on
 /// it, which is a sign. A panic in a draw call is a crash.
+/// How much of a letter has to cover a texel for it to be drawn at all, per
+/// spec 0047.
+///
+/// Matches `CUTOUT` in `mesh.wgsl`. Keep the two in step.
+///
+/// Under a half, because small text is mostly edge: at a half the thin
+/// strokes of a title a centimetre tall go first and the letters come apart
+/// before they are small enough to be unreadable anyway. Much lower and the
+/// halo the font's antialiasing leaves starts being kept.
+pub const CUTOUT: f32 = 0.35;
+
+/// The same word with its ground cut away, per spec 0047.
+///
+/// Letters as [`drawn`] makes them, and alpha that is how much of a letter
+/// covers each texel rather than always full. The mesh shader drops a
+/// fragment under `CUTOUT`, so what is behind the quad shows between the
+/// letters.
+///
+/// Both of these exist because a sign on a dark panel wants the black: it is
+/// a plate behind the letters at no cost, which is spec 0037's reasoning and
+/// is still right. A title on a coloured book spine wants the spine.
+pub fn stencilled(words: &str, tall: f32) -> TextureData {
+    let (wide, high, pixels) = lettered(words, tall);
+
+    TextureData::from_pixels(wide, high, pixels)
+}
+
 pub fn drawn(words: &str, tall: f32) -> TextureData {
+    let (wide, high, mut pixels) = lettered(words, tall);
+
+    // opaque, ground and all, per spec 0037
+    for texel in pixels.chunks_exact_mut(4) {
+        texel[3] = 255;
+    }
+
+    TextureData::from_pixels(wide, high, pixels)
+}
+
+/// The letters themselves: coverage in every channel, alpha included, which
+/// is what the two above differ over.
+fn lettered(words: &str, tall: f32) -> (u32, u32, Vec<u8>) {
     let tall = tall.max(1.0);
     let Ok(font) = FontRef::try_from_slice(FONT_BYTES) else {
-        return TextureData::white();
+        // one white texel, which is what a missing font leaves either of
+        // these as rather than a panic
+        return (1, 1, vec![255, 255, 255, 255]);
     };
 
     let scaled = font.as_scaled(PxScale::from(tall * (1.0 - BREATHING * 2.0)));
@@ -65,9 +107,6 @@ pub fn drawn(words: &str, tall: f32) -> TextureData {
     let wide = pen.ceil().max(1.0) as u32;
     let high = tall.ceil().max(1.0) as u32;
     let mut pixels = vec![0u8; (wide * high * 4) as usize];
-    for texel in pixels.chunks_exact_mut(4) {
-        texel[3] = 255;
-    }
 
     for (id, at) in placed {
         let glyph = id.with_scale_and_position(scaled.scale(), ab_glyph::point(at, baseline));
@@ -85,13 +124,14 @@ pub fn drawn(words: &str, tall: f32) -> TextureData {
 
             let ink = (covered.clamp(0.0, 1.0) * 255.0) as u8;
             let n = ((y as u32 * wide + x as u32) * 4) as usize;
-            for channel in 0..3 {
+            // alpha too, which is the whole difference between the two
+            for channel in 0..4 {
                 pixels[n + channel] = pixels[n + channel].max(ink);
             }
         });
     }
 
-    TextureData::from_pixels(wide, high, pixels)
+    (wide, high, pixels)
 }
 
 /// How much of the window a line takes at `size`, in pixels: the widest line's
@@ -190,6 +230,109 @@ mod tests {
     }
 
     /// Spec 0037: letters are white and the ground is black, so a tint can
+    /// Spec 0047: a stencilled word has nothing behind it.
+    #[test]
+    fn a_stencilled_word_has_nothing_behind_it() {
+        let sign = stencilled("snake", 32.0);
+        let level = &sign.levels[0];
+
+        let bare = level
+            .pixels
+            .chunks_exact(4)
+            .filter(|texel| texel[3] == 0)
+            .count();
+        let inked = level
+            .pixels
+            .chunks_exact(4)
+            .filter(|texel| texel[3] > 200)
+            .count();
+
+        assert!(bare > 0, "every texel is covered, so nothing was cut away");
+        assert!(inked > 0, "no texel is a letter");
+    }
+
+    /// Spec 0047: and the letters themselves are the ones `drawn` draws.
+    ///
+    /// The two share their glyph work, so this is here to catch the day they
+    /// stop: a stencil whose letters have drifted from the sign's is two
+    /// fonts in one building.
+    #[test]
+    fn stencilling_moves_nothing_but_the_alpha() {
+        let sign = drawn("Middlemarch", 24.0);
+        let cut = stencilled("Middlemarch", 24.0);
+
+        for (one, other) in sign.levels[0]
+            .pixels
+            .chunks_exact(4)
+            .zip(cut.levels[0].pixels.chunks_exact(4))
+        {
+            assert_eq!(
+                (one[0], one[1], one[2]),
+                (other[0], other[1], other[2]),
+                "a letter is a different colour stencilled than drawn"
+            );
+        }
+    }
+
+    /// Spec 0047: and it is the same size.
+    #[test]
+    fn a_stencilled_word_is_tight_to_the_words() {
+        let sign = drawn("Persuasion", 18.0);
+        let cut = stencilled("Persuasion", 18.0);
+
+        assert_eq!((cut.width(), cut.height()), (sign.width(), sign.height()));
+    }
+
+    /// Spec 0047: the same words twice give the same texture.
+    #[test]
+    fn the_same_words_stencil_the_same() {
+        assert_eq!(
+            stencilled("Utopia", 20.0).levels[0].pixels,
+            stencilled("Utopia", 20.0).levels[0].pixels
+        );
+    }
+
+    /// Spec 0047: and nothing still comes back.
+    #[test]
+    fn nothing_still_stencils() {
+        for words in ["", "   ", "\u{1F600}"] {
+            let cut = stencilled(words, 16.0);
+
+            assert!(
+                cut.width() > 0 && cut.height() > 0,
+                "{:?} stencilled to nothing at all",
+                words
+            );
+        }
+    }
+
+    /// Spec 0047: the shader cuts out at the number this says it does.
+    ///
+    /// Read out of the shader rather than trusted to a comment, the way spec
+    /// 0022's face table is. A comment saying to keep two numbers in step is
+    /// not a thing that keeps two numbers in step.
+    #[test]
+    fn the_shader_cuts_out_at_the_same_number() {
+        let source = include_str!("../res/shaders/mesh.wgsl");
+        let at = source
+            .find("const CUTOUT: f32 = ")
+            .expect("the shader declares a cutout");
+        let line = &source[at..];
+        let line = &line[..line.find(';').expect("it ends")];
+        let theirs: f32 = line
+            .rsplit(' ')
+            .next()
+            .expect("a number")
+            .parse()
+            .expect("a number");
+
+        assert_eq!(
+            theirs, CUTOUT,
+            "the shader cuts out at {theirs} and text::CUTOUT is {CUTOUT}"
+        );
+        const { assert!(CUTOUT < 0.5, "the cutout is not under a half") };
+    }
+
     /// colour them the way everything else in this engine is coloured.
     #[test]
     fn it_is_white_on_black() {

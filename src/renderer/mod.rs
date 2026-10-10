@@ -79,6 +79,9 @@ pub struct Renderer {
     /// Depth for the whole scene, settled before anything is shaded, so the
     /// mesh pass can read it while it tests against it. See spec 0029.
     prepass_pipeline: wgpu::RenderPipeline,
+    /// Which textures have something cut out of them, by `TextureId`. Spec
+    /// 0047.
+    holed: Vec<bool>,
     scene_depth_layout: wgpu::BindGroupLayout,
     scene_depth_bind_group: wgpu::BindGroup,
     /// Whether the march happens at all. A cost, and a game with nothing
@@ -602,6 +605,7 @@ impl Renderer {
             outline_pipeline,
             outline_buffer,
             prepass_pipeline,
+            holed: Vec::new(),
             scene_depth_layout,
             scene_depth_bind_group,
             contact_shadows: true,
@@ -631,6 +635,9 @@ impl Renderer {
     /// Uploads an image and its mip chain, and hands back the handle a game
     /// draws with.
     pub fn add_texture(&mut self, data: &TextureData) -> TextureId {
+        // whether anything drawn with this belongs in the passes that write
+        // depth without a texture bound. See spec 0047.
+        self.holed.push(data.has_holes());
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Texture"),
             size: wgpu::Extent3d {
@@ -978,7 +985,14 @@ impl Renderer {
                 shadow_pass.set_bind_group(1, &self.which_bind_groups[which as usize], &[]);
                 shadow_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
-                for (mesh_id, _, first, count) in batches.iter() {
+                for (mesh_id, texture_id, first, count) in batches.iter() {
+                    // a texture with holes casts no shadow here, for the
+                    // reason the prepass skips it: this pass has no texture
+                    // bound, so a line of lettering would throw the shadow
+                    // of the rectangle it is written on. Spec 0047.
+                    if self.holed.get(texture_id.0).copied().unwrap_or(false) {
+                        continue;
+                    }
                     let mesh = &self.meshes[mesh_id.0];
                     if mesh.index_count == 0 {
                         continue;
@@ -1022,7 +1036,14 @@ impl Renderer {
                 shadow_pass.set_bind_group(2, &self.point_faces_bind_group, &[]);
                 shadow_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
-                for (mesh_id, _, first, count) in batches.iter() {
+                for (mesh_id, texture_id, first, count) in batches.iter() {
+                    // a texture with holes casts no shadow here, for the
+                    // reason the prepass skips it: this pass has no texture
+                    // bound, so a line of lettering would throw the shadow
+                    // of the rectangle it is written on. Spec 0047.
+                    if self.holed.get(texture_id.0).copied().unwrap_or(false) {
+                        continue;
+                    }
                     let mesh = &self.meshes[mesh_id.0];
                     if mesh.index_count == 0 {
                         continue;
@@ -1061,9 +1082,16 @@ impl Renderer {
                 prepass.set_bind_group(0, &self.camera_bind_group, &[]);
                 prepass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
-                for (mesh_id, _, first, count) in opaque.iter() {
+                for (mesh_id, texture_id, first, count) in opaque.iter() {
                     let mesh = &self.meshes[mesh_id.0];
-                    if mesh.index_count == 0 {
+                    // a texture with holes in it cannot write depth here:
+                    // this pass has no texture bound and would fill in the
+                    // holes, which would leave the mesh pass cutting them
+                    // out of a depth buffer that already hid what is behind
+                    // them. Spec 0047.
+                    if mesh.index_count == 0
+                        || self.holed.get(texture_id.0).copied().unwrap_or(false)
+                    {
                         continue;
                     }
                     prepass.set_vertex_buffer(0, mesh.vertices.slice(..));

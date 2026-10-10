@@ -193,6 +193,10 @@ const NORMAL_STEP: f32 = 2.0;
 const SPOT_MIN_BIAS: f32 = 0.0005;
 const SPOT_MAX_BIAS: f32 = 0.004;
 
+// How much of a letter has to cover a texel for it to be drawn at all.
+// Matches text::CUTOUT in Rust. Keep the two in step. See spec 0047.
+const CUTOUT: f32 = 0.35;
+
 // Matches shadow::is_lit, shadow::bias and shadow::sample_at in Rust. Keep the
 // two in step.
 fn shadow_factor(world_position: vec3<f32>, normal: vec3<f32>, to_light: vec3<f32>) -> f32 {
@@ -603,6 +607,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // the instance color tints what is sampled rather than replacing it
     let sampled = textureSample(surface_texture, surface_sampler, in.uv);
+
+    // and a texel the texture says is not there is not drawn, per spec 0047.
+    // Before anything is lit, so what is dropped costs the sample and no
+    // more. A dropped fragment writes no depth either, which is what lets
+    // this sit in the opaque pass with nothing sorted: it is a cutout and
+    // not blending, which is the thing spec 0037 ruled out.
+    //
+    // Every texture this engine is given writes full alpha unless it was
+    // built by `text::stencilled`, so nothing that did not ask for a cutout
+    // comes near this.
+    if sampled.a < CUTOUT {
+        discard;
+    }
+
     let base = in.color * sampled;
 
     var shaded = base.rgb * (uniforms.ambient.rgb + diffuse * lit) + specular * lit;
