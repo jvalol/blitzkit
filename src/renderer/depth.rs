@@ -49,6 +49,25 @@ pub fn state() -> wgpu::DepthStencilState {
     }
 }
 
+/// What an outline declares, per spec 0046: tested, and not written.
+///
+/// Not written, because a wireframe that occludes the wireframe behind it
+/// hides the comparison, and because this pass shares the mesh pass's
+/// read-only depth attachment.
+///
+/// No depth bias here, though an outline badly wants one: its job is to trace
+/// a collider that usually agrees with the wall it is drawn over, and two
+/// surfaces at one depth fight. wgpu refuses a bias on anything that is not
+/// triangles, and this is lines, so the nudge toward the camera is done in
+/// `outline.wgsl` instead. Written down because a bias was tried here first
+/// and the validation error names the reason.
+pub fn outline_state() -> wgpu::DepthStencilState {
+    wgpu::DepthStencilState {
+        depth_write_enabled: Some(false),
+        ..state()
+    }
+}
+
 /// 3D geometry culls its back faces, counter-clockwise winding facing the
 /// camera. Quads do not, per spec 0001, so they keep the default.
 pub fn mesh_primitive_state() -> wgpu::PrimitiveState {

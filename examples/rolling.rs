@@ -4,7 +4,8 @@
 //! `cargo run --release --example rolling`
 //!
 //! WASD or the arrows roll the ball, the camera follows it, drag or move the
-//! mouse to swing the camera around, scroll to zoom, and escape quits.
+//! mouse to swing the camera around, scroll to zoom, O outlines what is
+//! solid, and escape quits.
 
 use blitzkit::camera::Camera;
 use blitzkit::collision::{move_and_slide, Aabb, Sphere};
@@ -29,6 +30,8 @@ struct Rolling {
     floor_mesh: Option<MeshId>,
     /// Walls and obstacles, the same boxes that are drawn.
     colliders: Vec<Aabb>,
+    /// Whether the colliders are outlined, per spec 0046.
+    outlining: bool,
     position: Vec3,
     /// Which way the ball rolls, from the keys held.
     drive: Vec3,
@@ -72,6 +75,7 @@ impl Rolling {
             box_mesh: None,
             floor_mesh: None,
             colliders,
+            outlining: false,
             position: vec3(0.0, BALL_RADIUS, 6.0),
             drive: Vec3::ZERO,
             camera_angle: 0.0,
@@ -151,6 +155,16 @@ impl Game for Rolling {
                 &Transform::at(collider.center()).with_scale(collider.size()),
                 vec4(0.45, 0.45, 0.55, 1.0),
             );
+
+            // and outlined on top of that with O, which is what a game does
+            // when the two are not the same list and it wants to see which.
+            // Here they are the same list, so the outline sits exactly on the
+            // box: that is the case worth looking at, because it is the one
+            // that speckles if the edge is not pulled toward the camera.
+            // Spec 0046.
+            if self.outlining {
+                scene.outline(*collider, vec4(0.0, 1.6, 0.9, 1.0));
+            }
         }
 
         scene.push_material(
@@ -179,6 +193,11 @@ impl Game for Rolling {
             KeyboardKey::S | KeyboardKey::Down => self.drive.z = -amount,
             KeyboardKey::A | KeyboardKey::Left => self.drive.x = -amount,
             KeyboardKey::D | KeyboardKey::Right => self.drive.x = amount,
+            KeyboardKey::O => {
+                if held {
+                    self.outlining = !self.outlining;
+                }
+            }
             KeyboardKey::Escape => self.quitting = held,
             _ => (),
         }

@@ -37,8 +37,9 @@ existing specs to stay true.
 
 - `src/lib.rs` — the `Game` trait, the winit event loop, frame timing.
 - `src/renderer/` — wgpu setup, the quad and mesh pipelines, text through
-  `wgpu_text`. `scene.rs` is what a game pushes to be drawn in 3D, and
-  `depth.rs` holds the depth buffer and the settings that go with it.
+  `wgpu_text`. `scene.rs` is what a game pushes to be drawn in 3D, `depth.rs`
+  holds the depth buffer and the settings that go with it, and `outline.rs`
+  turns a collision box into the twelve edges the debug pass draws.
 - `src/geometry/` — quads the game pushes each frame, and their vertices.
 - `src/camera.rs` — where the scene is looked at from, and its matrices.
 - `src/mesh.rs` — 3D vertices, the shapes that ship with the engine, and the
@@ -56,8 +57,8 @@ existing specs to stay true.
 - `res/` — the font, the quad, mesh and shadow shaders, and the texture the
   examples use. All of it is compiled in.
 - `examples/` — `cubes` for specs 0007 through 0012 and the lights of 0020
-  through 0022, `rolling` for 0013 through 0015, `klein` and `tunnel` for 0016,
-  `teapot` for 0017. `klein` and `teapot` also show 0018.
+  through 0022, `rolling` for 0013 through 0015 and 0046, `klein` and `tunnel`
+  for 0016, `teapot` for 0017. `klein` and `teapot` also show 0018.
 - `specs/` — what the engine promises.
 
 ## Conventions

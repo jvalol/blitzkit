@@ -4,10 +4,12 @@
 //! thing it wants drawn, the same shape as `Geometry::push_quad`, and the
 //! renderer batches everything sharing a mesh into one instanced draw.
 
+use crate::collision::Aabb;
 use crate::lighting::{
     Light, PointLight, SpotLight, MAX_POINT_LIGHTS, MAX_SHADOWING_POINT_LIGHTS, MAX_SPOT_LIGHTS,
 };
 use crate::mesh::Transform;
+use crate::renderer::outline::Outline;
 use glam::Vec4;
 use std::collections::HashMap;
 
@@ -114,7 +116,17 @@ pub struct Scene {
     /// The spots, likewise. Far fewer, because each one costs a pass over the
     /// scene to fill its shadow map. See spec 0021.
     spot_lights: Vec<SpotLight>,
+    /// Collision boxes to draw over the finished scene, refilled each frame
+    /// like the rest of this. See spec 0046.
+    outlines: Vec<Outline>,
 }
+
+/// How many boxes a scene may outline in one frame, per spec 0046.
+///
+/// A whole building's worth and then some. The arcade's is a few hundred, and
+/// this is the list a game reaches for when it wants to see all of something
+/// rather than a part.
+pub const MAX_OUTLINES: usize = 4096;
 
 impl Scene {
     pub fn new() -> Self {
@@ -128,6 +140,33 @@ impl Scene {
         }
         self.point_lights.clear();
         self.spot_lights.clear();
+        self.outlines.clear();
+    }
+
+    /// Draws a collision box over the finished scene this frame, per spec 0046.
+    ///
+    /// What a game draws and what it lets you walk into are two different
+    /// lists, and when they come apart neither looks wrong on its own. Two
+    /// calls in two colours put both lists up at once: where they agree you
+    /// see one outline, and where they disagree the gap between them is the
+    /// bug.
+    ///
+    /// Past [`MAX_OUTLINES`] the extra are dropped and said so, the way a
+    /// scene with too many lamps is told.
+    pub fn outline(&mut self, box_: Aabb, color: Vec4) {
+        if self.outlines.len() >= MAX_OUTLINES {
+            log::warn!(
+                "a scene outlined more than {} boxes; the rest are dropped",
+                MAX_OUTLINES
+            );
+            return;
+        }
+
+        self.outlines.push(Outline { box_, color });
+    }
+
+    pub fn outlines(&self) -> &[Outline] {
+        &self.outlines
     }
 
     /// Adds a lamp for this frame, per spec 0020.
@@ -249,6 +288,30 @@ impl Scene {
 
 #[cfg(test)]
 mod tests {
+
+    /// Spec 0046: past the cap the extra are dropped and said so.
+    #[test]
+    fn too_many_outlines_are_dropped_and_said_so() {
+        let mut scene = Scene::new();
+
+        for n in 0..(MAX_OUTLINES + 10) {
+            let at = glam::Vec3::splat(n as f32);
+            scene.outline(Aabb::new(at, at + glam::Vec3::ONE), Vec4::ONE);
+        }
+
+        assert_eq!(scene.outlines().len(), MAX_OUTLINES);
+    }
+
+    /// Spec 0046: they are this frame's, like everything else here.
+    #[test]
+    fn reset_drops_the_outlines() {
+        let mut scene = Scene::new();
+        scene.outline(Aabb::new(glam::Vec3::ZERO, glam::Vec3::ONE), Vec4::ONE);
+        assert_eq!(scene.outlines().len(), 1);
+
+        scene.reset();
+        assert!(scene.outlines().is_empty(), "an outline outlived its frame");
+    }
     use super::*;
 
     fn spot(at: f32) -> SpotLight {

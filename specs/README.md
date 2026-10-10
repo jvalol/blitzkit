@@ -52,6 +52,7 @@ not a priority, and it never changes once a spec exists.
 | [0043](0043-water.md) | A surface that moves, and what water does to a body in it |
 | [0044](0044-a-sound-a-game-makes.md) | Samples a game worked out itself, played where it likes |
 | [0045](0045-a-sound-a-game-was-given.md) | A WAV read out of memory, so a footstep can be a recording |
+| [0046](0046-seeing-what-is-solid.md) | Collision boxes drawn over the scene, so a collider that disagrees with what is drawn is visible |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.

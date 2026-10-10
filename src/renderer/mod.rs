@@ -8,6 +8,7 @@
 //! A game never sees a wgpu type. Anything uploaded comes back as a handle.
 
 pub mod depth;
+pub mod outline;
 pub mod render_text;
 pub mod scene;
 
@@ -72,6 +73,9 @@ pub struct Renderer {
     /// arrives with meshes in spec 0010; quads and text never use it.
     depth: depth::DepthTexture,
     mesh_pipeline: wgpu::RenderPipeline,
+    /// Collision boxes drawn over the scene as lines, per spec 0046.
+    outline_pipeline: wgpu::RenderPipeline,
+    outline_buffer: wgpu::Buffer,
     /// Depth for the whole scene, settled before anything is shaded, so the
     /// mesh pass can read it while it tests against it. See spec 0029.
     prepass_pipeline: wgpu::RenderPipeline,
@@ -572,6 +576,9 @@ impl Renderer {
             )
         });
         let instance_buffer = create_buffer(&device, 0, wgpu::BufferUsages::VERTEX);
+        let outline_pipeline =
+            create_outline_pipeline(&device, &camera_bind_group_layout, config.format);
+        let outline_buffer = create_buffer(&device, 0, wgpu::BufferUsages::VERTEX);
 
         let mut renderer = Self {
             window,
@@ -592,6 +599,8 @@ impl Renderer {
             text_brush,
             depth,
             mesh_pipeline,
+            outline_pipeline,
+            outline_buffer,
             prepass_pipeline,
             scene_depth_layout,
             scene_depth_bind_group,
@@ -920,6 +929,7 @@ impl Renderer {
         // holds a depth and has nowhere to put an alpha. It does not see a
         // glowing thing at all, per spec 0039.
         let (opaque, translucent, batches) = self.upload_instances(scene);
+        let outlines = self.upload_outlines(scene);
 
         // what the light can see, first of all. Skipped when nothing is drawn in
         // 3D: the instance buffer is empty then, and slicing an empty buffer is
@@ -1124,6 +1134,16 @@ impl Renderer {
                     }
                 }
             }
+
+            // and the colliders over the top of it, per spec 0046. Last, so
+            // they are over everything they are being compared against, and
+            // tested, so one behind a wall is hidden.
+            if outlines > 0 {
+                mesh_pass.set_pipeline(&self.outline_pipeline);
+                mesh_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                mesh_pass.set_vertex_buffer(0, self.outline_buffer.slice(..));
+                mesh_pass.draw(0..outlines, 0..1);
+            }
         }
 
         {
@@ -1229,6 +1249,30 @@ impl Renderer {
         }
 
         (opaque, translucent, casting)
+    }
+
+    /// Writes this frame's outlines into their buffer, per spec 0046, and
+    /// says how many vertices went in.
+    fn upload_outlines(&mut self, scene: &Scene) -> u32 {
+        let mut vertices: Vec<outline::Vertex> = Vec::new();
+
+        for one in scene.outlines() {
+            vertices.extend_from_slice(&outline::vertices(one));
+        }
+
+        if vertices.is_empty() {
+            return 0;
+        }
+
+        let bytes: &[u8] = bytemuck::cast_slice(&vertices);
+        if bytes.len() as u64 > self.outline_buffer.size() {
+            self.outline_buffer =
+                create_buffer_init(&self.device, bytes, wgpu::BufferUsages::VERTEX);
+        } else {
+            self.queue.write_buffer(&self.outline_buffer, 0, bytes);
+        }
+
+        vertices.len() as u32
     }
 
     /// Writes this frame's quads into the vertex and index buffers, growing them when they are too small.
@@ -1524,6 +1568,51 @@ fn create_shadow_pipeline(
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// The outlines, per spec 0046: lines, unlit, over the finished scene.
+fn create_outline_pipeline(
+    device: &wgpu::Device,
+    camera_bind_group_layout: &wgpu::BindGroupLayout,
+    format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::include_wgsl!("../../res/shaders/outline.wgsl"));
+
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("Outline Pipeline Layout"),
+        bind_group_layouts: &[Some(camera_bind_group_layout)],
+        immediate_size: 0,
+    });
+
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Outline Pipeline"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[Some(outline::Vertex::DESC)],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        // lines, and no culling: a line has no side to be the back of
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::LineList,
+            ..Default::default()
+        },
+        depth_stencil: Some(depth::outline_state()),
         multisample: wgpu::MultisampleState::default(),
         multiview_mask: None,
         cache: None,
