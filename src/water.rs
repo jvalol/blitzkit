@@ -71,6 +71,17 @@ pub const CHOP: f32 = 0.45;
 /// Past it the pool loses time rather than the frame: a game that stalls for a
 /// second gets water that has moved less than a second, not water that has
 /// exploded.
+/// How many times a second the surface is stepped, whatever the frame does.
+///
+/// A fixed rate and not the frame's own, because the frame's own wanders and
+/// a wave equation stepped at a wandering dt has its highest mode pumped.
+/// See `step`. Finer than this where stability asks for it, never coarser.
+///
+/// A hundred and twenty, which is a frame on the machines these games run on,
+/// so the common case is one substep a frame and the carried remainder stays
+/// near nothing.
+pub const RATE: f32 = 120.0;
+
 pub const MOST_STEPS: u32 = 8;
 
 /// How far off still the surface is allowed to get, as a share of how deep the
@@ -119,6 +130,9 @@ pub struct Water {
     along: usize,
     /// How far apart two nodes are. Square cells, so one number.
     step: f32,
+    /// Time handed over that has not been stepped yet, carried so that the
+    /// substep can be one size whatever the frame does.
+    owed: f32,
     height: Vec<f32>,
     rate: Vec<f32>,
 }
@@ -139,6 +153,7 @@ impl Water {
         let along = ((size.y / step).round() as usize).max(1) + 1;
 
         Self {
+            owed: 0.0,
             at,
             size,
             deep: deep.max(0.0),
@@ -178,15 +193,29 @@ impl Water {
 
         self.since += dt;
 
-        let limit = self.longest_step();
-        let wanted = (dt / limit).ceil().max(1.0);
-        let steps = (wanted as u32).min(MOST_STEPS);
-        // capped, this is less than the frame asked for, which is the pool
-        // losing time rather than the frame losing the pool
-        let sub = (dt / steps as f32).min(limit);
+        // One size of substep, always, with what is left over carried to the
+        // next frame.
+        //
+        // Not the frame divided into however many substeps stability needs,
+        // which is what this did and which blew the baths' pool up. That
+        // substep is the frame time, and a frame time wanders: the arcade's
+        // sat at 8.4 milliseconds with a longer one every three or four
+        // frames. A wave equation stepped at a wandering dt is a pendulum
+        // whose length is being shaken, and shaking one at twice its own
+        // frequency pumps it. The pool's grid-scale mode runs at 7.8 frames a
+        // cycle, the jitter came every 2 to 4, and over eighty seconds the
+        // surface went from a millimetre of ripple to every other node
+        // slammed against the brim: a forest of spikes.
+        //
+        // The same frame times shuffled into another order are harmless,
+        // which is how this was pinned down. It is the rhythm and not the
+        // sizes.
+        let fixed = (1.0 / RATE).min(self.longest_step());
+        self.owed = (self.owed + dt).min(fixed * MOST_STEPS as f32);
 
-        for _ in 0..steps {
-            self.once(sub);
+        while self.owed >= fixed {
+            self.once(fixed);
+            self.owed -= fixed;
         }
     }
 
@@ -716,6 +745,64 @@ mod tests {
     /// How much water there is, up to a constant. Reflecting walls conserve it.
     fn level(water: &Water) -> f32 {
         water.height.iter().sum()
+    }
+
+    /// Spec 0043: a frame that wanders does not pump the surface.
+    ///
+    /// This is the fault that took the arcade's pool. The surface was stepped
+    /// in however many substeps the frame needed, which made the substep the
+    /// frame time, and a frame time wanders: the arcade's sat at 8.4
+    /// milliseconds with a longer one every three or four frames. A wave
+    /// equation stepped at a wandering dt is a pendulum whose length is being
+    /// shaken, and shaking one at twice its own frequency pumps it.
+    ///
+    /// The pool's grid-scale mode runs at about eight frames a cycle and the
+    /// jitter came every two to four, which is the resonance. Over eighty
+    /// seconds a millimetre of ripple became every other node slammed against
+    /// the brim, which draws as a forest of spikes.
+    ///
+    /// The frame times here are a tenth of a millisecond apart. The point is
+    /// that the rhythm and not the size is what did it: the same frame times
+    /// shuffled into another order never moved the surface at all.
+    #[test]
+    fn a_frame_that_wanders_does_not_pump_the_surface() {
+        // the arcade's pool, which is the one it happened to
+        let mut water = Water::new(Vec3::ZERO, vec2(8.0, 5.0), 1.08, 80);
+        water.damping = 0.3;
+        water.speed = 3.4;
+
+        let mean = 0.00836;
+        let (mut since, mut owed, mut most) = (0.0f32, 0.0f32, 0.0f32);
+
+        // ninety seconds of it, which is twice as long as the arcade took
+        for n in 0..10_800u32 {
+            // a longer frame every fourth, which is the rhythm that resonates
+            let dt = if n % 4 == 0 { mean * 1.06 } else { mean * 0.98 };
+
+            since += dt;
+            owed += dt;
+            if owed >= 0.22 {
+                owed -= 0.22;
+                water.push(
+                    Vec3::new((since * 0.7).cos() * 3.3, 0.0, (since * 0.96).sin() * 2.1),
+                    0.34,
+                    0.055,
+                );
+            }
+
+            water.step(dt);
+            most = most.max(stirring(&water));
+        }
+
+        // a stir of 0.055 into a pool a metre deep settles at a few
+        // millimetres. A tenth of the depth is a surface that has run away.
+        assert!(
+            most < 0.1,
+            "after {:.0} seconds of a wandering frame the surface reached {:.4}, \
+             which is a pool being pumped rather than stirred",
+            since,
+            most
+        );
     }
 
     /// Spec 0043: still water stays still.

@@ -33,13 +33,33 @@ neighbours, less a damping term proportional to its speed:
 
 **Stability** is the whole difficulty with stepping it directly. The explicit
 form above goes unstable the moment a wave can cross a cell in one step, which
-is the Courant condition `c·dt ≤ dx/√2` in two dimensions. `step(dt)` therefore
-takes as many equal substeps as it needs to keep under that and no more, so a
-frame that arrives late makes the water slower to compute rather than louder.
-The count is capped: a dt long enough to need more than `MOST_STEPS` is treated
-as that many, which loses time rather than the frame. A game that stalls for a
-second gets a pool that has moved less than a second's worth, not a pool that
-has exploded.
+is the Courant condition `c·dt ≤ dx/√2` in two dimensions.
+
+**The substep is one size, always**, and the frame has nothing to say about it.
+`step(dt)` adds the frame to what it is owed and takes as many substeps of
+`1/RATE` as that covers, carrying the remainder to the next frame. Where the
+Courant condition asks for finer than `1/RATE` it gets finer, never coarser.
+The backlog is capped at `MOST_STEPS` substeps: a game that stalls for a second
+gets a pool that has moved less than a second's worth, not a pool that has
+exploded.
+
+It did not used to be one size. It used to divide the frame into however many
+substeps stability needed, which made the substep the frame time, and that is
+the fault that took the arcade's pool. A frame time wanders: the arcade's sat
+at 8.4 milliseconds with a longer one every three or four frames. A wave
+equation stepped at a wandering dt is a pendulum whose length is being shaken,
+and shaking one at twice its own frequency pumps it. The pool's grid-scale
+mode, the one where every other node alternates, ran at about eight frames a
+cycle against jitter every two to four, which is the resonance. Over eighty
+seconds a millimetre of ripple became every node slammed against the brim, and
+it drew as a forest of spikes standing out of the water.
+
+Every frame time was well inside the Courant condition, by a factor of better
+than two, so nothing was crossing a cell in a step. What settled it was
+replaying the game's own recorded frame times in a different order: the same
+numbers shuffled never moved the surface at all. It was the rhythm and not the
+sizes, which is why a fixed substep is the fix and a smaller one would not have
+been.
 
 **A brim.** The surface cannot get further off still than `BRIM` of its own
 depth, and a node held there loses its speed with it. Water does not climb out
@@ -160,6 +180,7 @@ not carried: a wall does not float.
 - Damping brings it back to still. — `water::tests::it_settles`
 - A push in the middle stays symmetric. — `water::tests::a_middle_push_stays_even`
 - A long step is substepped rather than let go unstable. — `water::tests::a_long_step_stays_bounded`
+- A frame that wanders does not pump the surface. — `water::tests::a_frame_that_wanders_does_not_pump_the_surface`
 - A step longer than the cap loses time rather than the pool. — `water::tests::a_stalled_frame_loses_time`
 - Edges reflect, and a push moves water rather than taking it away. — `water::tests::the_walls_hold_it_in`
 - The surface cannot leave its basin, whatever is done to it, and comes back down. — `water::tests::the_surface_cannot_leave_the_basin`
