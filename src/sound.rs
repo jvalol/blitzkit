@@ -54,6 +54,17 @@ const PRIMING_SAMPLES: usize = 4_410;
 /// works a sound out once, keeps it, and plays it as often as it likes: a
 /// footstep that allocated a buffer every time somebody took a step would be a
 /// game that allocated on every step.
+///
+/// **To look inside one**, clone it and collect it: this is an
+/// `Iterator<Item = f32>`, so `sound.clone().collect::<Vec<f32>>()` gives the
+/// run as it will be heard, with [`Samples::gain`] applied. The clone is
+/// because collecting consumes, and it costs nothing. The rate is
+/// [`Samples::len`] over [`Samples::seconds`].
+///
+/// Said here because the method list below does not say it and reads as
+/// though a sound cannot be inspected at all. Somebody concluded exactly that,
+/// deleted a test over it, and started adding accessors that were already
+/// here under another name.
 #[derive(Clone, Debug)]
 pub struct Samples {
     rate: std::num::NonZeroU32,
