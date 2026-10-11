@@ -830,7 +830,12 @@ impl Renderer {
             }
         }
 
-        coplanar::Fights::of(boxes, turned, shaped)
+        coplanar::Fights::of(boxes, turned, shaped, &self.looking())
+    }
+
+    /// What this camera's depth buffer can tell apart, per spec 0048.
+    pub fn looking(&self) -> crate::renderer::depth::Depth {
+        crate::renderer::depth::Depth::of(&self.camera)
     }
 
     /// Asks for one coplanar check on the next frame drawn, per spec 0048.

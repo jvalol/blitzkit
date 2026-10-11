@@ -57,6 +57,7 @@ pub struct Reach {
     counts: [usize; 3],
     reached: Vec<bool>,
     cells: usize,
+    reached_box: Option<Aabb>,
 }
 
 impl Reach {
@@ -106,6 +107,7 @@ impl Reach {
             counts,
             reached: Vec::new(),
             cells: 0,
+            reached_box: None,
         };
 
         if total > MOST {
@@ -302,6 +304,28 @@ impl Reach {
             }
         }
 
+        // and the box round all of it, for whoever asks how far back an eye
+        // can get
+        let mut reached_box = None;
+
+        for i in 0..counts[0] {
+            for j in 0..counts[1] {
+                for k in 0..counts[2] {
+                    if !reached[at_of([i, j, k])] {
+                        continue;
+                    }
+
+                    let low = within.min + Vec3::new(i as f32, j as f32, k as f32) * step;
+                    let cell = Aabb::new(low, low + Vec3::splat(step));
+
+                    reached_box = Some(match reached_box {
+                        Some(box_) => Aabb::union(&box_, &cell),
+                        None => cell,
+                    });
+                }
+            }
+        }
+
         Self {
             step,
             radius: body.radius,
@@ -309,6 +333,7 @@ impl Reach {
             counts,
             reached,
             cells,
+            reached_box,
         }
     }
 
@@ -326,6 +351,16 @@ impl Reach {
     /// How many cells the fill reached.
     pub fn cells(&self) -> usize {
         self.cells
+    }
+
+    /// The box round everywhere a body can be, or nothing if nowhere is.
+    ///
+    /// One box and not the cells, because what asks for this is asking how far
+    /// back an eye can get, and the far corner of the whole of it answers that
+    /// without a search. Generous, since it does not know which of the cells in
+    /// that box were actually reached.
+    pub fn reached_box(&self) -> Option<Aabb> {
+        self.reached_box
     }
 
     /// How big one cell is.

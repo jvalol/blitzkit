@@ -124,6 +124,103 @@ impl DepthTexture {
 mod tests {
     use super::*;
 
+    /// The hall this was written for is 16.6 metres long.
+    const CAMERA: Depth = Depth {
+        near: 0.1,
+        far: 100.0,
+    };
+
+    /// Spec 0048: four times as far is sixteen times as coarse.
+    #[test]
+    fn what_the_buffer_resolves_grows_with_the_square_of_the_distance() {
+        let near = CAMERA.resolves_at(5.0);
+        let far = CAMERA.resolves_at(20.0);
+
+        assert!(
+            (far / near - 16.0).abs() < 0.01,
+            "five metres resolves {:.6} and twenty resolves {:.6}, a ratio of {:.2}",
+            near,
+            far,
+            far / near
+        );
+    }
+
+    /// And the numbers themselves, because a law with the wrong constant in it
+    /// still obeys the law.
+    #[test]
+    fn the_buffer_resolves_a_seventh_of_a_millimetre_across_the_hall() {
+        let across = CAMERA.resolves_at(16.6);
+
+        assert!(
+            (across - 1.64e-4).abs() < 1e-5,
+            "across the hall it resolves {:.6} metres, not about 0.000164",
+            across
+        );
+    }
+
+    /// A gap and the distance it starts fighting at are each other backwards.
+    #[test]
+    fn a_gap_and_the_distance_it_fights_past_undo_each_other() {
+        for z in [1.0f32, 5.0, 16.6, 50.0].iter().copied() {
+            let back = CAMERA.fights_past(CAMERA.resolves_at(z));
+
+            assert!(
+                (back - z).abs() < 0.01,
+                "a gap resolved at {:.2} metres came back as fighting past {:.2}",
+                z,
+                back
+            );
+        }
+    }
+
+    /// Faces in one plane fight wherever you stand.
+    #[test]
+    fn faces_in_one_plane_fight_from_no_distance_at_all() {
+        assert_eq!(
+            CAMERA.fights_past(0.0),
+            0.0,
+            "two faces in one plane were given a distance to fight past"
+        );
+    }
+
+    /// Past the widest gap there is nothing to compare, and the widest gap is
+    /// the one that only fights at the far plane.
+    #[test]
+    fn the_widest_gap_that_fights_is_the_one_at_the_far_plane() {
+        let widest = CAMERA.widest();
+
+        assert!(
+            (CAMERA.fights_past(widest) - CAMERA.far).abs() < 0.5,
+            "the widest gap of {:.6} fights past {:.1}, not {:.1}",
+            widest,
+            CAMERA.fights_past(widest),
+            CAMERA.far
+        );
+
+        // and a hair wider than that is out of range altogether
+        assert!(
+            CAMERA.fights_past(widest * 1.5) > CAMERA.far,
+            "a gap half again as wide still fights inside the far plane"
+        );
+    }
+
+    /// A camera with nothing between its planes gives numbers rather than
+    /// infinities, because a game is allowed to set a silly one.
+    #[test]
+    fn a_camera_with_no_depth_at_all_still_answers() {
+        let flat = Depth {
+            near: 0.0,
+            far: 0.0,
+        };
+
+        assert!(
+            flat.resolves_at(10.0).is_finite() && flat.fights_past(1e-4).is_finite(),
+            "a camera with no range gave {:?} and {:?}",
+            flat.resolves_at(10.0),
+            flat.fights_past(1e-4)
+        );
+    }
+
     #[test]
     fn the_prepass_writes_what_the_mesh_pass_tests() {
         // the prepass settles depth and the mesh pass reads it, so they have to
@@ -204,5 +301,72 @@ mod tests {
 
         assert_eq!(primitive.cull_mode, Some(wgpu::Face::Back));
         assert_eq!(primitive.front_face, wgpu::FrontFace::Ccw);
+    }
+}
+
+/// The step between two neighbouring values in the depth buffer.
+///
+/// [`FORMAT`] holds a float in nought to one, and this engine's projection puts
+/// the near plane at nought and the far plane at one, per `Camera`. Past a fifth
+/// of a metre from the eye the stored value is between a half and one, where
+/// float32 steps by two to the minus twenty fourth and nowhere else, so one
+/// constant covers everything anybody will ever look at.
+pub const ULP: f32 = 1.0 / (1u32 << 24) as f32;
+
+/// What the depth buffer can and cannot tell apart, which is a question about
+/// how far away the surfaces are. See spec 0048.
+///
+/// Two surfaces that do not share a plane still fight once the gap between them
+/// is finer than the buffer's step at that distance, and that step grows with
+/// the square of the distance. A tolerance written as one number in metres is
+/// therefore a tolerance that is right at one distance: a tenth of a millimetre
+/// is what this buffer resolves at thirteen metres, which was a reasonable
+/// number for the arcade's hall by accident and nothing anywhere else.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Depth {
+    pub near: f32,
+    pub far: f32,
+}
+
+impl Depth {
+    /// Taken from the camera that will be looking, so the two numbers are not
+    /// written down twice.
+    pub fn of(camera: &crate::camera::Camera) -> Self {
+        Self {
+            near: camera.near,
+            far: camera.far,
+        }
+    }
+
+    /// How fine a gap the buffer still separates at `z` metres from the eye.
+    ///
+    /// The projection maps a view depth to `far * (z - near) / (z * (far -
+    /// near))`, whose slope is `near * far / ((far - near) * z * z)`. One step
+    /// of the stored float divided by that slope is the gap on the ground.
+    pub fn resolves_at(&self, z: f32) -> f32 {
+        let span = (self.far - self.near).max(f32::EPSILON);
+        let scale = (self.near * self.far).max(f32::EPSILON);
+
+        ULP * span * z * z / scale
+    }
+
+    /// How far from the eye two surfaces `gap` apart stop being separable, so
+    /// that from there onward they fight.
+    ///
+    /// Nought for a gap of nought: faces in one plane fight wherever you stand,
+    /// which is why that is the one case needing no distance at all.
+    pub fn fights_past(&self, gap: f32) -> f32 {
+        let span = (self.far - self.near).max(f32::EPSILON);
+        let scale = self.near * self.far;
+
+        (gap.max(0.0) * scale / (ULP * span)).sqrt()
+    }
+
+    /// The widest gap that can fight anywhere this side of the far plane.
+    ///
+    /// Anything further apart than this is two surfaces, everywhere, and not
+    /// worth comparing.
+    pub fn widest(&self) -> f32 {
+        self.resolves_at(self.far)
     }
 }

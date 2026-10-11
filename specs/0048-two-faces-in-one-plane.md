@@ -33,8 +33,24 @@ renderer.
 
 **A pair is reported when all of these hold.**
 
-- Two faces agree on a plane to within `SAME`, a tenth of a millimetre. Closer
-  than that and the depth buffer cannot separate them either.
+- The two faces are near enough to one plane that the depth buffer will blur
+  them from somewhere a body can stand. That is not a constant. The buffer is
+  `Depth32Float` and the projection puts the near plane at nought and the far
+  at one, so one step of the stored float is worth `ULP * (far - near) * z * z
+  / (near * far)` on the ground: six ten thousandths of a millimetre at a
+  metre, a seventh of a millimetre across the arcade's hall, half a millimetre
+  at thirty metres, six millimetres at the far plane. `Depth::fights_past`
+  turns a gap into the distance it starts fighting from, and a pair is kept
+  only when `Fight::furthest_eye` says a body can get that far back on the side
+  the faces look out from.
+
+  This was a flat tenth of a millimetre until 2026-10-11. A tenth of a
+  millimetre is what the arcade's camera resolves at thirteen metres, which
+  suited a hall 16.6 metres long by accident and nothing anywhere else: it
+  called a third of a millimetre fine when that fights across any long room,
+  and it called a hundredth of a millimetre a fault in a cupboard where
+  nothing could ever be seen. `SAME` survives as the epsilon for the geometry,
+  which is a different question.
 - Both faces look the same way along that axis. Two faces looking at each other
   are a stack, and they hide one another.
 - They have at least `LEAST` in common, a tenth of a square metre. Two boxes
@@ -50,6 +66,15 @@ renderer.
   anything else does, and nobody will stand on the weather side of them to look.
   Anything at all counts and it need not cover the patch: a wall standing on a
   floor says the floor is indoors.
+
+**The report says the gap and the distance.** A pair in one plane fights
+wherever you stand. A pair four ten thousandths of a millimetre apart fights
+past a metre, and one a third of a millimetre apart fights past twenty two, so
+the line says which and you can judge it against the room you are in. The
+patch is put at the outer of the two planes, since that is the surface you
+would be looking at if you could tell them apart. Sorted nearest to one plane
+first, in buckets of a tenth of a millimetre so a hair of difference does not
+outrank a patch ten times the size, and then biggest first.
 
 **One line per pair of boxes, the biggest patch they share.** Two boxes flush
 on three sides are one thing to go and look at. The lapped floors are flush on
@@ -87,6 +112,12 @@ nobody reads is a check nobody ran, and the rest are outlined in the game.
 - A pair with nothing beyond it is the weather side of the shell, and one column standing on it puts the fight back. — `renderer::coplanar::tests::a_pair_with_nothing_beyond_it_is_the_weather_side`
 - A box resting on another is a stack and not a fight. — `renderer::coplanar::tests::a_box_resting_on_another_does_not_fight`
 - A graze of two centimetres is not worth a line. — `renderer::coplanar::tests::a_sliver_is_not_worth_reporting`
+- What the buffer resolves grows with the square of the distance, and across the arcade's hall it is a seventh of a millimetre. — `renderer::depth::tests::what_the_buffer_resolves_grows_with_the_square_of_the_distance`, `renderer::depth::tests::the_buffer_resolves_a_seventh_of_a_millimetre_across_the_hall`
+- A gap and the distance it fights past undo each other, faces in one plane fight from no distance at all, and the widest gap that fights is the one at the far plane. — `renderer::depth::tests::a_gap_and_the_distance_it_fights_past_undo_each_other`, `renderer::depth::tests::faces_in_one_plane_fight_from_no_distance_at_all`, `renderer::depth::tests::the_widest_gap_that_fights_is_the_one_at_the_far_plane`
+- A camera with no range answers with numbers rather than infinities. — `renderer::depth::tests::a_camera_with_no_depth_at_all_still_answers`
+- Three tenths of a millimetre is a fault in a room sixty metres long and not in one eight metres long. — `renderer::coplanar::tests::a_hair_apart_is_a_fault_in_a_long_room_and_not_in_a_short_one`
+- A gap wider than the far plane can blur is not a pair, and one inside it is. — `renderer::coplanar::tests::a_gap_wider_than_the_buffer_will_ever_blur_is_not_a_pair`
+- One plane sorts above a hair apart, even when it is the smaller patch. — `renderer::coplanar::tests::one_plane_sorts_above_a_hair_apart`
 - A scaled instance is measured exactly and a turned one is refused. — `renderer::coplanar::tests::a_scaled_instance_gives_its_own_box`, `renderer::coplanar::tests::a_turned_instance_is_left_out`
 - An empty mesh has no box and is not one. — `renderer::coplanar::tests::an_empty_mesh_has_no_box`, `mesh::tests::an_empty_mesh_is_not_a_box`
 - A cube and a quad are boxes; a cube with a vertex pulled inside is not. — `mesh::tests::a_cube_is_a_box_and_a_turned_thing_is_not`
@@ -102,7 +133,10 @@ test that is in another one.
 ### Verified by hand
 
 - The report comes back over a real frame. Run the arcade, press P, read the
-  log: 221 pairs over 5214 boxes, 139 turned and 770 not box shaped.
+  log: 2 pairs out of 236 over 5215 boxes, 138 turned and 814 not box shaped.
+  Both are five ten thousandths of a millimetre apart, which is what a
+  transform leaves behind and is one plane as far as any arithmetic here can
+  tell.
 - The patches are outlined where the speckle is. Run the arcade, press P, and
   the patches stand in magenta against spec 0046's cyan colliders.
 
@@ -128,3 +162,9 @@ every barrel, since a barrel's box is a good deal bigger than the barrel. A
 report with something extra in it is cheaper than one with something missing.
 
 **Every frame.** It is every drawn thing against every other, on one key press.
+
+**Whether the view is grazing.** Fighting is loudest along a surface seen
+nearly edge on, because that is where neighbouring pixels are furthest apart in
+depth. The distance test knows how far back an eye can get and nothing about
+the angle it would be looking from. Ray casting would hand both over together,
+since a ray gives its own incidence; spec 0049 says what that would take.

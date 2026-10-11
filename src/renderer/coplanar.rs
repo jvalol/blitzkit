@@ -18,11 +18,19 @@
 //! show, so [`hidden`] throws out every pair that some third box covers.
 
 use crate::collision::Aabb;
+use crate::renderer::depth::Depth;
 use glam::{Mat4, Vec3};
 use std::collections::HashMap;
 
-/// How near two planes have to be to count as one. A tenth of a millimetre:
-/// closer than that and the depth buffer cannot tell them apart either.
+/// How near two numbers have to be to count as one place, for the geometry:
+/// whether a box covers a patch, whether two spans overlap. A tenth of a
+/// millimetre.
+///
+/// Not the tolerance for two faces being one surface. That one is not a
+/// constant at all, because the depth buffer separates a hair at arm's length
+/// and half a millimetre across a long room; see [`Depth`]. This was that
+/// tolerance once, and a tenth of a millimetre is what the arcade's camera
+/// resolves at thirteen metres, which suited its hall by accident.
 pub const SAME: f32 = 1e-4;
 
 /// The smallest patch worth reporting, in square metres. Ten centimetres
@@ -46,9 +54,16 @@ pub struct Fight {
     pub axis: usize,
     /// Which way both faces look along that axis, 1.0 or -1.0.
     pub facing: f32,
-    /// What the two faces have in common, flat on `axis`. This is the thing to
-    /// outline: it is exactly where the speckle will be.
+    /// What the two faces have in common, flat on `axis`, at the outer of the
+    /// two planes. This is the thing to outline: it is where the speckle will
+    /// be.
     pub patch: Aabb,
+    /// How far apart the two planes are. Nought when they are one plane.
+    pub gap: f32,
+    /// How far from the eye the buffer stops separating them, so from there
+    /// onward they fight. Nought when the gap is nought, because faces in one
+    /// plane fight wherever you stand.
+    pub fights_past: f32,
 }
 
 impl Fight {
@@ -77,8 +92,9 @@ fn others(axis: usize) -> (usize, usize) {
 ///
 /// It compares every box with every other, so it is for a key press and not
 /// for a frame.
-pub fn fighting(boxes: &[Aabb]) -> Vec<Fight> {
+pub fn fighting(boxes: &[Aabb], depth: &Depth) -> Vec<Fight> {
     let mut found = Vec::new();
+    let widest = depth.widest();
 
     for (a, one) in boxes.iter().enumerate() {
         for (b, two) in boxes.iter().enumerate().skip(a + 1) {
@@ -90,11 +106,21 @@ pub fn fighting(boxes: &[Aabb]) -> Vec<Fight> {
                         (one.min[axis], two.min[axis])
                     };
 
-                    if (at_one - at_two).abs() > SAME {
+                    let gap = (at_one - at_two).abs();
+
+                    if gap > widest {
                         continue;
                     }
 
-                    let Some(patch) = shared(one, two, axis, at_one) else {
+                    // the outer of the two planes, which is the surface you
+                    // would be looking at if you could tell them apart
+                    let at = if facing > 0.0 {
+                        at_one.max(at_two)
+                    } else {
+                        at_one.min(at_two)
+                    };
+
+                    let Some(patch) = shared(one, two, axis, at) else {
                         continue;
                     };
 
@@ -104,6 +130,8 @@ pub fn fighting(boxes: &[Aabb]) -> Vec<Fight> {
                         axis,
                         facing,
                         patch,
+                        gap,
+                        fights_past: depth.fights_past(gap),
                     };
 
                     if fight.area() >= LEAST {
@@ -283,10 +311,10 @@ impl Fights {
     /// undersides and their west ends all at once; the tops are the sixteen
     /// square metres you wake up standing on and the other two are the same
     /// fault seen from places you cannot stand.
-    pub fn of(boxes: Vec<Aabb>, turned: usize, shaped: usize) -> Self {
+    pub fn of(boxes: Vec<Aabb>, turned: usize, shaped: usize, depth: &Depth) -> Self {
         let mut widest: HashMap<(usize, usize), Fight> = HashMap::new();
 
-        for fight in fighting(&boxes) {
+        for fight in fighting(&boxes, depth) {
             if hidden(&fight, &boxes) || !looks_into_the_building(&fight, &boxes) {
                 continue;
             }
@@ -299,12 +327,22 @@ impl Fights {
         }
 
         let mut fights: Vec<Fight> = widest.into_values().collect();
-        // biggest first, since that is the one to go and look at, and stable so
-        // two runs of a frame read the same
+        // nearest to one plane first and then biggest, since a pair in one
+        // plane fights wherever you stand and a pair a third of a millimetre
+        // apart only fights from the far end of a long room. Bucketed by a
+        // tenth of a millimetre rather than compared outright, so a hair of
+        // difference in the gap does not outrank a patch ten times the size.
+        // Stable, so two runs of a frame read the same.
+        let bucket = |fight: &Fight| (fight.gap / SAME) as u32;
+
         fights.sort_by(|one, two| {
-            two.area()
-                .partial_cmp(&one.area())
-                .unwrap_or(std::cmp::Ordering::Equal)
+            bucket(one)
+                .cmp(&bucket(two))
+                .then(
+                    two.area()
+                        .partial_cmp(&one.area())
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                )
                 .then((one.a, one.b, one.axis).cmp(&(two.a, two.b, two.axis)))
         });
 
@@ -337,6 +375,56 @@ impl Fight {
     }
 }
 
+impl Fight {
+    /// How far from this patch an eye can get while staying on the side the
+    /// faces look out from.
+    ///
+    /// The far corner of everywhere a body can be, measured to the far end of
+    /// the patch, because an eye at one end of a sixteen metre strip is looking
+    /// at the other end from sixteen metres. It does not ask whether there is a
+    /// wall in the way, so it is generous, which is the right way round for
+    /// something deciding whether to keep a line in a report.
+    pub fn furthest_eye(&self, seen: &Aabb) -> f32 {
+        let mut stood = *seen;
+
+        // only the side the faces look out from
+        if self.facing > 0.0 {
+            stood.min[self.axis] = stood.min[self.axis].max(self.patch.min[self.axis]);
+        } else {
+            stood.max[self.axis] = stood.max[self.axis].min(self.patch.max[self.axis]);
+        }
+
+        if stood.min[self.axis] > stood.max[self.axis] {
+            return 0.0;
+        }
+
+        let mut furthest = 0.0f32;
+
+        for corner in 0..8 {
+            let pick = |bit: usize, axis: usize| {
+                if corner & (1 << bit) == 0 {
+                    stood.min[axis]
+                } else {
+                    stood.max[axis]
+                }
+            };
+            let eye = Vec3::new(pick(0, 0), pick(1, 1), pick(2, 2));
+            // the end of the patch furthest from that corner
+            let mut off = Vec3::ZERO;
+
+            for axis in 0..3 {
+                let low = (eye[axis] - self.patch.min[axis]).abs();
+                let high = (eye[axis] - self.patch.max[axis]).abs();
+                off[axis] = low.max(high);
+            }
+
+            furthest = furthest.max(off.length());
+        }
+
+        furthest
+    }
+}
+
 impl Fights {
     /// The same report with every pair thrown out that nobody can get in front
     /// of, per spec 0049.
@@ -355,9 +443,24 @@ impl Fights {
         }
 
         let out_by = reach.clear_of_a_surface();
+        let seen = reach.reached_box();
 
-        self.fights
-            .retain(|fight| reach.any_in(fight.in_front_of(out_by)));
+        self.fights.retain(|fight| {
+            if !reach.any_in(fight.in_front_of(out_by)) {
+                return false;
+            }
+
+            // and far enough back that the buffer gives up. A pair in one plane
+            // needs no distance at all; a pair a third of a millimetre apart
+            // needs twenty two metres of room to show in, and a small scene
+            // does not have that.
+            match seen {
+                Some(seen) if fight.fights_past > 0.0 => {
+                    fight.furthest_eye(&seen) >= fight.fights_past
+                }
+                _ => true,
+            }
+        });
         self
     }
 }
@@ -369,14 +472,30 @@ impl std::fmt::Display for Fight {
         let size = self.patch.size();
         let (one, two) = others(self.axis);
 
+        let apart = if self.gap <= 0.0 {
+            "in one plane".to_string()
+        } else {
+            // four decimals of a millimetre, because the gaps that matter most
+            // are the ones a transform left behind: the arcade's two are six
+            // ten thousandths of a millimetre, which is the same plane as far
+            // as any arithmetic here can tell, and printing them to two
+            // decimals said "0.00 mm apart" and read as a bug
+            format!(
+                "{:.4} mm apart, fighting past {:.1} m",
+                self.gap * 1000.0,
+                self.fights_past
+            )
+        };
+
         write!(
             out,
-            "{:.2} by {:.2} of {} facing {:+.0} at {:.3}, from {:.2} {:.2} {:.2} and {:.2} {:.2} {:.2}",
+            "{:.2} by {:.2} of {} facing {:+.0} at {:.3}, {}, from {:.2} {:.2} {:.2} and {:.2} {:.2} {:.2}",
             size[one],
             size[two],
             across,
             self.facing,
             at,
+            apart,
             self.patch.min.x,
             self.patch.min.y,
             self.patch.min.z,
@@ -391,6 +510,14 @@ impl std::fmt::Display for Fight {
 mod tests {
     use super::*;
     use glam::{Quat, Vec4};
+
+    /// The arcade's camera, which is where the numbers in these tests come
+    /// from: it resolves a tenth of a millimetre at thirteen metres and six
+    /// millimetres at the far plane.
+    const CAMERA: Depth = Depth {
+        near: 0.1,
+        far: 100.0,
+    };
 
     /// The hall's floor, as the arcade draws it.
     fn hall_floor() -> Aabb {
@@ -427,7 +554,7 @@ mod tests {
     /// Two floor slabs, both tops at nought, overlapping five metres by three.
     #[test]
     fn two_floors_at_one_height_fight() {
-        let report = Fights::of(vec![hall_floor(), lapped_floor(), column()], 0, 0);
+        let report = Fights::of(vec![hall_floor(), lapped_floor(), column()], 0, 0, &CAMERA);
 
         assert_eq!(
             report.fights.len(),
@@ -469,7 +596,7 @@ mod tests {
             max: Vec3::new(41.3, 0.0, 60.3),
         };
 
-        let report = Fights::of(vec![hall_floor(), unlapped, column()], 0, 0);
+        let report = Fights::of(vec![hall_floor(), unlapped, column()], 0, 0, &CAMERA);
 
         assert!(
             report.fights.is_empty(),
@@ -515,7 +642,7 @@ mod tests {
             max: Vec3::new(6.0, 3.0, 4.3),
         };
 
-        let report = Fights::of(vec![dado, pier, wall, floor, across], 0, 0);
+        let report = Fights::of(vec![dado, pier, wall, floor, across], 0, 0, &CAMERA);
 
         assert!(
             report.fights.is_empty(),
@@ -551,7 +678,7 @@ mod tests {
             max: Vec3::new(6.0, 3.0, 4.3),
         };
 
-        let report = Fights::of(vec![dado, flush, wall, floor, across], 0, 0);
+        let report = Fights::of(vec![dado, flush, wall, floor, across], 0, 0, &CAMERA);
 
         assert!(
             !report.fights.is_empty(),
@@ -566,7 +693,7 @@ mod tests {
     /// which is its own control: put the building back and the fight returns.
     #[test]
     fn a_pair_with_nothing_beyond_it_is_the_weather_side() {
-        let bare = Fights::of(vec![hall_floor(), lapped_floor()], 0, 0);
+        let bare = Fights::of(vec![hall_floor(), lapped_floor()], 0, 0, &CAMERA);
 
         assert!(
             bare.fights.is_empty(),
@@ -574,13 +701,171 @@ mod tests {
             bare.fights
         );
 
-        let indoors = Fights::of(vec![hall_floor(), lapped_floor(), column()], 0, 0);
+        let indoors = Fights::of(vec![hall_floor(), lapped_floor(), column()], 0, 0, &CAMERA);
 
         assert_eq!(
             indoors.fights.len(),
             1,
             "one column standing on them should put the fight back, and left {:?}",
             indoors.fights
+        );
+    }
+
+    /// Two floor slabs overlapping two metres by two, the second one `gap`
+    /// above the first, in a room `long` metres across with a lid on it.
+    ///
+    /// The lid is there so the fill does not climb, and the column is there so
+    /// the patch has something standing on it to say it is indoors.
+    fn a_room(long: f32, gap: f32) -> Vec<Aabb> {
+        vec![
+            Aabb {
+                min: Vec3::new(-5.0, -0.3, -5.0),
+                max: Vec3::new(5.0, 0.0, 5.0),
+            },
+            Aabb {
+                min: Vec3::new(3.0, -0.3, -1.0),
+                max: Vec3::new(long, gap, 1.0),
+            },
+            Aabb {
+                min: Vec3::new(3.5, 0.0, -0.5),
+                max: Vec3::new(4.0, 2.5, 0.0),
+            },
+            Aabb {
+                min: Vec3::new(-6.0, 2.5, -6.0),
+                max: Vec3::new(long + 1.0, 2.8, 6.0),
+            },
+        ]
+    }
+
+    /// Spec 0048: a pair a hair apart fights from far enough back and not from
+    /// nearer, so whether it is worth a line depends on the room it is in.
+    ///
+    /// Three tenths of a millimetre is nothing at arm's length and is half of
+    /// what this camera can resolve at thirty metres. The old tolerance was one
+    /// number in metres, which is to say it was right at one distance.
+    #[test]
+    fn a_hair_apart_is_a_fault_in_a_long_room_and_not_in_a_short_one() {
+        let gap = 3e-4;
+        let fights_past = CAMERA.fights_past(gap);
+
+        assert!(
+            (fights_past - 22.4).abs() < 0.5,
+            "three tenths of a millimetre should fight past about 22 metres, not {:.1}",
+            fights_past
+        );
+
+        let filled = |long: f32| {
+            let boxes = a_room(long, gap);
+            let mut world = Aabb::empty();
+
+            for box_ in &boxes {
+                world = world.union(box_);
+            }
+
+            let reach = crate::reach::Reach::found(
+                Vec3::new(0.0, 1.0, 0.0),
+                crate::reach::Body {
+                    radius: 0.45,
+                    rise: 0.25,
+                    tall: 4.0,
+                },
+                &boxes,
+                world.expanded(Vec3::ONE),
+                crate::reach::STEP,
+            );
+
+            assert!(
+                !reach.is_empty(),
+                "the fill reached nothing in a room {:.0} metres long",
+                long
+            );
+
+            (
+                Fights::of(boxes.clone(), 0, 0, &CAMERA),
+                Fights::of(boxes, 0, 0, &CAMERA).only_seen_from(&reach),
+            )
+        };
+
+        // a room sixty metres long has room to stand far enough back
+        let (every, kept) = filled(60.0);
+
+        assert!(
+            !every.fights.is_empty(),
+            "the pair was not found at all before the filter"
+        );
+        assert_eq!(
+            kept.fights.len(),
+            1,
+            "a long room has the distance for it and the filter kept {:?}",
+            kept.fights
+        );
+
+        // and one eight metres long does not: the far corner is fourteen
+        // metres from the patch and it takes twenty two
+        let (every, kept) = filled(8.0);
+
+        assert!(
+            !every.fights.is_empty(),
+            "the pair was not found at all before the filter"
+        );
+        assert!(
+            kept.fights.is_empty(),
+            "a short room cannot show a gap this fine and the filter kept {:?}",
+            kept.fights
+        );
+    }
+
+    /// Spec 0048: past what the far plane can resolve there is nothing to
+    /// compare, and inside it there is.
+    #[test]
+    fn a_gap_wider_than_the_buffer_will_ever_blur_is_not_a_pair() {
+        let wide = Fights::of(a_room(20.0, CAMERA.widest() * 2.0), 0, 0, &CAMERA);
+
+        assert!(
+            wide.fights.is_empty(),
+            "two surfaces a centimetre apart came back as one: {:?}",
+            wide.fights
+        );
+
+        let narrow = Fights::of(a_room(20.0, CAMERA.widest() * 0.5), 0, 0, &CAMERA);
+
+        assert!(
+            !narrow.fights.is_empty(),
+            "a gap inside what the far plane blurs was not reported"
+        );
+    }
+
+    /// Spec 0048: one plane sorts above a hair apart, whatever the sizes.
+    ///
+    /// A pair in one plane fights wherever you stand. A pair a hair apart
+    /// fights from the far end of a long room, and that is the second thing to
+    /// go and look at however big it is.
+    #[test]
+    fn one_plane_sorts_above_a_hair_apart() {
+        let mut boxes = a_room(20.0, 4e-4);
+
+        // and a second pair, in one plane and a tenth the size
+        boxes.push(Aabb {
+            min: Vec3::new(-4.0, -0.3, 2.0),
+            max: Vec3::new(-3.0, 0.0, 2.6),
+        });
+
+        let report = Fights::of(boxes, 0, 0, &CAMERA);
+
+        assert!(
+            report.fights.len() >= 2,
+            "expected both pairs and got {:?}",
+            report.fights
+        );
+        assert_eq!(
+            report.fights[0].gap,
+            0.0,
+            "the pair in one plane came second, behind one {:.2} mm apart",
+            report.fights[0].gap * 1000.0
+        );
+        assert!(
+            report.fights[0].area() < report.fights[1].area(),
+            "this test proves nothing unless the one in one plane is the smaller"
         );
     }
 
@@ -611,7 +896,7 @@ mod tests {
             max: Vec3::new(10.0, 1.4, 5.0),
         };
 
-        let report = Fights::of(vec![one, two, over], 0, 0);
+        let report = Fights::of(vec![one, two, over], 0, 0, &CAMERA);
 
         assert!(
             report.fights.is_empty(),
@@ -630,7 +915,7 @@ mod tests {
             max: Vec3::new(3.5, 1.4, 5.0),
         };
 
-        let report = Fights::of(vec![one, two, half], 0, 0);
+        let report = Fights::of(vec![one, two, half], 0, 0, &CAMERA);
 
         assert_eq!(
             report.fights.len(),
@@ -653,7 +938,7 @@ mod tests {
             max: Vec3::new(1.8, 1.6, 0.8),
         };
 
-        let report = Fights::of(vec![under, on_top], 0, 0);
+        let report = Fights::of(vec![under, on_top], 0, 0, &CAMERA);
 
         assert!(
             report.fights.is_empty(),
@@ -676,7 +961,7 @@ mod tests {
             max: Vec3::new(2.0, 1.0, 2.0),
         };
 
-        let report = Fights::of(vec![one, graze], 0, 0);
+        let report = Fights::of(vec![one, graze], 0, 0, &CAMERA);
 
         assert!(
             report.fights.is_empty(),
@@ -749,7 +1034,7 @@ mod tests {
     /// frame it is speaking for.
     #[test]
     fn what_was_left_out_is_counted() {
-        let report = Fights::of(vec![hall_floor()], 7, 3);
+        let report = Fights::of(vec![hall_floor()], 7, 3, &CAMERA);
 
         assert_eq!(report.turned, 7, "the count of turned instances was lost");
         let _ = Vec4::ONE;
