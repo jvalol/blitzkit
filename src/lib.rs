@@ -9,6 +9,7 @@ pub mod mesh;
 pub mod mouse;
 pub mod notice;
 pub mod physics;
+pub mod reach;
 pub mod renderer;
 pub mod shadow;
 pub mod sound;

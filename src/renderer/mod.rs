@@ -98,6 +98,9 @@ pub struct Renderer {
     /// See spec 0048.
     asked_fights: bool,
     fights: coplanar::Fights,
+    /// The body to fill out from the camera with, if the game said. See spec
+    /// 0049.
+    body: Option<crate::reach::Body>,
     textures: Vec<wgpu::BindGroup>,
     shadow_pipeline: wgpu::RenderPipeline,
     /// A second one for a lamp's six faces: it has a fragment stage, because
@@ -630,6 +633,7 @@ impl Renderer {
             meshes: Vec::new(),
             asked_fights: false,
             fights: coplanar::Fights::default(),
+            body: None,
             textures: Vec::new(),
             shadow_pipeline,
             point_shadow_pipeline,
@@ -835,8 +839,22 @@ impl Renderer {
     /// with every other. The answer goes in the log and stays in
     /// [`Renderer::fights`], so a game can outline the patches the frame after
     /// and see where the speckle is rather than read coordinates.
-    pub fn check_fighting_faces(&mut self) {
+    ///
+    /// Give it a `body` and it also fills out from the camera to find where
+    /// that body could be, per spec 0049, and throws out every pair nobody can
+    /// get in front of. Without one the report is every pair, which in the
+    /// arcade is 221 and mostly the tops of ceilings.
+    ///
+    /// The fill goes over the frame's own drawn boxes and not over the game's
+    /// colliders, which is worth saying because the colliders look like the
+    /// better list. A ceiling you cannot walk into does not need a collider and
+    /// the arcade's hall has none, so a fill over colliders climbs out through
+    /// the ceiling and the filter keeps the very faces it was meant to drop.
+    /// What is drawn has every ceiling in it, because a room with no ceiling
+    /// drawn is a room you can see the sky through.
+    pub fn check_fighting_faces(&mut self, body: Option<crate::reach::Body>) {
         self.asked_fights = true;
+        self.body = body;
     }
 
     /// What the last check found, per spec 0048. Empty until one is asked for.
@@ -851,7 +869,37 @@ impl Renderer {
         }
 
         self.asked_fights = false;
-        self.fights = self.fighting_faces(scene);
+        let found = self.fighting_faces(scene);
+        let every = found.fights.len();
+
+        self.fights = match self.body.take() {
+            Some(body) => {
+                let mut world = crate::collision::Aabb::empty();
+
+                for box_ in &found.boxes {
+                    world = world.union(box_);
+                }
+
+                let reach = crate::reach::Reach::found(
+                    self.camera.position,
+                    body,
+                    &found.boxes,
+                    world.expanded(glam::Vec3::splat(1.0)),
+                    crate::reach::STEP,
+                );
+                let kept = found.only_seen_from(&reach);
+
+                log::info!(
+                    "a body can be in {} cells of {:.2}, and {} of {} fighting pairs are in front of one",
+                    reach.cells(),
+                    reach.step(),
+                    kept.fights.len(),
+                    every
+                );
+                kept
+            }
+            None => found,
+        };
 
         let report = &self.fights;
 

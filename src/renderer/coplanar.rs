@@ -317,6 +317,51 @@ impl Fights {
     }
 }
 
+impl Fight {
+    /// The space this face looks out into, as far out as a body's centre can
+    /// come, per spec 0049.
+    ///
+    /// Not one cell. What a [`Reach`] holds is where a body's centre can be, so
+    /// the air touching a floor is never in it however open the room is, and a
+    /// probe a cell deep says every floor in the building looks into a solid.
+    pub fn in_front_of(&self, out_by: f32) -> Aabb {
+        let mut box_ = self.patch;
+
+        if self.facing > 0.0 {
+            box_.max[self.axis] += out_by;
+        } else {
+            box_.min[self.axis] -= out_by;
+        }
+
+        box_
+    }
+}
+
+impl Fights {
+    /// The same report with every pair thrown out that nobody can get in front
+    /// of, per spec 0049.
+    ///
+    /// This is the thing a list of boxes cannot answer and the thing that makes
+    /// the report readable. The top of a ceiling and the underside of a floor
+    /// are flush with their neighbours as often as anything else is, and they
+    /// look into sealed space.
+    ///
+    /// An empty reach filters nothing. A fill that reached nowhere is a fill
+    /// that failed, usually because the body was standing inside something, and
+    /// a failed fill that silences the whole report is worse than no fill.
+    pub fn only_seen_from(mut self, reach: &crate::reach::Reach) -> Self {
+        if reach.is_empty() {
+            return self;
+        }
+
+        let out_by = reach.clear_of_a_surface();
+
+        self.fights
+            .retain(|fight| reach.any_in(fight.in_front_of(out_by)));
+        self
+    }
+}
+
 impl std::fmt::Display for Fight {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let across = ["x", "y", "z"][self.axis];

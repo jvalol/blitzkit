@@ -71,9 +71,12 @@ bigger than the thing inside it, so its faces are in planes the real surface is
 not. `Fights::turned` and `Fights::shaped` say how many were left out, so a
 clean report says how much of the frame it is speaking for.
 
-**It logs the twenty biggest and says how many more there are.** The arcade
-gives 221 over 5214 boxes. A report nobody reads is a check nobody ran, and the
-rest are outlined in the game, where the ones you cannot get to never show.
+**Given a body it also throws out every pair nobody can get in front of**, per
+spec 0049. That is the filter that makes this readable: the arcade's 221 become
+2. Without one the report is every pair.
+
+**It logs the twenty biggest and says how many more there are.** A report
+nobody reads is a check nobody ran, and the rest are outlined in the game.
 
 ## Acceptance criteria
 
@@ -105,12 +108,10 @@ test that is in another one.
 
 ## Out of scope
 
-**Line of sight.** The check knows whether a face looks into the building. It
-does not know whether anybody can see it from anywhere they can stand. The
-221 the arcade reports include rib tops flush with the ceiling above them,
-which are real coplanar faces in a place no eye reaches. Answering that
-properly means knowing the reachable space, which is a flood fill over the
-colliders and a separate piece of work.
+**Line of sight.** Spec 0049 answers whether a body can be in front of a face.
+It does not answer whether anything is looking that way or whether a bookcase is
+in between. Both of the arcade's two survivors are things to walk under and look
+up at, which is as far as this goes.
 
 **Anything that is not a box.** Three quarters of what the arcade draws is
 refused, because its box is not its faces. Two turned barrels flush with each

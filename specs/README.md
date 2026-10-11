@@ -55,6 +55,7 @@ not a priority, and it never changes once a spec exists.
 | [0046](0046-seeing-what-is-solid.md) | Collision boxes drawn over the scene, so a collider that disagrees with what is drawn is visible |
 | [0047](0047-a-word-with-nothing-behind-it.md) | A word with its ground cut away, so text can go on a surface that is not already dark |
 | [0048](0048-two-faces-in-one-plane.md) | Two drawn faces found in one plane, so the fault this building has hit seven times is arithmetic rather than a photograph |
+| [0049](0049-where-a-body-can-be.md) | Where a body can get to, filled out over what is drawn, so a face nobody can stand in front of is not reported as a fault |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.
