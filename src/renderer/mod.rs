@@ -7,6 +7,7 @@
 //!
 //! A game never sees a wgpu type. Anything uploaded comes back as a handle.
 
+pub mod coplanar;
 pub mod depth;
 pub mod outline;
 pub mod render_text;
@@ -45,6 +46,10 @@ use wgpu_text::{BrushBuilder, TextBrush};
 use winit::window::Window;
 
 use crate::text::FONT_BYTES;
+
+/// How many fighting pairs a coplanar check writes into the log, biggest
+/// first, per spec 0048. The rest are in [`Renderer::fights`] to be outlined.
+const SAID: usize = 20;
 
 pub struct Renderer {
     /// Kept so a game can lock or hide the cursor, per spec 0013. The surface
@@ -88,6 +93,11 @@ pub struct Renderer {
     /// resting on anything does not need it.
     contact_shadows: bool,
     meshes: Vec<GpuMesh>,
+    /// Whether a coplanar check is owed, and what the last one found. A game
+    /// asks for one on a key press and reads the answer back the frame after.
+    /// See spec 0048.
+    asked_fights: bool,
+    fights: coplanar::Fights,
     textures: Vec<wgpu::BindGroup>,
     shadow_pipeline: wgpu::RenderPipeline,
     /// A second one for a lamp's six faces: it has a fragment stage, because
@@ -122,6 +132,13 @@ struct GpuMesh {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     index_count: u32,
+    /// The box the mesh fits inside, kept so the coplanar check has something
+    /// to measure without reading the vertices back off the GPU. See spec
+    /// 0048.
+    bounds: crate::collision::Aabb,
+    /// Whether that box is a statement about this mesh's faces or only about
+    /// how much room it takes up. See `MeshData::is_box`.
+    boxy: bool,
 }
 
 /// What asking the surface for a frame came back with, as what to do about it.
@@ -611,6 +628,8 @@ impl Renderer {
             contact_shadows: true,
             translucent_pipelines,
             meshes: Vec::new(),
+            asked_fights: false,
+            fights: coplanar::Fights::default(),
             textures: Vec::new(),
             shadow_pipeline,
             point_shadow_pipeline,
@@ -717,6 +736,8 @@ impl Renderer {
             vertices,
             indices,
             index_count: data.indices.len() as u32,
+            bounds: data.bounds(),
+            boxy: data.is_box(),
         });
 
         MeshId(self.meshes.len() - 1)
@@ -761,6 +782,111 @@ impl Renderer {
         );
 
         mesh.index_count = data.indices.len() as u32;
+        mesh.bounds = data.bounds();
+        mesh.boxy = data.is_box();
+    }
+
+    /// Every pair of drawn faces in this frame that share a plane and are both
+    /// on show, per spec 0048.
+    ///
+    /// This is the one fault in this building that a list of colliders cannot
+    /// find, because fighting is a drawing fault and the colliders are not the
+    /// drawing. So it reads the frame: each instance's mesh box put through its
+    /// transform, every pair compared, and the pairs some third box covers
+    /// thrown away.
+    ///
+    /// It compares every instance with every other, which is a key press and
+    /// not a frame. Instances turned off the axes are counted and left out
+    /// rather than measured loose; see [`coplanar::world_box`].
+    pub fn fighting_faces(&self, scene: &Scene) -> coplanar::Fights {
+        let mut boxes = Vec::new();
+        let mut turned = 0;
+
+        let mut shaped = 0;
+
+        for (mesh, _, instances) in scene.batches() {
+            let Some(gpu) = self.meshes.get(mesh.0) else {
+                continue;
+            };
+
+            // a mesh whose box is not its faces has nothing to say here, and
+            // what it says instead is loud: see `MeshData::is_box`
+            if !gpu.boxy {
+                shaped += instances.len();
+                continue;
+            }
+
+            for instance in instances {
+                let model = glam::Mat4::from_cols_array_2d(&instance.model);
+
+                match coplanar::world_box(model, gpu.bounds) {
+                    Some(world) => boxes.push(world),
+                    None => turned += 1,
+                }
+            }
+        }
+
+        coplanar::Fights::of(boxes, turned, shaped)
+    }
+
+    /// Asks for one coplanar check on the next frame drawn, per spec 0048.
+    ///
+    /// One frame and not every frame, because it compares every drawn instance
+    /// with every other. The answer goes in the log and stays in
+    /// [`Renderer::fights`], so a game can outline the patches the frame after
+    /// and see where the speckle is rather than read coordinates.
+    pub fn check_fighting_faces(&mut self) {
+        self.asked_fights = true;
+    }
+
+    /// What the last check found, per spec 0048. Empty until one is asked for.
+    pub fn fights(&self) -> &coplanar::Fights {
+        &self.fights
+    }
+
+    /// Runs an owed check and says what it found.
+    fn answer_fights(&mut self, scene: &Scene) {
+        if !self.asked_fights {
+            return;
+        }
+
+        self.asked_fights = false;
+        self.fights = self.fighting_faces(scene);
+
+        let report = &self.fights;
+
+        if report.fights.is_empty() {
+            log::info!(
+                "no two drawn faces share a plane in the open, over {} boxes, with {} turned off the axes and {} not box shaped, neither measured",
+                report.boxes.len(),
+                report.turned,
+                report.shaped
+            );
+            return;
+        }
+
+        log::warn!(
+            "{} pairs of drawn faces share a plane in the open, over {} boxes, with {} turned off the axes and {} not box shaped, neither measured",
+            report.fights.len(),
+            report.boxes.len(),
+            report.turned,
+            report.shaped
+        );
+
+        // the biggest handful and not all of them. The list is sorted by how
+        // much patch there is, a building gives a couple of hundred, and a
+        // report nobody reads is a check nobody ran. The rest are outlined in
+        // the game, where the ones you cannot get to never show.
+        for fight in report.fights.iter().take(SAID) {
+            log::warn!("  {}", fight);
+        }
+
+        if report.fights.len() > SAID {
+            log::warn!(
+                "  and {} smaller, which are outlined rather than written out",
+                report.fights.len() - SAID
+            );
+        }
     }
 
     /// What the shadow map covers. A world bigger than this gets no shadows
@@ -856,6 +982,10 @@ impl Renderer {
     }
 
     pub fn render(&mut self, scene: &Scene, geometry: &Geometry, text_renderer: &TextRenderer) {
+        // before anything is asked of the surface, so a frame that turns out
+        // not to draw still answers a check that was owed
+        self.answer_fights(scene);
+
         let got = self.surface.get_current_texture();
         let asked = Asked::at(&got);
 

@@ -54,6 +54,7 @@ not a priority, and it never changes once a spec exists.
 | [0045](0045-a-sound-a-game-was-given.md) | A WAV read out of memory, so a footstep can be a recording |
 | [0046](0046-seeing-what-is-solid.md) | Collision boxes drawn over the scene, so a collider that disagrees with what is drawn is visible |
 | [0047](0047-a-word-with-nothing-behind-it.md) | A word with its ground cut away, so text can go on a surface that is not already dark |
+| [0048](0048-two-faces-in-one-plane.md) | Two drawn faces found in one plane, so the fault this building has hit seven times is arithmetic rather than a photograph |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.

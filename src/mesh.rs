@@ -62,6 +62,35 @@ impl MeshData {
             })
     }
 
+    /// Whether every vertex sits at a corner of the mesh's own box, which is
+    /// what makes [`MeshData::bounds`] a statement about surfaces rather than
+    /// about extent. See spec 0048.
+    ///
+    /// A cube is, and so is a quad, which is a box flat on one axis. A turned
+    /// profile is not, a lattice is not, and grass built straight into world
+    /// coordinates is not: those have vertices inside their box, so the box
+    /// has faces where the mesh has nothing, and a check that reads it as
+    /// faces is reading fiction. Twenty-four blades of grass in one tuft gave
+    /// twenty-four identical boxes and two hundred and seventy-six pairs of
+    /// imaginary fighting faces, which was the biggest thing in the first
+    /// report this was written for.
+    pub fn is_box(&self) -> bool {
+        if self.vertices.is_empty() {
+            return false;
+        }
+
+        let bounds = self.bounds();
+
+        self.vertices.iter().all(|vertex| {
+            let at = Vec3::from(vertex.position);
+
+            (0..3).all(|axis| {
+                (at[axis] - bounds.min[axis]).abs() < 1e-4
+                    || (at[axis] - bounds.max[axis]).abs() < 1e-4
+            })
+        })
+    }
+
     /// A unit cube centered on the origin, with a normal per face rather than
     /// per corner, so its edges stay sharp. That means four vertices per face
     /// instead of eight shared corners.
@@ -978,5 +1007,63 @@ f 1/1/1 2/2/1 3/3/1\nf 1/1/1 3/3/1 4/4/1\n";
         for vertex in mesh.vertices.iter() {
             assert!((vertex.normal[1].abs() - 1.0).abs() < 1e-5, "{:?}", vertex);
         }
+    }
+
+    /// Spec 0048: a box's box is its faces, and a woven thing's is not.
+    #[test]
+    fn a_cube_is_a_box_and_a_turned_thing_is_not() {
+        assert!(
+            MeshData::cube().is_box(),
+            "a cube's vertices are its corners and it came back not a box"
+        );
+
+        // a quad is a box flat on one axis, and its box is still its face
+        let quad = MeshData::new(
+            vec![
+                Vertex {
+                    position: [0.0, 0.0, 0.0],
+                    normal: [0.0, 1.0, 0.0],
+                    uv: [0.0, 0.0],
+                },
+                Vertex {
+                    position: [1.0, 0.0, 0.0],
+                    normal: [0.0, 1.0, 0.0],
+                    uv: [1.0, 0.0],
+                },
+                Vertex {
+                    position: [1.0, 0.0, 1.0],
+                    normal: [0.0, 1.0, 0.0],
+                    uv: [1.0, 1.0],
+                },
+                Vertex {
+                    position: [0.0, 0.0, 1.0],
+                    normal: [0.0, 1.0, 0.0],
+                    uv: [0.0, 1.0],
+                },
+            ],
+            vec![0, 1, 2, 0, 2, 3],
+        );
+
+        assert!(quad.is_box(), "a quad is a flat box and came back not one");
+
+        // and the control: one vertex off a corner and the box stops being a
+        // statement about faces. This is a barrel, a lattice, a blade of grass.
+        let mut dented = MeshData::cube();
+        dented.vertices[0].position[0] *= 0.4;
+
+        assert!(
+            !dented.is_box(),
+            "a cube with a vertex pulled inside still came back a box"
+        );
+    }
+
+    /// An empty mesh is not a box, so nothing downstream reads a box made of
+    /// infinities as six faces.
+    #[test]
+    fn an_empty_mesh_is_not_a_box() {
+        assert!(
+            !MeshData::default().is_box(),
+            "a mesh with no vertices came back a box"
+        );
     }
 }
