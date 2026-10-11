@@ -374,11 +374,19 @@ pub struct SoundSystem {
     output: Option<Output>,
 }
 
+/// How loud the engine plays, under whatever a game asks for.
+///
+/// On the player for anything queued, and on the sound itself for anything
+/// mixed, because a mixed sound has no player to carry it. One number either
+/// way, so the two paths cannot drift apart in loudness.
+const MASTER: f32 = 0.5;
+
 struct Output {
     player: rodio::Player,
     spatial_player: rodio::SpatialPlayer,
-    // Playback stops when this is dropped, so it lives as long as the players.
-    _sink: rodio::MixerDeviceSink,
+    // Playback stops when this is dropped, so it lives as long as the players,
+    // and it carries the mixer that `play` hands sounds to.
+    sink: rodio::MixerDeviceSink,
 }
 
 impl Default for SoundSystem {
@@ -394,7 +402,7 @@ impl SoundSystem {
                 sink.log_on_drop(false);
 
                 let player = rodio::Player::connect_new(sink.mixer());
-                player.set_volume(0.5);
+                player.set_volume(MASTER);
 
                 // The first sound through the output comes out sharp when it
                 // has to be resampled, so a tenth of a second of silence goes
@@ -417,7 +425,7 @@ impl SoundSystem {
                 Some(Output {
                     player,
                     spatial_player,
-                    _sink: sink,
+                    sink,
                 })
             }
             Err(e) => {
@@ -467,7 +475,35 @@ impl SoundSystem {
             return;
         }
 
-        self.queue(sound.clone());
+        self.mix(sound.clone());
+    }
+
+    /// Plays a sound alongside whatever else is already sounding.
+    ///
+    /// A player is a queue. Hand it a sound while one is still playing and it
+    /// waits its turn, so anything asked for faster than it lasts falls
+    /// further behind for ever: the arcade's footsteps at a run went on for
+    /// half a minute after the walking stopped, and its first answer was to
+    /// trim every recording shorter than the gap between steps. That is a
+    /// game working round the engine.
+    ///
+    /// The mixer was there the whole time, with both players hanging off it.
+    /// A sound handed to it directly starts now and ends when it ends, so two
+    /// steps that overlap are two steps overlapping and nothing accumulates.
+    ///
+    /// The master volume rides on the sound rather than on a player, since
+    /// there is no player to hold it.
+    #[inline]
+    pub fn mix<S>(&self, sound: S)
+    where
+        S: rodio::Source + Send + 'static,
+    {
+        if let Some(output) = &self.output {
+            output
+                .sink
+                .mixer()
+                .add(rodio::source::Source::amplify(sound, MASTER));
+        }
     }
 
     /// The same, from somewhere in the world.
