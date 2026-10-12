@@ -144,6 +144,53 @@ fn lettered(words: &str, tall: f32) -> (u32, u32, Vec<u8>) {
 ///
 /// Advances only. This font is monospaced and kerns nothing, so a pair's width
 /// is its two advances; a font that kerned would measure a hair wide here.
+/// The same words with newlines put in so no line is wider than `width`.
+///
+/// For the engine's own measuring to agree with its own drawing.
+/// [`room_for`] breaks on `\n` and nowhere else, so a string left to the
+/// renderer's own wrapping measures as one long line and anything sized from
+/// that measurement, a plate behind the text most of all, comes out the
+/// wrong shape. Wrapped here, the newlines are in the string and both see
+/// the same thing.
+///
+/// Breaks between words. A single word longer than `width` is left whole and
+/// over-long, because the alternative is breaking a word in half and a word
+/// in half is harder to read than a word that runs on.
+///
+/// Newlines already in the string are kept, and each of their lines is
+/// wrapped on its own.
+pub fn wrapped(words: &str, size: f32, width: f32) -> String {
+    let mut out = String::with_capacity(words.len());
+
+    for (n, line) in words.split('\n').enumerate() {
+        if n > 0 {
+            out.push('\n');
+        }
+
+        let mut room = String::new();
+
+        for word in line.split(' ') {
+            let longer = if room.is_empty() {
+                String::from(word)
+            } else {
+                format!("{} {}", room, word)
+            };
+
+            if !room.is_empty() && room_for(&longer, size).x > width {
+                out.push_str(&room);
+                out.push('\n');
+                room = String::from(word);
+            } else {
+                room = longer;
+            }
+        }
+
+        out.push_str(&room);
+    }
+
+    out
+}
+
 pub fn room_for(words: &str, size: f32) -> glam::Vec2 {
     let font = FontRef::try_from_slice(FONT_BYTES).expect("the font is in this binary");
     let scaled = font.as_scaled(PxScale::from(size));
@@ -331,6 +378,78 @@ mod tests {
             "the shader cuts out at {theirs} and text::CUTOUT is {CUTOUT}"
         );
         const { assert!(CUTOUT < 0.5, "the cutout is not under a half") };
+    }
+
+    /// Spec 0038: wrapped words fit, and measure the way they draw.
+    ///
+    /// The point of wrapping here rather than leaving it to the renderer:
+    /// `room_for` breaks on a newline and nowhere else, so a line the
+    /// renderer wraps by itself measures as one long line and the plate
+    /// drawn behind it comes out the wrong shape. The arcade's help line ran
+    /// off the right of its window for exactly that reason.
+    ///
+    /// Checked by measuring, not by counting newlines, so it holds whatever
+    /// the font does.
+    #[test]
+    fn wrapped_words_fit_the_width_they_were_given() {
+        let size = 16.0;
+        let words = "Use WASD and the mouse to get about. Hold Shift to run. \
+                     Press the arrow keys to look around, or to work the toy \
+                     you are looking at. Press Escape to quit.";
+
+        for width in [200.0f32, 400.0, 700.0] {
+            let out = wrapped(words, size, width);
+
+            for line in out.split('\n') {
+                assert!(
+                    room_for(line, size).x <= width,
+                    "{:?} is {:.0} wide against {:.0}",
+                    line,
+                    room_for(line, size).x,
+                    width
+                );
+            }
+
+            // and the words are all still there, in order
+            assert_eq!(
+                out.split_whitespace().collect::<Vec<_>>(),
+                words.split_whitespace().collect::<Vec<_>>(),
+                "wrapping lost or moved a word at {:.0} wide",
+                width
+            );
+
+            // and it did not wrap more than it had to
+            assert!(
+                out.split('\n').count() > 1,
+                "nothing wrapped at {:.0} wide",
+                width
+            );
+        }
+
+        // wide enough for the lot, and nothing is broken up
+        assert_eq!(wrapped(words, size, 100_000.0), words);
+    }
+
+    /// Spec 0038: a word too long for the width is left whole.
+    ///
+    /// Running on past the edge is easier to read than being cut in half,
+    /// and the alternative is a hyphen this font has no rule for.
+    #[test]
+    fn a_word_wider_than_the_width_is_left_alone() {
+        let size = 16.0;
+        let long = "supercalifragilistic";
+        let out = wrapped(&format!("a {} b", long), size, 10.0);
+
+        assert!(out.contains(long), "the long word was broken: {:?}", out);
+        assert_eq!(out.split('\n').collect::<Vec<_>>(), vec!["a", long, "b"]);
+    }
+
+    /// Spec 0038: newlines already in the words are kept.
+    #[test]
+    fn wrapping_keeps_the_breaks_it_was_given() {
+        let out = wrapped("one\ntwo three", 16.0, 100_000.0);
+
+        assert_eq!(out, "one\ntwo three");
     }
 
     /// Spec 0047: both halves of the cutout ask the same question.

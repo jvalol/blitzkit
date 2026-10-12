@@ -1,7 +1,7 @@
 # 0038 A line worth reading
 
 **Status:** implemented
-**Date:** 2026-10-04
+**Date:** 2026-10-04, amended 2026-10-12
 
 ## Goal
 
@@ -49,6 +49,10 @@ the CPU.
 
 ## Acceptance criteria
 
+- Wrapped words fit the room they were given, and no word is lost or moved. — `text::tests::wrapped_words_fit_the_width_they_were_given`
+- A word wider than the room is left whole rather than broken. — `text::tests::a_word_wider_than_the_width_is_left_alone`
+- Newlines already in the words are kept. — `text::tests::wrapping_keeps_the_breaks_it_was_given`
+
 - A line's width is its letters' advances at that scale. — `text::tests::a_line_takes_the_room_its_letters_need`
 - A longer string is wider. — `text::tests::more_letters_need_more_room`
 - Twice the size needs twice the room. — `text::tests::room_scales_with_the_size`
@@ -73,14 +77,31 @@ the CPU.
 - The panel reads over a full board. — play tessera until it ends and read the line.
 - A corner readout reads over a lit table. — run carom and read the lines.
 
+**`text::wrapped` puts the breaks in the string**, and that is the whole of
+why it exists here rather than being left to the renderer.
+
+Wrapping was out of scope, with a note saying so and naming the hazard: a
+game that sets narrow `RenderText::bounds` and a frame gets a frame that does
+not match, because `room_for` breaks on a newline and nowhere else and so
+measures the unwrapped line. The arcade then walked into the other half of
+it. Its line in the hall is longer than its window and ran off the right edge
+mid-word, in the game and in the screenshot on its own site, and the fix
+could not be `bounds` for exactly the reason the note gave.
+
+So the words are wrapped before anything measures them. With the newlines in
+the string, `room_for` and the drawing see the same thing and the frame fits
+what is drawn. A game passes the room it has; the arcade passes its window
+less the margin the line starts at.
+
+Breaks go between words. A single word wider than the room is left whole and
+runs on, because a word cut in half is harder to read than a word that
+overruns, and a hyphen is a rule this font does not have. Newlines already in
+the string are kept and each of their lines is wrapped on its own.
+
 ## Out of scope
 
 Colours and padding a game can set. One look, so a player moving between these
 games is reading the same panel.
-
-Word wrapping. `room_for` measures what it is given and breaks lines only at
-newlines; `RenderText::bounds` still wraps the drawn text, and a game that sets
-both narrow bounds and a frame will get a frame that does not match.
 
 Anything behind text drawn into a texture by `text::drawn`. That is a sign in
 the world, not a line on the glass.
