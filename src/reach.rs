@@ -27,7 +27,26 @@ pub const STEP: f32 = 0.25;
 
 /// The most cells a fill will build. Past this it refuses and says so, rather
 /// than asking the machine for a grid it cannot hold.
-pub const MOST: usize = 16_000_000;
+///
+/// Thirty two million, and here is what that is in memory, which the number
+/// never said before: a fill holds four `Vec<bool>` over the grid at once, so
+/// a cell is four bytes and the cap is a hundred and twenty eight megabytes
+/// at the worst it allows.
+///
+/// It was sixteen million, set when the biggest building anybody filled was
+/// the arcade at ninety seven metres across. That building's room behind the
+/// wall grew to a hundred and fifty nine so its solar system would stop
+/// telling lies about which things are near which, and the fill over it wants
+/// twenty four million: a box 190 by 11 by 179 at a quarter-metre step. The
+/// engine refused, correctly and loudly, and two of the arcade's tests caught
+/// it by asserting the fill had reached something before asking where.
+///
+/// Raised rather than worked around in the game, because the alternative was
+/// to bound each fill to the part of the building it cares about, and a fill
+/// bounded to where you already expect to get to cannot find the place you
+/// did not expect. Ninety six megabytes for a second is the cheaper side of
+/// that trade.
+pub const MOST: usize = 32_000_000;
 
 /// The body a fill is for.
 #[derive(Clone, Copy, Debug)]
