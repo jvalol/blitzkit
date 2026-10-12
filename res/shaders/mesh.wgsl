@@ -581,6 +581,18 @@ fn point_light(
 }
 
 // Blinn-Phong, matching Light::shade in src/lighting.rs. Keep the two in step.
+// The cut-out prepass, per spec 0047. No colour: this exists only so that a
+// surface with holes in it can put its depth in the buffer, which the plain
+// prepass cannot do because it has no texture bound and would fill the holes
+// in. Everything the fragment survives here, it survives in `fs_main` too,
+// because both ask the same question of the same texel.
+@fragment
+fn fs_cutout(in: VertexOutput) {
+    if textureSample(surface_texture, surface_sampler, in.uv).a < CUTOUT {
+        discard;
+    }
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let normal = normalize(in.normal);

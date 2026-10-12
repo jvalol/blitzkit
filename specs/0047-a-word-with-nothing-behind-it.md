@@ -1,7 +1,7 @@
 # 0047 A word with nothing behind it
 
 **Status:** implemented
-**Date:** 2026-10-10, a sighting added 2026-10-11
+**Date:** 2026-10-10, amended 2026-10-11
 
 ## Goal
 
@@ -86,31 +86,52 @@ as it moves, and mip levels average the alpha down until small text dissolves
 rather than fades. Text read face on is fine. Text at a shallow angle, far off,
 is where this looks worst, and the spines of a bookshelf are both.
 
-**And face on, far off, it goes entirely.** The arcade's spec 0015 put a name
-over every body in its solar system, on quads turned to face the eye and
-scaled so that each name holds the same size on the glass however far off it
-is. Cut out, the names are there at two metres and four, thin at eight, and
-gone by twenty. At thirty there is nothing over Saturn at all, with the room's
-columns taken out of the build so that nothing could be hiding it and the
-colour multiplier run up to 24 so that nothing could be dimming it. One line
-changed from `stencilled` to `drawn` puts them back, bright and sharp, from
-the same spot.
+**A cut-out surface wrote no depth, anywhere, and that was the fault.** Found
+2026-10-11 and fixed the same evening. The note here before this one blamed
+mip levels and said so with a shrug; it was wrong, and the shrug was the only
+honest part of it.
 
-The paragraph above is the obvious reading of that and does not fit it. These
-quads hold the same size on the glass at every distance, so the sampler should
-be reaching the same mip at two metres as at thirty, and the names should fail
-everywhere or nowhere. Occlusion and brightness are ruled out. What is left is
-a measurement nobody has taken, and until somebody takes it this is written
-down as a sighting and not as a mechanism.
+The prepass skips a holed texture, for the good reason above: it binds no
+texture and would fill the holes in. The mesh pass declares
+`depth::read_only_state()` and its attachment takes `depth_ops: None`, because
+it samples the depth texture for spec 0029 and wgpu will not have one texture
+written as an attachment and read as a resource in the same pass. Between the
+two, a holed surface was tested against everything and written nowhere.
+Whatever was drawn after it painted over it, however far behind it that thing
+was.
 
-What a game can do about it today is use `drawn`, which is what the arcade
-does. A dark ground is free against a dark room and reads against a bright
-one, and the reason to reach for `stencilled` is a surface with a colour worth
-seeing rather than a surface worth hiding.
+Three faults in the arcade were this one:
+
+- Saturn's rings were cut away wherever a column stood behind them. The ball
+  hid the label behind it correctly and the rings hid nothing, which is the
+  pair that gave it away: same place, same frame, one writes depth and one
+  does not.
+- The opaque plates behind the solar system's labels painted over those same
+  rings from eleven metres further off.
+- Cut-out text vanished at distance. Not mips: the star wall behind it was
+  drawn after it. Near the sun there was nothing behind to overwrite it, which
+  is why it looked like a distance effect.
+
+**`fs_cutout` and the cut-out prepass** are the fix. A second run in the
+prepass binds each holed surface and discards under `CUTOUT` before the depth
+lands, so a holed surface writes exactly the depth its kept fragments deserve
+and nothing for its holes. No colour target: it writes depth and nothing else.
+The mesh pass is untouched and still read-only.
+
+Writing depth from the mesh pass instead was tried first and is not available:
+making that attachment writable fails validation against the spec 0029 sample.
+The error is worth quoting, because it is the thing that decides the design
+here: "Attempted to use Texture with 'Depth Texture' label with conflicting
+usages."
+
+Both halves of the cut-out are now the same question asked twice of the same
+texel, in `fs_cutout` and in `fs_main`, so a fragment that survives one
+survives the other.
 
 ## Acceptance criteria
 
 - A stencilled word's letters are opaque and its ground is not. — `text::tests::a_stencilled_word_has_nothing_behind_it`
+- The cut-out prepass asks the same question of a texel that the mesh pass does. — `text::tests::the_cutout_is_one_number_in_three_places`
 - Its letters are the same as `drawn`'s. — `text::tests::stencilling_moves_nothing_but_the_alpha`
 - It is the same size as `drawn`'s. — `text::tests::a_stencilled_word_is_tight_to_the_words`
 - The same words twice give the same texture. — `text::tests::the_same_words_stencil_the_same`
@@ -120,6 +141,10 @@ seeing rather than a surface worth hiding.
 - A stencilled texture is known to have holes, and a drawn one is not. — `texture::tests::a_stencilled_texture_has_holes`
 
 ### Verified by hand
+
+- A cut-out surface hides what is behind it. — run the arcade, walk to Saturn
+  in the room behind the wall, and stand where a column is behind its rings.
+  The rings were cut away there until 2026-10-11.
 
 - A title on a coloured book spine shows the spine around the letters. — run
   the arcade and walk up to the nook's shelves.
@@ -137,6 +162,5 @@ turned up.
 
 **Anything about mip levels.** The crawl above is real and the fix for it is
 alpha-to-coverage or a distance field, both of which are a different spec and
-neither of which anything here is asking for yet. The 2026-10-11 sighting is
-not that fix either: it is a note that the cost is bigger than this spec said
-and is not yet understood.
+neither of which anything here is asking for yet. What was blamed on mips on
+2026-10-11 was the missing depth write, and is fixed.

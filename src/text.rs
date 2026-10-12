@@ -333,6 +333,54 @@ mod tests {
         const { assert!(CUTOUT < 0.5, "the cutout is not under a half") };
     }
 
+    /// Spec 0047: both halves of the cutout ask the same question.
+    ///
+    /// `fs_cutout` writes the depth and `fs_main` writes the colour, and a
+    /// fragment that survives one has to survive the other or a surface
+    /// hides what it does not draw and draws what it does not hide.
+    ///
+    /// Read out of the shader, like the test above, because the two are four
+    /// hundred lines apart and the thing that keeps them in step cannot be a
+    /// comment. The control is to change one of them: drop the `<` to `<=` in
+    /// either and this still passes, which is fair, because that is the same
+    /// question on all but one texel. Change the constant either side of and
+    /// it fails.
+    #[test]
+    fn the_cutout_is_one_number_in_three_places() {
+        let source = include_str!("../res/shaders/mesh.wgsl");
+
+        // the depth half exists at all. It is the whole of why a cut-out
+        // surface hides anything, and nothing else in the shader needs it,
+        // so a tidy-up would take it out without a word.
+        assert!(
+            source.contains("fn fs_cutout("),
+            "the shader has no cut-out prepass entry point"
+        );
+
+        let tests: Vec<&str> = source
+            .lines()
+            .filter(|line| line.contains("< CUTOUT"))
+            .map(|line| line.trim())
+            .collect();
+
+        assert_eq!(
+            tests.len(),
+            2,
+            "the shader tests the cutout {} times, not twice: {:?}",
+            tests.len(),
+            tests
+        );
+
+        for test in &tests {
+            assert!(
+                test.contains(".a < CUTOUT"),
+                "a cutout test reads {:?}, which is not an alpha against the \
+                 constant",
+                test
+            );
+        }
+    }
+
     /// colour them the way everything else in this engine is coloured.
     #[test]
     fn it_is_white_on_black() {

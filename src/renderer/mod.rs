@@ -78,6 +78,10 @@ pub struct Renderer {
     /// arrives with meshes in spec 0010; quads and text never use it.
     depth: depth::DepthTexture,
     mesh_pipeline: wgpu::RenderPipeline,
+    /// The prepass again for anything whose texture has holes in it, with the
+    /// texture bound so the holes can be cut before the depth is written.
+    /// Spec 0047.
+    cutout_prepass_pipeline: wgpu::RenderPipeline,
     /// Collision boxes drawn over the scene as lines, per spec 0046.
     outline_pipeline: wgpu::RenderPipeline,
     outline_buffer: wgpu::Buffer,
@@ -582,6 +586,12 @@ impl Renderer {
             depth::mesh_primitive_state(),
             depth::read_only_state(),
         );
+        let cutout_prepass_pipeline = create_cutout_prepass_pipeline(
+            &device,
+            &camera_bind_group_layout,
+            &texture_bind_group_layout,
+        );
+
         // the same shader twice more, for the far side of a translucent shape
         // and then its near side, per spec 0018
         let translucent_pipelines = [wgpu::Face::Front, wgpu::Face::Back].map(|cull| {
@@ -622,6 +632,7 @@ impl Renderer {
             text_brush,
             depth,
             mesh_pipeline,
+            cutout_prepass_pipeline,
             outline_pipeline,
             outline_buffer,
             prepass_pipeline,
@@ -1267,16 +1278,34 @@ impl Renderer {
 
                 for (mesh_id, texture_id, first, count) in opaque.iter() {
                     let mesh = &self.meshes[mesh_id.0];
-                    // a texture with holes in it cannot write depth here:
-                    // this pass has no texture bound and would fill in the
-                    // holes, which would leave the mesh pass cutting them
-                    // out of a depth buffer that already hid what is behind
-                    // them. Spec 0047.
+                    // a texture with holes in it cannot write depth with this
+                    // pipeline: it has no texture bound and would fill in the
+                    // holes. It goes in the second run below instead, which
+                    // binds the surface and cuts them. Spec 0047.
                     if mesh.index_count == 0
                         || self.holed.get(texture_id.0).copied().unwrap_or(false)
                     {
                         continue;
                     }
+                    prepass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                    prepass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    prepass.draw_indexed(0..mesh.index_count, 0, *first..(*first + *count));
+                }
+
+                // and the cut-out things, bound to their surfaces so the holes
+                // are discarded before the depth lands. Second rather than
+                // mixed in, because this changes pipeline and binds a group
+                // per batch where the run above binds nothing at all.
+                prepass.set_pipeline(&self.cutout_prepass_pipeline);
+
+                for (mesh_id, texture_id, first, count) in opaque.iter() {
+                    let mesh = &self.meshes[mesh_id.0];
+                    if mesh.index_count == 0
+                        || !self.holed.get(texture_id.0).copied().unwrap_or(false)
+                    {
+                        continue;
+                    }
+                    prepass.set_bind_group(1, &self.textures[texture_id.0], &[]);
                     prepass.set_vertex_buffer(0, mesh.vertices.slice(..));
                     prepass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                     prepass.draw_indexed(0..mesh.index_count, 0, *first..(*first + *count));
@@ -1299,6 +1328,11 @@ impl Renderer {
                 })],
                 // read only: the prepass settled it, and a pass that wrote it
                 // could not also be sampling it
+                // read only, and it has to stay that way: this pass samples
+                // the same depth texture for spec 0029, and wgpu will not
+                // have a texture written as an attachment and read as a
+                // resource in one pass. That is why the cut-out things write
+                // their depth back in the prepass instead. Spec 0047.
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.depth.view,
                     depth_ops: None,
@@ -1929,6 +1963,63 @@ fn create_prepass_pipeline(
             compilation_options: Default::default(),
         },
         fragment: None,
+        primitive: depth::mesh_primitive_state(),
+        depth_stencil: Some(depth::state()),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// The prepass again, with the surface bound so the holes can be cut out of
+/// the depth it writes. Spec 0047.
+///
+/// It exists because the plain prepass binds no texture and so would lay down
+/// depth over a cut-out surface's holes, and because the mesh pass cannot
+/// write depth at all: it samples the depth texture for spec 0029, and wgpu
+/// refuses a texture written as an attachment and read as a resource in one
+/// pass. So the one place a hole can be cut before the depth is written is
+/// here, in a pass that reads no depth.
+///
+/// Without it, a surface with holes wrote no depth anywhere. It was tested
+/// against everything and invisible to every test, so whatever was drawn
+/// after it painted over it however far away that was: Saturn's rings were
+/// cut away wherever a column stood behind them, a word on a sign was rubbed
+/// out by the wall behind the sign, and the arcade's labels disappeared
+/// outright at any distance with a star wall behind them.
+///
+/// No colour targets. This writes depth and nothing else.
+fn create_cutout_prepass_pipeline(
+    device: &wgpu::Device,
+    camera_bind_group_layout: &wgpu::BindGroupLayout,
+    texture_bind_group_layout: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::include_wgsl!("../../res/shaders/mesh.wgsl"));
+
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("Cutout Prepass Pipeline Layout"),
+        bind_group_layouts: &[
+            Some(camera_bind_group_layout),
+            Some(texture_bind_group_layout),
+        ],
+        immediate_size: 0,
+    });
+
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Cutout Prepass Pipeline"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[Some(crate::mesh::Vertex::DESC), Some(Instance::DESC)],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_cutout"),
+            targets: &[],
+            compilation_options: Default::default(),
+        }),
         primitive: depth::mesh_primitive_state(),
         depth_stencil: Some(depth::state()),
         multisample: wgpu::MultisampleState::default(),
