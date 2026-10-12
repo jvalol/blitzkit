@@ -1,7 +1,7 @@
 # 0047 A word with nothing behind it
 
 **Status:** implemented
-**Date:** 2026-10-10
+**Date:** 2026-10-10, a sighting added 2026-10-11
 
 ## Goal
 
@@ -86,6 +86,28 @@ as it moves, and mip levels average the alpha down until small text dissolves
 rather than fades. Text read face on is fine. Text at a shallow angle, far off,
 is where this looks worst, and the spines of a bookshelf are both.
 
+**And face on, far off, it goes entirely.** The arcade's spec 0015 put a name
+over every body in its solar system, on quads turned to face the eye and
+scaled so that each name holds the same size on the glass however far off it
+is. Cut out, the names are there at two metres and four, thin at eight, and
+gone by twenty. At thirty there is nothing over Saturn at all, with the room's
+columns taken out of the build so that nothing could be hiding it and the
+colour multiplier run up to 24 so that nothing could be dimming it. One line
+changed from `stencilled` to `drawn` puts them back, bright and sharp, from
+the same spot.
+
+The paragraph above is the obvious reading of that and does not fit it. These
+quads hold the same size on the glass at every distance, so the sampler should
+be reaching the same mip at two metres as at thirty, and the names should fail
+everywhere or nowhere. Occlusion and brightness are ruled out. What is left is
+a measurement nobody has taken, and until somebody takes it this is written
+down as a sighting and not as a mechanism.
+
+What a game can do about it today is use `drawn`, which is what the arcade
+does. A dark ground is free against a dark room and reads against a bright
+one, and the reason to reach for `stencilled` is a surface with a colour worth
+seeing rather than a surface worth hiding.
+
 ## Acceptance criteria
 
 - A stencilled word's letters are opaque and its ground is not. — `text::tests::a_stencilled_word_has_nothing_behind_it`
@@ -115,4 +137,6 @@ turned up.
 
 **Anything about mip levels.** The crawl above is real and the fix for it is
 alpha-to-coverage or a distance field, both of which are a different spec and
-neither of which anything here is asking for yet.
+neither of which anything here is asking for yet. The 2026-10-11 sighting is
+not that fix either: it is a note that the cost is bigger than this spec said
+and is not yet understood.
