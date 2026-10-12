@@ -6,6 +6,76 @@
 use crate::collision::Ray;
 use glam::{Mat4, Vec2, Vec3, Vec4};
 
+/// What a camera can see, as six planes facing inward.
+///
+/// For throwing away work on things that are not in the picture. The arcade
+/// asks it which of its lamps are worth sending: a building with a room a
+/// hundred and fifty nine metres across has more fittings than the engine
+/// carries lamps, and most of them are behind you.
+///
+/// **A lamp is in the picture when its reach is**, which is why this takes a
+/// sphere rather than a point. A lamp outside the view still lights what is
+/// inside it, so a lamp may only be thrown away when nothing it could light
+/// is on screen. [`PointLight::falloff`] is exactly nought at the range, so
+/// everything a lamp lights is inside a sphere of that radius, and the test
+/// is whether that sphere reaches the picture.
+///
+/// [`PointLight::falloff`]: crate::lighting::PointLight::falloff
+#[derive(Debug, Copy, Clone)]
+pub struct Frustum {
+    /// Left, right, bottom, top, near, far. Each is `xyz` a normal pointing
+    /// into the frustum and `w` its offset, normalised so the dot product is
+    /// a distance in metres.
+    sides: [Vec4; 6],
+}
+
+impl Frustum {
+    /// The planes of a view projection, by Gribb and Hartmann: each side is
+    /// the w row of the matrix plus or minus one of the others.
+    ///
+    /// Normalised on the way in, so `holds_sphere` can compare against a
+    /// radius in metres. Unnormalised the test still answers yes or no in
+    /// the right places for a point and is wrong for everything else, which
+    /// is the kind of wrong that looks right until a lamp winks out.
+    pub fn of(view_projection: Mat4) -> Self {
+        let m = view_projection.to_cols_array_2d();
+        let row = |n: usize| Vec4::new(m[0][n], m[1][n], m[2][n], m[3][n]);
+        let (w, x, y, z) = (row(3), row(0), row(1), row(2));
+
+        // near is z alone and not w + z, because this projection puts depth
+        // nought at the near plane rather than minus one. Spec 0008.
+        let sides = [w + x, w - x, w + y, w - y, z, w - z].map(|side| {
+            let length = Vec3::new(side.x, side.y, side.z).length();
+
+            if length > 1e-6 {
+                side / length
+            } else {
+                side
+            }
+        });
+
+        Self { sides }
+    }
+
+    /// Whether any part of a sphere is inside, taking the planes one at a
+    /// time.
+    ///
+    /// Says yes to some spheres that are wholly outside, in the corners
+    /// where two planes both pass them. That is the cheap test's one cost
+    /// and it is the right way round: it keeps a lamp that did not need
+    /// keeping, where the other kind of wrong is a lamp going out.
+    pub fn holds_sphere(&self, at: Vec3, radius: f32) -> bool {
+        self.sides
+            .iter()
+            .all(|side| Vec3::new(side.x, side.y, side.z).dot(at) + side.w >= -radius)
+    }
+
+    /// Whether a point is inside.
+    pub fn holds(&self, at: Vec3) -> bool {
+        self.holds_sphere(at, 0.0)
+    }
+}
+
 /// Where the scene is looked at from.
 ///
 /// World space is right-handed with y up, per `specs/0007-math-types.md`, and
@@ -71,6 +141,11 @@ impl Camera {
         self.projection() * self.view()
     }
 
+    /// The six planes of what this camera can see, per spec 0050.
+    pub fn frustum(&self) -> Frustum {
+        Frustum::of(self.view_projection())
+    }
+
     /// The ray a cursor points along, per spec 0025.
     ///
     /// `cursor` is in physical pixels from the window's top left with y going
@@ -116,6 +191,135 @@ impl Default for Camera {
 
 #[cfg(test)]
 mod tests {
+
+    /// Spec 0050: a frustum holds what is in front of it and not what is
+    /// behind.
+    ///
+    /// The one that matters is behind. An unguarded projection sends a point
+    /// at your back through a negative w and it comes out mirrored into the
+    /// middle of the picture, which is how a thing nobody can see takes the
+    /// place of one they can. Planes have no such trick: behind is behind.
+    #[test]
+    fn a_frustum_holds_what_is_in_front_of_it() {
+        let mut camera = Camera::new();
+        camera.position = Vec3::ZERO;
+        camera.target = -Vec3::Z;
+        camera.fov_y = 60f32.to_radians();
+
+        let seen = camera.frustum();
+
+        assert!(seen.holds(Vec3::new(0.0, 0.0, -10.0)), "straight ahead");
+        assert!(!seen.holds(Vec3::new(0.0, 0.0, 10.0)), "at your back");
+        assert!(
+            !seen.holds(Vec3::new(0.0, 0.0, -0.01)),
+            "inside the near plane"
+        );
+        assert!(
+            !seen.holds(Vec3::new(0.0, 0.0, -(camera.far + 1.0))),
+            "past the far plane"
+        );
+        assert!(
+            !seen.holds(Vec3::new(40.0, 0.0, -10.0)),
+            "far off to the side"
+        );
+    }
+
+    /// Spec 0050: and holds a sphere whose middle is outside but whose edge
+    /// is not.
+    ///
+    /// The whole reason it takes a radius. A lamp beside the picture lights
+    /// what is in it, so throwing the lamp away because its middle is out of
+    /// shot puts out a light you can see the work of.
+    ///
+    /// Walks a sphere sideways out of the picture and finds where it stops
+    /// being held, then checks that place against the plane itself. The
+    /// control is a radius of nought: the same sphere is then dropped a good
+    /// deal earlier.
+    #[test]
+    fn a_frustum_holds_a_sphere_it_only_clips() {
+        let mut camera = Camera::new();
+        camera.position = Vec3::ZERO;
+        camera.target = -Vec3::Z;
+        camera.fov_y = 60f32.to_radians();
+
+        let seen = camera.frustum();
+        let reach = 3.0f32;
+        let out = |radius: f32| {
+            let mut across = 0.0f32;
+
+            while across < 60.0 {
+                if !seen.holds_sphere(Vec3::new(across, 0.0, -10.0), radius) {
+                    return across;
+                }
+                across += 0.01;
+            }
+
+            across
+        };
+
+        let with_it = out(reach);
+        let without = out(0.0);
+
+        assert!(
+            with_it > without + reach * 0.5,
+            "a sphere of {} reaches {:.2} against a point's {:.2}",
+            reach,
+            with_it,
+            without
+        );
+
+        // and a sphere wholly past the side is still dropped
+        assert!(
+            !seen.holds_sphere(Vec3::new(without + reach * 4.0, 0.0, -10.0), reach),
+            "a sphere well outside was held"
+        );
+    }
+
+    /// Spec 0050: the planes are normalised, so a radius means metres.
+    ///
+    /// Unnormalised, the test still answers correctly for a point and is
+    /// wrong by whatever each row happens to scale to for a sphere, which
+    /// looks right until a lamp winks out.
+    ///
+    /// Against a side plane, and that is the whole of why this test is
+    /// written the way it is. A first draft measured the near plane and
+    /// passed with the normalising taken out, because this projection's z
+    /// row is already a hair over unit length: normalising it does nothing
+    /// and the test was watching the one plane that could not tell. The side
+    /// planes come out twice as long at this field of view, so they can.
+    ///
+    /// The distance is worked out from the geometry rather than from the
+    /// frustum. A camera at the origin looking down -z has its right plane
+    /// through the origin with inward unit normal `(-cos p, 0, -sin p)`,
+    /// where `p` is the horizontal half angle. A point a metre beyond the
+    /// edge is `cos p` from the plane, so a sphere there is held when its
+    /// radius reaches that and not before.
+    #[test]
+    fn the_sides_of_a_frustum_measure_in_metres() {
+        let mut camera = Camera::new();
+        camera.position = Vec3::ZERO;
+        camera.target = -Vec3::Z;
+        camera.fov_y = 60f32.to_radians();
+
+        let seen = camera.frustum();
+        let half = ((camera.fov_y * 0.5).tan() * camera.aspect()).atan();
+        let ahead = 10.0f32;
+        // a metre beyond where the edge crosses this depth
+        let out = Vec3::new(ahead * half.tan() + 1.0, 0.0, -ahead);
+        let reach = half.cos();
+
+        assert!(
+            seen.holds_sphere(out, reach * 1.05),
+            "a sphere of {:.3} m did not reach a plane {:.3} m off",
+            reach * 1.05,
+            reach
+        );
+        assert!(
+            !seen.holds_sphere(out, reach * 0.95),
+            "a sphere of {:.3} m did reach it",
+            reach * 0.95
+        );
+    }
     use super::*;
     use glam::{vec2, vec3};
 
