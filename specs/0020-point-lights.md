@@ -27,6 +27,23 @@ existing game looking the way it looked.
 A game that pushes more gets the first sixty four and a warning in the log; it
 does not lose the frame and it does not silently drop them without saying so.
 
+**The warning is once a frame and only when the number moves.** It was once
+per refused lamp. The arcade grew a room with a hundred ceiling lamps in it
+and began pushing a hundred and thirty three lights, which is sixty nine
+refusals a frame and, at the frame rate that building runs at, about eight and
+a half thousand identical lines a second. The formatting was work done every
+frame and the log was unreadable, which is the worse half: a warning nobody
+can read is a warning nobody gets.
+
+So the caps count what they turn away and `Scene::reset` says it at the end of
+the frame, once, and only when the count is not what was said last time. A
+building that is over a cap is over it on every frame; said once you learn the
+fact, said again you learn that it moved, and that is the line worth having.
+Nothing is said when it falls back to nought, because an all clear is not
+news, but it is remembered, so the fault coming back is news again. The same
+counting covers the shadow-casting cap here, spec 0021's spots and spec 0046's
+outlines, which all had the same shape.
+
 It was eight, and eight was never a number about hardware. A lamp is two vec4s,
 so eight of them is 256 bytes of a block a uniform binding has kilobytes of room
 for. The number came from the first scene that wanted more than one light.
@@ -76,6 +93,7 @@ checks are what cover the gap.
 - Two lights add up rather than one winning. — `lighting::tests::point_lights_add_together`
 - A scene with no point lights shades exactly as spec 0012 did. — `lighting::tests::no_point_lights_is_the_old_shading`
 - Lights are pushed per frame and cleared with the scene. — `renderer::scene::tests::point_lights_are_cleared_with_the_scene`
+- A cap says what it turned away once a frame, and again only when the count moves. — `renderer::scene::tests::a_cap_says_what_it_turned_away_once_a_frame`
 - A lamp past the count is dropped, and the first ones kept. — `renderer::scene::tests::only_the_lamps_that_fit_are_kept`
 - The uniform matches the shader's block, field by field. — `renderer::uniform_tests::the_scene_uniform_is_laid_out_for_the_gpu`
 - A lamp is two vec4s, so an array of them is not silently padded apart. — `renderer::uniform_tests::a_lamp_is_two_vec4s_and_nothing_else`

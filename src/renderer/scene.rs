@@ -119,6 +119,41 @@ pub struct Scene {
     /// Collision boxes to draw over the finished scene, refilled each frame
     /// like the rest of this. See spec 0046.
     outlines: Vec<Outline>,
+    /// What the caps turned away this frame, what was last said about it,
+    /// and how many times anything has been said at all.
+    ///
+    /// The count is there so a test can see the thing this is for. Watching
+    /// `said` across two frames cannot: it lands on the same value whether a
+    /// line went out or not, which a first draft of
+    /// `tests::a_cap_says_what_it_turned_away_once_a_frame` asserted on and
+    /// which passed with the change check taken out.
+    turned: Turned,
+    said: Option<Turned>,
+    spoke: usize,
+}
+
+/// How much of a frame each cap refused.
+///
+/// Counted rather than said on the spot, because a cap is hit once per thing
+/// and the thing is a per-frame thing. The arcade grew a room with a hundred
+/// ceiling lamps in it and started pushing a hundred and thirty three lights
+/// against a cap of sixty four: sixty nine refusals a frame, at a hundred and
+/// twenty five frames a second, is eight and a half thousand identical lines
+/// a second. The formatting is work done every frame and the log is
+/// unreadable, which is the worse half: a warning nobody can read is a
+/// warning nobody gets.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Turned {
+    lamps: usize,
+    casting: usize,
+    spots: usize,
+    outlines: usize,
+}
+
+impl Turned {
+    fn any(&self) -> bool {
+        *self != Self::default()
+    }
 }
 
 /// How many boxes a scene may outline in one frame, per spec 0046.
@@ -134,6 +169,8 @@ impl Scene {
     }
 
     pub fn reset(&mut self) {
+        self.say_what_was_turned_away();
+
         // keeps the allocations, drops the contents
         for instances in self.instances.values_mut() {
             instances.clear();
@@ -141,6 +178,65 @@ impl Scene {
         self.point_lights.clear();
         self.spot_lights.clear();
         self.outlines.clear();
+        self.turned = Turned::default();
+    }
+
+    /// Says what the caps refused in the frame just finished, once, and only
+    /// when it is not what was said last time.
+    ///
+    /// Only when it changes, because a building that is over a cap is over it
+    /// on every frame and saying so on every frame is the same line forever.
+    /// Said once, you learn the fact; said again, you learn that it moved,
+    /// which is the thing worth a line.
+    ///
+    /// Nothing is said when the count falls to nought. An all clear is not
+    /// news, and it is still remembered, so a fault that comes back says so
+    /// again.
+    fn say_what_was_turned_away(&mut self) {
+        if Some(self.turned) == self.said || !self.turned.any() {
+            self.said = Some(self.turned);
+            return;
+        }
+
+        let Turned {
+            lamps,
+            casting,
+            spots,
+            outlines,
+        } = self.turned;
+
+        self.spoke += 1;
+
+        if lamps > 0 {
+            log::warn!(
+                "a scene asked for {} more point lights than the {} it carries",
+                lamps,
+                MAX_POINT_LIGHTS
+            );
+        }
+        if casting > 0 {
+            log::warn!(
+                "a scene asked {} more point lights to cast than the {} it carries",
+                casting,
+                MAX_SHADOWING_POINT_LIGHTS
+            );
+        }
+        if spots > 0 {
+            log::warn!(
+                "a scene asked for {} more spot lights than the {} it carries",
+                spots,
+                MAX_SPOT_LIGHTS
+            );
+        }
+        if outlines > 0 {
+            log::warn!(
+                "a scene outlined {} more boxes than the {} it carries",
+                outlines,
+                MAX_OUTLINES
+            );
+        }
+
+        self.said = Some(self.turned);
     }
 
     /// Draws a collision box over the finished scene this frame, per spec 0046.
@@ -151,14 +247,12 @@ impl Scene {
     /// see one outline, and where they disagree the gap between them is the
     /// bug.
     ///
-    /// Past [`MAX_OUTLINES`] the extra are dropped and said so, the way a
-    /// scene with too many lamps is told.
+    /// Past [`MAX_OUTLINES`] the extra are dropped and counted, and the
+    /// count is said once a frame by `reset`, the way a scene with too many
+    /// lamps is told.
     pub fn outline(&mut self, box_: Aabb, color: Vec4) {
         if self.outlines.len() >= MAX_OUTLINES {
-            log::warn!(
-                "a scene outlined more than {} boxes; the rest are dropped",
-                MAX_OUTLINES
-            );
+            self.turned.outlines += 1;
             return;
         }
 
@@ -171,26 +265,21 @@ impl Scene {
 
     /// Adds a lamp for this frame, per spec 0020.
     ///
-    /// Past [`MAX_POINT_LIGHTS`] the extra ones are dropped and said so, rather
-    /// than quietly going missing or costing the frame.
+    /// Past [`MAX_POINT_LIGHTS`] the extra ones are dropped and counted,
+    /// rather than quietly going missing or costing the frame. The count is
+    /// said once a frame by `reset` and not once per lamp: see `Turned`.
     ///
     /// A lamp asking to cast past [`MAX_SHADOWING_POINT_LIGHTS`] keeps its
     /// light and loses its shadow, per spec 0022. Dropping the whole lamp over
     /// it would take away more than was asked for.
     pub fn push_light(&mut self, mut light: PointLight) {
         if self.point_lights.len() >= MAX_POINT_LIGHTS {
-            log::warn!(
-                "a scene pushed more than {} point lights; the rest are dropped",
-                MAX_POINT_LIGHTS
-            );
+            self.turned.lamps += 1;
             return;
         }
 
         if light.casts && self.casting_lamps().len() >= MAX_SHADOWING_POINT_LIGHTS {
-            log::warn!(
-                "a scene asked more than {} point lights to cast shadows; the rest light without one",
-                MAX_SHADOWING_POINT_LIGHTS
-            );
+            self.turned.casting += 1;
             light.casts = false;
         }
 
@@ -212,14 +301,12 @@ impl Scene {
 
     /// Adds a spot for this frame, per spec 0021.
     ///
-    /// Past [`MAX_SPOT_LIGHTS`] the extra ones are dropped and said so. The cap
-    /// is low because every spot is another pass over the whole scene.
+    /// Past [`MAX_SPOT_LIGHTS`] the extra ones are dropped and counted, and
+    /// the count is said once a frame by `reset`. The cap is low because
+    /// every spot is another pass over the whole scene.
     pub fn push_spot(&mut self, light: SpotLight) {
         if self.spot_lights.len() >= MAX_SPOT_LIGHTS {
-            log::warn!(
-                "a scene pushed more than {} spot lights; the rest are dropped",
-                MAX_SPOT_LIGHTS
-            );
+            self.turned.spots += 1;
             return;
         }
 
@@ -464,6 +551,101 @@ mod tests {
         assert_eq!(std::mem::offset_of!(Instance, shininess), 116);
         assert_eq!(attributes[8].offset, 116);
         assert_eq!(Instance::DESC.array_stride, Instance::SIZE);
+    }
+
+    /// Spec 0020: a cap says what it refused once a frame, not once a lamp.
+    ///
+    /// The arcade grew a room with a hundred ceiling lamps in it and began
+    /// pushing a hundred and thirty three lights against a cap of sixty
+    /// four. At one line per refusal that was sixty nine a frame and eight
+    /// and a half thousand a second: the formatting was work done every
+    /// frame, and the log was unreadable, which is the worse half of it.
+    ///
+    /// Counted here rather than read out of the log, because capturing `log`
+    /// in a test is a dependency and a global. `spoke` stands in for it, and
+    /// it has to: a first draft of this watched `said` across two frames and
+    /// passed with the change check taken out, because `said` lands on the
+    /// same value either way. It was asserting on something it could not
+    /// see, which is the fault this file keeps a lookout for.
+    ///
+    /// Two controls, and both fail. Count every push in `push_light` rather
+    /// than only the refused ones, and the first assertion goes. Take
+    /// `Some(self.turned) == self.said` out of the test in
+    /// `say_what_was_turned_away`, and the second does.
+    #[test]
+    fn a_cap_says_what_it_turned_away_once_a_frame() {
+        let mut scene = Scene::new();
+
+        for n in 0..(MAX_POINT_LIGHTS + 9) {
+            scene.push_light(PointLight::new(
+                Vec3::new(n as f32, 0.0, 0.0),
+                Vec3::ONE,
+                1.0,
+                1.0,
+            ));
+        }
+
+        assert_eq!(scene.point_lights().len(), MAX_POINT_LIGHTS);
+        assert_eq!(
+            scene.turned.lamps, 9,
+            "it counted the pushes, not the refusals"
+        );
+
+        // the frame ends: the count is said and remembered, and the next
+        // frame starts from nothing
+        scene.reset();
+
+        assert_eq!(
+            scene.said,
+            Some(Turned {
+                lamps: 9,
+                ..Turned::default()
+            })
+        );
+        assert_eq!(scene.turned, Turned::default());
+        assert_eq!(scene.spoke, 1, "it should have said so once");
+
+        // the same frame again says nothing new, which is the whole point
+        for n in 0..(MAX_POINT_LIGHTS + 9) {
+            scene.push_light(PointLight::new(
+                Vec3::new(n as f32, 0.0, 0.0),
+                Vec3::ONE,
+                1.0,
+                1.0,
+            ));
+        }
+        scene.reset();
+
+        assert_eq!(scene.spoke, 1, "the same overflow was said twice");
+
+        // and a frame that is over by a different amount is worth a line
+        for n in 0..(MAX_POINT_LIGHTS + 2) {
+            scene.push_light(PointLight::new(
+                Vec3::new(n as f32, 0.0, 0.0),
+                Vec3::ONE,
+                1.0,
+                1.0,
+            ));
+        }
+        scene.reset();
+
+        assert_eq!(
+            scene.said,
+            Some(Turned {
+                lamps: 2,
+                ..Turned::default()
+            })
+        );
+        assert_eq!(scene.spoke, 2, "a different overflow went unsaid");
+
+        // a frame that fits says nothing, and is still remembered, so the
+        // fault coming back is news again
+        scene.push_light(PointLight::new(Vec3::ZERO, Vec3::ONE, 1.0, 1.0));
+        scene.reset();
+
+        assert_eq!(scene.said, Some(Turned::default()));
+        assert_eq!(scene.spoke, 2, "an all clear was announced");
+        assert!(!Turned::default().any());
     }
 
     #[test]
