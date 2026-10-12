@@ -68,8 +68,9 @@ pub fn edges(box_: Aabb) -> [[Vec3; 2]; 12] {
     out
 }
 
-/// The vertices for one box, two to an edge.
-pub fn vertices(outline: &Outline) -> [Vertex; 24] {
+/// The vertices for one box, two to an edge, in a world moved so that the eye
+/// is at the origin, per spec 0051.
+pub fn vertices(outline: &Outline, eye: Vec3) -> [Vertex; 24] {
     let color = outline.color.to_array();
     let mut out = [Vertex {
         position: [0.0; 3],
@@ -77,8 +78,8 @@ pub fn vertices(outline: &Outline) -> [Vertex; 24] {
     }; 24];
 
     for (n, [from, to]) in edges(outline.box_).iter().enumerate() {
-        out[n * 2].position = from.to_array();
-        out[n * 2 + 1].position = to.to_array();
+        out[n * 2].position = (*from - eye).to_array();
+        out[n * 2 + 1].position = (*to - eye).to_array();
     }
 
     out
@@ -97,10 +98,13 @@ mod tests {
     fn a_box_is_twelve_edges() {
         assert_eq!(edges(box_()).len(), 12);
         assert_eq!(
-            vertices(&Outline {
-                box_: box_(),
-                color: Vec4::ONE
-            })
+            vertices(
+                &Outline {
+                    box_: box_(),
+                    color: Vec4::ONE
+                },
+                Vec3::ZERO
+            )
             .len(),
             24
         );

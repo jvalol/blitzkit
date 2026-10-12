@@ -10,7 +10,7 @@ use crate::lighting::{
 };
 use crate::mesh::Transform;
 use crate::renderer::outline::Outline;
-use glam::Vec4;
+use glam::{Vec3, Vec4};
 use std::collections::HashMap;
 
 /// A mesh that has been uploaded to the GPU. Handing out a handle rather than
@@ -80,6 +80,21 @@ impl Instance {
     /// and a light does not cast its own shadow. See spec 0039.
     pub fn glows(&self) -> bool {
         self.color[0] > 1.0 || self.color[1] > 1.0 || self.color[2] > 1.0
+    }
+
+    /// The same instance with the world moved so that the eye is at the
+    /// origin, per spec 0051.
+    ///
+    /// Only the translation column moves. The rotation and scale of a model
+    /// are about its own origin and do not care where the camera is, and the
+    /// normal matrix is built from those, so it is left alone.
+    pub fn from_the_eye(&self, eye: Vec3) -> Self {
+        let mut moved = *self;
+        moved.model[3][0] -= eye.x;
+        moved.model[3][1] -= eye.y;
+        moved.model[3][2] -= eye.z;
+
+        moved
     }
 
     pub fn new(transform: &Transform, color: Vec4, shininess: f32) -> Self {
@@ -740,5 +755,65 @@ mod tests {
 
         assert!(lit_glass.glows());
         assert!(lit_glass.is_translucent());
+    }
+
+    /// Spec 0051: the eye moves the world, and nothing else about an instance.
+    #[test]
+    fn being_handed_over_from_the_eye_moves_only_where_a_thing_stands() {
+        let turned = Transform::at(glam::vec3(10.0, 20.0, 30.0))
+            .with_rotation(glam::Quat::from_rotation_y(0.7))
+            .with_scale(glam::vec3(2.0, 3.0, 4.0));
+        let instance = Instance::new(&turned, Vec4::ONE, 8.0);
+        let eye = glam::vec3(1.0, 2.0, 3.0);
+        let moved = instance.from_the_eye(eye);
+
+        assert_eq!(moved.model[3], [9.0, 18.0, 27.0, 1.0]);
+        // and the three columns that carry the turn and the size are the ones
+        // the normal matrix is built from, so they may not drift
+        for column in 0..3 {
+            assert_eq!(
+                moved.model[column], instance.model[column],
+                "column {} of a turned, scaled model changed",
+                column
+            );
+        }
+        assert_eq!(moved.normal, instance.normal);
+        assert_eq!(moved.color, instance.color);
+        assert_eq!(moved.shininess, instance.shininess);
+    }
+
+    /// Spec 0051: and this is what it is for. A two centimetre marble thirty
+    /// three kilometres from the world origin has a surface when it is handed
+    /// over from the eye, and seven places to put one when it is not.
+    #[test]
+    fn a_marble_at_the_far_wall_keeps_its_surface() {
+        const FAR: f32 = 33_280.0;
+        let at = glam::vec3(0.0, 0.0, FAR);
+        let instance = Instance::new(&Transform::at(at), Vec4::ONE, Instance::DEFAULT_SHININESS);
+
+        // what the vertex stage does: model times vertex, for two hundred
+        // vertices across the marble's two centimetres, measured on the axis
+        // that carries the distance: that is the one that runs out of digits
+        let places = |one: &Instance| {
+            let model = glam::Mat4::from_cols_array_2d(&one.model);
+            let mut seen = std::collections::HashSet::new();
+            for step in 0..=200 {
+                let along = -0.01 + 0.0001 * step as f32;
+                let world = model * glam::vec3(0.0, 0.0, along).extend(1.0);
+                seen.insert(world.z.to_bits());
+            }
+            seen.len()
+        };
+
+        assert_eq!(
+            places(&instance),
+            7,
+            "f32 at the far wall was expected to be coarse, and was not"
+        );
+        assert_eq!(
+            places(&instance.from_the_eye(at)),
+            201,
+            "every vertex across the marble should land somewhere of its own"
+        );
     }
 }

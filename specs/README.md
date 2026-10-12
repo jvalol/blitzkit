@@ -57,6 +57,7 @@ not a priority, and it never changes once a spec exists.
 | [0048](0048-two-faces-in-one-plane.md) | Two drawn faces found in one plane, so the fault this building has hit seven times is arithmetic rather than a photograph |
 | [0049](0049-where-a-body-can-be.md) | Where a body can get to, filled out over what is drawn, so a face nobody can stand in front of is not reported as a fault |
 | [0050](0050-what-a-camera-can-see.md) | The six planes of what a camera can see, so a game can throw away a lamp whose reach never meets the picture |
+| [0051](0051-the-world-from-the-eye.md) | Everything the GPU is handed is measured from the camera, so a thing thirty kilometres from the world origin is drawn as precisely as one next door |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.

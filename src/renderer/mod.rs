@@ -1107,7 +1107,7 @@ impl Renderer {
         self.queue.write_buffer(
             &self.point_faces_buffer,
             0,
-            bytemuck::cast_slice(&point_faces(scene.point_lights())),
+            bytemuck::cast_slice(&point_faces(scene.point_lights(), self.camera.position)),
         );
         self.upload_geometry(geometry);
 
@@ -1200,7 +1200,7 @@ impl Renderer {
             // then six passes for each lamp that asked to cast, per spec 0022.
             // Every layer is cleared whether a lamp claimed it or not, for the
             // same reason the spots' are.
-            let faces = point_faces(scene.point_lights());
+            let faces = point_faces(scene.point_lights(), self.camera.position);
             for (layer, view) in self.point_shadow_layers.iter().enumerate() {
                 let mut shadow_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("Point Shadow Pass"),
@@ -1435,6 +1435,9 @@ impl Renderer {
     /// A run is one of four kinds, so the instances of a kind lie together and
     /// a kind is a span rather than a list of indices.
     fn upload_instances(&mut self, scene: &Scene) -> (Vec<Batch>, Vec<Batch>, Vec<Batch>) {
+        // the world is handed over moved so that the eye is at the origin,
+        // per spec 0051
+        let eye = self.camera.position;
         let mut instances: Vec<Instance> = Vec::new();
         let mut opaque = Vec::new();
         let mut translucent = Vec::new();
@@ -1460,9 +1463,14 @@ impl Renderer {
                 [(false, false), (false, true), (true, false), (true, true)]
             {
                 let first = instances.len() as u32;
-                instances.extend(mesh_instances.iter().filter(|instance| {
-                    instance.is_translucent() == see_through && instance.glows() == glowing
-                }));
+                instances.extend(
+                    mesh_instances
+                        .iter()
+                        .filter(|instance| {
+                            instance.is_translucent() == see_through && instance.glows() == glowing
+                        })
+                        .map(|instance| instance.from_the_eye(eye)),
+                );
 
                 let count = instances.len() as u32 - first;
                 if count == 0 {
@@ -1502,7 +1510,7 @@ impl Renderer {
         let mut vertices: Vec<outline::Vertex> = Vec::new();
 
         for one in scene.outlines() {
-            vertices.extend_from_slice(&outline::vertices(one));
+            vertices.extend_from_slice(&outline::vertices(one, self.camera.position));
         }
 
         if vertices.is_empty() {
@@ -1583,9 +1591,11 @@ unsafe impl bytemuck::Pod for GpuPointLight {}
 unsafe impl bytemuck::Zeroable for GpuPointLight {}
 
 impl GpuPointLight {
-    fn new(light: &crate::lighting::PointLight) -> Self {
+    fn new(light: &crate::lighting::PointLight, eye: glam::Vec3) -> Self {
         Self {
-            position_range: light.position.extend(light.range.max(0.0)).to_array(),
+            position_range: (light.position - eye)
+                .extend(light.range.max(0.0))
+                .to_array(),
             color_intensity: light.color.extend(light.intensity).to_array(),
         }
     }
@@ -1614,7 +1624,7 @@ unsafe impl bytemuck::Pod for GpuSpotLight {}
 unsafe impl bytemuck::Zeroable for GpuSpotLight {}
 
 impl GpuSpotLight {
-    fn new(light: &crate::lighting::SpotLight) -> Self {
+    fn new(light: &crate::lighting::SpotLight, eye: glam::Vec3) -> Self {
         let (cos_outer, cos_inner) = light.cone_cosines();
         let direction = light.direction.normalize_or_zero();
         let direction = if direction.length_squared() < 0.5 {
@@ -1625,16 +1635,19 @@ impl GpuSpotLight {
         let range = light.range.max(0.0);
 
         Self {
-            position_range: light.position.extend(range).to_array(),
+            position_range: (light.position - eye).extend(range).to_array(),
             direction_cos_outer: direction.extend(cos_outer).to_array(),
             color_intensity: light.color.extend(light.intensity).to_array(),
             cos_inner: [cos_inner, 0.0, 0.0, 0.0],
-            view_projection: shadow::spot_view_projection(
+            // worked out in the world and then told where the world went, per
+            // spec 0051: a matrix that took a world position takes an
+            // eye-relative one by letting the eye back in first.
+            view_projection: (shadow::spot_view_projection(
                 light.position,
                 direction,
                 light.outer.max(light.inner),
                 range,
-            )
+            ) * glam::Mat4::from_translation(eye))
             .to_cols_array(),
         }
     }
@@ -1661,7 +1674,10 @@ unsafe impl bytemuck::Zeroable for GpuPointFace {}
 /// A layer no lamp claimed is left with a zero range, which the pass reads as
 /// nothing to draw. Its map is still cleared, so a lamp that stopped casting
 /// cannot leave last frame's shadow behind.
-fn point_faces(lamps: &[crate::lighting::PointLight]) -> [GpuPointFace; POINT_SHADOW_LAYERS] {
+fn point_faces(
+    lamps: &[crate::lighting::PointLight],
+    eye: glam::Vec3,
+) -> [GpuPointFace; POINT_SHADOW_LAYERS] {
     let mut faces = [GpuPointFace::default(); POINT_SHADOW_LAYERS];
 
     for (slot, index) in crate::lighting::casting_lamps(lamps)
@@ -1672,9 +1688,10 @@ fn point_faces(lamps: &[crate::lighting::PointLight]) -> [GpuPointFace; POINT_SH
         let range = lamp.range.max(0.0);
         for face in 0..6 {
             faces[slot * 6 + face] = GpuPointFace {
-                view_projection: shadow::face_view_projection(lamp.position, face, range)
-                    .to_cols_array(),
-                position_range: lamp.position.extend(range).to_array(),
+                view_projection: (shadow::face_view_projection(lamp.position, face, range)
+                    * glam::Mat4::from_translation(eye))
+                .to_cols_array(),
+                position_range: (lamp.position - eye).extend(range).to_array(),
             };
         }
     }
@@ -1726,18 +1743,23 @@ impl SceneUniform {
         bounds: &Aabb,
         contact_shadows: bool,
     ) -> Self {
+        // everything with a position in it is handed over relative to this,
+        // per spec 0051, and every matrix that used to take a world position
+        // is told where the world went by letting the eye back in first
+        let eye = camera.position;
+
         // the scene caps this already, per spec 0020, but the array is fixed
         // and reading past it would be a different kind of bug
         let used = lamps.len().min(crate::lighting::MAX_POINT_LIGHTS);
         let mut point_lights = [GpuPointLight::default(); crate::lighting::MAX_POINT_LIGHTS];
         for (slot, lamp) in point_lights.iter_mut().zip(&lamps[..used]) {
-            *slot = GpuPointLight::new(lamp);
+            *slot = GpuPointLight::new(lamp, eye);
         }
 
         let lit = spots.len().min(crate::lighting::MAX_SPOT_LIGHTS);
         let mut spot_lights = [GpuSpotLight::default(); crate::lighting::MAX_SPOT_LIGHTS];
         for (slot, spot) in spot_lights.iter_mut().zip(&spots[..lit]) {
-            *slot = GpuSpotLight::new(spot);
+            *slot = GpuSpotLight::new(spot, eye);
         }
 
         // the same rule the scene and the shadow passes use, so a lamp cannot be
@@ -1750,13 +1772,17 @@ impl SceneUniform {
         }
 
         Self {
-            view_projection: camera.view_projection().to_cols_array(),
-            camera_position: camera.position.extend(0.0).to_array(),
+            view_projection: camera.view_projection_from_the_eye().to_cols_array(),
+            // the eye is the origin now, so this is where it is. Kept rather
+            // than taken out because the shader asks it for the direction to
+            // the viewer and nought is the honest answer. Spec 0051.
+            camera_position: glam::Vec4::ZERO.to_array(),
             light_direction: light.direction.normalize_or_zero().extend(0.0).to_array(),
             light_color: light.color.extend(light.intensity).to_array(),
             ambient: light.ambient.extend(0.0).to_array(),
-            light_view_projection: shadow::light_view_projection(light.direction, bounds)
-                .to_cols_array(),
+            light_view_projection: (shadow::light_view_projection(light.direction, bounds)
+                * glam::Mat4::from_translation(eye))
+            .to_cols_array(),
             point_light_count: [used as u32, 0, 0, 0],
             point_lights,
             spot_light_count: [lit as u32, 0, 0, 0],
@@ -2538,14 +2564,19 @@ mod uniform_tests {
         );
 
         assert_eq!(uniform.point_light_count[0], 2);
-        assert_eq!(uniform.point_lights[0].position_range, [1.0, 2.0, 3.0, 5.0]);
+        // from the eye, per spec 0051, and the default camera stands at
+        // (0, 1, 5), so (1, 2, 3) is two in front of it and one above
+        assert_eq!(
+            uniform.point_lights[0].position_range,
+            [1.0, 1.0, -2.0, 5.0]
+        );
         assert_eq!(
             uniform.point_lights[0].color_intensity,
             [1.0, 0.0, 0.0, 2.0]
         );
         assert_eq!(
             uniform.point_lights[1].position_range,
-            [-4.0, 0.0, 0.0, 9.0]
+            [-4.0, -1.0, -5.0, 9.0]
         );
         // the rest stay at nothing, so a lamp from a past frame cannot light
         assert_eq!(uniform.point_lights[2].color_intensity, [0.0; 4]);
@@ -2625,7 +2656,8 @@ mod uniform_tests {
         );
 
         assert_eq!(uniform.spot_light_count[0], 1);
-        assert_eq!(uniform.spot_lights[0].position_range, [0.0, 3.0, 0.0, 9.0]);
+        // from the eye, per spec 0051, with the default camera at (0, 1, 5)
+        assert_eq!(uniform.spot_lights[0].position_range, [0.0, 2.0, -5.0, 9.0]);
         assert_eq!(uniform.spot_lights[0].color_intensity, [1.0, 0.0, 0.0, 2.0]);
         // the wider angle has the smaller cosine, and it is the outer one
         let cos_outer = uniform.spot_lights[0].direction_cos_outer[3];
@@ -2717,7 +2749,7 @@ mod uniform_tests {
     fn a_casting_lamp_gets_six_layers_and_the_rest_get_none() {
         let lamps =
             [PointLight::new(glam::vec3(0.0, 3.0, 0.0), glam::Vec3::ONE, 1.0, 8.0).casting()];
-        let faces = point_faces(&lamps);
+        let faces = point_faces(&lamps, glam::Vec3::ZERO);
 
         for (layer, face) in faces.iter().take(6).enumerate() {
             assert_eq!(
@@ -2750,15 +2782,18 @@ mod uniform_tests {
             PointLight::new(glam::Vec3::Y * 2.0, glam::Vec3::ONE, 1.0, 4.0).casting(),
             PointLight::new(glam::Vec3::Z * 2.0, glam::Vec3::ONE, 1.0, 4.0).casting(),
         ];
+        let camera = Camera::new();
         let uniform = SceneUniform::new(
-            &Camera::new(),
+            &camera,
             &Light::new(),
             &lamps,
             &[],
             &shadow::default_bounds(),
             true,
         );
-        let faces = point_faces(&lamps);
+        // and both sides have to have moved the world the same way, per spec
+        // 0051, or the slot points at a lamp standing somewhere else
+        let faces = point_faces(&lamps, camera.position);
 
         for slot in 0..uniform.point_shadow[0] as usize {
             let lamp = uniform.point_lights[uniform.point_shadow[slot + 1] as usize];

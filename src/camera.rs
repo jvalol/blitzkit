@@ -136,9 +136,31 @@ impl Camera {
         glam::camera::rh::proj::directx::perspective(self.fov_y, self.aspect(), self.near, self.far)
     }
 
-    /// What the GPU gets: one matrix taking a world position to clip space.
+    /// One matrix taking a world position to clip space.
     pub fn view_projection(&self) -> Mat4 {
         self.projection() * self.view()
+    }
+
+    /// The same, for a world already moved so that the eye is at the origin,
+    /// per spec 0051.
+    ///
+    /// This is what the GPU gets. Everything with a position in it is handed
+    /// over shifted by `-position` first, and this is the matrix that goes
+    /// with that shift: the same view, turned the same way, standing at
+    /// nought.
+    ///
+    /// **Why the shift is worth the trouble.** A coordinate's precision in
+    /// f32 is a fraction of its own size, so a surface detail a centimetre
+    /// across is lost inside a position thirty kilometres from the origin:
+    /// the numbers there step 3.9 mm at a time, and a two centimetre ball
+    /// has five of them across it. The shift is done before the model matrix
+    /// multiplies anything, so what the GPU adds a centimetre to is a small
+    /// number and every digit survives. See spec 0051.
+    pub fn view_projection_from_the_eye(&self) -> Mat4 {
+        let look =
+            glam::camera::rh::view::look_at_mat4(Vec3::ZERO, self.target - self.position, self.up);
+
+        self.projection() * look
     }
 
     /// The six planes of what this camera can see, per spec 0050.
@@ -600,5 +622,38 @@ mod tests {
 
         assert!((clip.x / clip.w).abs() < 1e-5);
         assert!((clip.y / clip.w).abs() < 1e-5);
+    }
+
+    /// Spec 0051: moving the world under the eye puts a thing in the same
+    /// place on the screen, so nothing at ordinary distances changes.
+    #[test]
+    fn the_eye_at_the_origin_sees_what_the_eye_in_the_world_saw() {
+        let mut camera = Camera::new();
+        camera.position = Vec3::new(3.0, 2.0, 40.0);
+        camera.target = Vec3::new(-1.0, 0.5, 0.0);
+        camera.viewport = Vec2::new(1600.0, 900.0);
+
+        let world = camera.view_projection();
+        let eyed = camera.view_projection_from_the_eye();
+
+        for at in [
+            Vec3::ZERO,
+            Vec3::new(5.0, 1.0, 10.0),
+            Vec3::new(-20.0, -3.0, -15.0),
+            Vec3::new(0.25, 60.0, 2.0),
+        ] {
+            let was = world * at.extend(1.0);
+            let is = eyed * (at - camera.position).extend(1.0);
+            let was = was.truncate() / was.w;
+            let is = is.truncate() / is.w;
+
+            assert!(
+                was.distance(is) < 1e-4,
+                "{} landed at {} from the world and {} from the eye",
+                at,
+                was,
+                is
+            );
+        }
     }
 }
