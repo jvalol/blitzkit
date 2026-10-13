@@ -11,11 +11,18 @@ the same way you would.
 
 ## arcade
 
-An arcade with games built on this engine.
+An arcade with games built on this engine, and thirty three kilometres of
+solar system behind one of its walls.
 
 [github.com/jvalol/arcade](https://github.com/jvalol/arcade)
 
-![An arcade showcasing what I've built with the engine](https://raw.githubusercontent.com/jvalol/arcade/main/media/screenshot.png)
+![Saturn, its rings open, with Titan a speck nine metres off and a galaxy above them both](https://raw.githubusercontent.com/jvalol/arcade/main/media/screenshot.png)
+
+![The Earth, nine centimetres of it, coastlines and all, on a lit line running away into stars](https://raw.githubusercontent.com/jvalol/arcade/main/media/earth.png)
+
+![The Moon, a grey marble alone on a plain of stars](https://raw.githubusercontent.com/jvalol/arcade/main/media/the-moon.png)
+
+![Jupiter, a metre across, with the sixth astronomical unit marked beside it](https://raw.githubusercontent.com/jvalol/arcade/main/media/jupiter.png)
 
 ## pong
 
