@@ -1120,6 +1120,90 @@ mod tests {
         assert!((end.x - 4.0).abs() < 1e-3, "rolled to {:?}", end);
     }
 
+    /// Spec 0051: collision is still done in world coordinates, and this is
+    /// what that costs at the far end of the biggest world built on this
+    /// engine.
+    ///
+    /// 0051 moved the drawing to the eye and left collision where it was,
+    /// saying a game that wants to walk thirty kilometres from its origin has
+    /// to say so to a future spec. The arcade walks thirty-three, down the
+    /// line of its true scale solar system, so this is the measurement rather
+    /// than the warning.
+    ///
+    /// The same second of walking, sixty frames of it with gravity on, at the
+    /// origin and at Neptune's 33,477 metres. The large coordinate is the one
+    /// being walked along, which is the hard way round and the arcade's own:
+    /// every frame adds a step to a number that has already spent its digits.
+    ///
+    /// It costs almost nothing. A second goes 4.219 metres out there against
+    /// 4.200 here, which is half a per cent, and a body rests at the same
+    /// height to five places. The reason is in the last assertion: a frame's
+    /// walk is 0.070 metres and f32 counts in 0.004 out there, so a step is
+    /// seventeen times the grain and never rounds away.
+    ///
+    /// Seventeen is not a lot of headroom, which is why that is the assertion
+    /// to watch rather than the other two. A thousand times further out the
+    /// grain passes the step and a second of walking goes nought metres: not
+    /// jittery, not slow, stopped. Walking is what breaks first, and it breaks
+    /// all at once.
+    #[test]
+    fn a_floor_thirty_three_kilometres_out_is_still_a_floor() {
+        // where spec 0018 of the arcade stands Neptune
+        const FAR: f32 = 33_477.0;
+        const PACE: f32 = 4.2;
+        const FRAMES: u32 = 60;
+
+        let walked = |out: f32| {
+            let floor = Aabb::from_center_size(vec3(0.0, -0.5, out), vec3(40.0, 1.0, 400.0));
+            // exactly touching, which is where a body at rest ends up
+            let mut at = vec3(0.0, 0.5, out);
+            let mut least = f32::MAX;
+
+            for _ in 0..FRAMES {
+                let was = at;
+                let step = 1.0 / FRAMES as f32;
+
+                at = move_and_slide(Sphere::new(at, 0.5), Vec3::NEG_Y * 9.8, step, &[floor]);
+                at = move_and_slide(Sphere::new(at, 0.5), Vec3::Z * PACE, step, &[floor]);
+                least = least.min((at.z - was.z).abs());
+            }
+
+            (at, least)
+        };
+
+        let (near, _) = walked(0.0);
+        let (far, least) = walked(FAR);
+
+        // it neither sinks into the floor nor hovers over it
+        assert!(
+            (far.y - near.y).abs() < 1e-3,
+            "a body rests at {:.5} out there and at {:.5} here",
+            far.y,
+            near.y
+        );
+        // and a second of walking covers what a second of walking covers
+        assert!(
+            ((far.z - FAR) - near.z).abs() < 0.05,
+            "a second went {:.3} m out there and {:.3} m here",
+            far.z - FAR,
+            near.z
+        );
+
+        // which it does because a frame's step is nowhere near the smallest
+        // number f32 can tell apart out there. That is the one to watch: it is
+        // what a world bigger than this would spend, and when a frame's walk
+        // stops being several times this, walking is what breaks first.
+        let grain = FAR * f32::EPSILON;
+        assert!(
+            least > grain * 8.0,
+            "the smallest frame moved {:.5} m and f32 counts in {:.5} m out there, \
+             which is only {:.1} times over",
+            least,
+            grain,
+            least / grain
+        );
+    }
+
     #[test]
     fn a_ball_rolls_off_the_end_of_a_floor() {
         // the floor runs to x = 10, and the ball is just past its edge: clear of

@@ -52,8 +52,20 @@ world position.
 **What this does not fix.** Culling, collision, walking and everything else a
 game does on the CPU still work in world coordinates, and so still lose digits
 at distance. Culling can afford to: a wrong answer at the margin costs a frame
-of a thing drawn or not drawn. Collision cannot, and a game that wants to walk
-about thirty kilometres from its origin has to say so to a future spec.
+of a thing drawn or not drawn.
+
+**Collision at thirty-three kilometres costs half a per cent**, which is the
+part of that sentence that used to be a warning and is now a measurement. The
+arcade walks the whole of its true scale solar system, so the number was there
+to be taken: the same second of walking covers 4.219 metres at Neptune against
+4.200 at the origin, and a body rests at the same height to five places.
+
+It holds because a frame's walk is 0.070 metres and f32 counts in 0.004 out
+there, so a step is seventeen times the grain. That ratio is the thing to
+watch, and seventeen is not much headroom. A world a thousand times wider puts
+the grain past the step and a second of walking covers nought metres. Walking
+does not get jittery and then fail; it stops dead, and the first thing anybody
+would check, which is whether the floor still holds you up, still says yes.
 
 ## Acceptance criteria
 
@@ -67,6 +79,8 @@ about thirty kilometres from its origin has to say so to a future spec.
 - So do the spots. — `renderer::uniform_tests::the_uniform_carries_the_spots_it_is_given`
 - A casting lamp's six faces and the uniform's table agree on where that lamp
   stands, which they only do if both moved the world the same way. — `renderer::uniform_tests::the_faces_and_the_uniform_agree_on_which_lamps_cast`
+- Collision, which this does not move to the eye, costs half a per cent at
+  thirty-three kilometres and stops dead a thousand times further out. — `collision::tests::a_floor_thirty_three_kilometres_out_is_still_a_floor`
 
 ### Verified by hand
 
@@ -77,6 +91,8 @@ about thirty kilometres from its origin has to say so to a future spec.
 
 ## Out of scope
 
-Collision and walking at distance, per the note above. A world larger than
-float32 can address at all, which needs the positions themselves to be wider
-and is a different change.
+Moving collision to the eye as well. It is measured rather than assumed now,
+per the note above, and at the distances anything built on this engine
+actually reaches it costs half a per cent. A world wide enough to need it is a
+world that needs the positions themselves to be wider, which is a different
+change.
