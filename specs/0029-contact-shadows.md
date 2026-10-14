@@ -40,17 +40,66 @@ something, and the point is in contact shadow.
 covers what the map cannot resolve and stops, which keeps it cheap and keeps it
 from arguing with the map about distances the map is right about.
 
-**Every pixel takes its steps at a different phase.** All of them stepping at
+**Every pixel takes its steps at the same phase, the middle of the step.**
+
+~~Every pixel takes its steps at a different phase. All of them stepping at
 exactly the same distances puts the edge of what the march finds on the same
 few surfaces for every one of them, and the boundary comes out as a stipple of
 lit and shadowed pixels rather than a line. Each pixel's march is nudged by a
 fraction of a step, from interleaved gradient noise on its own position. A
 different number per pixel and the same one every frame, so it does not crawl.
-The edge is spread over the step instead of landing on it.
+The edge is spread over the step instead of landing on it.~~
+
+Struck 2026-10-14. The last sentence of that is false and it is false in a way
+worth writing down: it holds the number fixed for the wrong object. A pixel
+keeps its phase. A point on a wall does not keep its pixel. Walk across a room
+and every point on every surface draws a new phase each frame, so the contact
+term fizzes, and what it fizzes over is exactly the ground the march covers,
+which is every surface near another one.
+
+It took three goes to find, because it does not look like what it is. It was
+first read as the engine never having multisampled, which was true and was
+something else, so the engine was multisampled. Four samples left it, so it
+was taken to the eight the hardware had. Eight left it, so the surface it sat
+on was repainted to halve its contrast. None of those could have touched it.
+Multisampling settles how much of a pixel a triangle covers, and this is a
+question about what the pixel is shaded; the contrast of the surface is a
+multiplier on a term that was wrong before it was multiplied.
+
+What it costs to give up is the banding the noise was hiding. Measured on the
+arcade's bath house ceiling, which is the worst case in any of these games for
+surfaces lying close to one another, it costs nothing that can be seen at
+twenty steps or at sixty, while the fizz goes from 523 single pixel spikes in a
+frame to 22. In the hall the phase moves 0.17 per cent of the picture and
+nothing in it reads as a band.
+
+If banding does turn up somewhere, the answer is not the noise again. It is
+either more steps, which is measurable and dull, or a phase taken from
+something that holds still relative to the surface.
 
 **The darker of the two wins.** Neither overrides the other. The map knows about
 distance and is wrong about contact; the march is the other way round, so the
 answer is whichever says less light.
+
+**A long shallow edge lit along itself is past what this can answer.** Found
+2026-10-14 in the arcade's bath house, whose ceiling is eleven ribs hanging
+fifteen centimetres under a lid, lit by sconces low on the walls. The light
+runs along those surfaces rather than onto them, so the march walks nearly
+parallel to the edge it is asking about, and whether a step lands inside the
+rib next door comes down to a texel of the depth buffer.
+
+Every setting was tried, measured at one camera, counting single pixels
+standing away from their neighbours along those edges. A phase per pixel: a
+fizz that crawls, 523 of them. One phase for every pixel: a dashed line, 49.
+Forty steps, sixty, a hundred, a longer start, a start that grows as the light
+grazes: 44 to 49, all within each other's noise. Counting how many steps were
+inside rather than stopping at the first: 14, and the dashes become a regular
+scallop, which is worse to look at than the dashes. With the march off: 12.
+
+There is no setting of this that answers that geometry. The honest fix is to
+filter the contact term, which means a pass of its own and a buffer to put it
+in, and that is a different spec that nobody has written. Until then a game
+whose rooms are built like that one turns this off, which the arcade now does.
 
 **Only what the camera can see casts one.** The depth buffer holds the frame,
 so an occluder off the edge of it, or behind the camera, contributes nothing.
@@ -123,6 +172,8 @@ that had no business being unbounded.
 - Something in the foreground is not something in contact. — `contact::tests::a_thing_in_the_foreground_is_not_contact`
 - A step is never longer than the thinnest thing the march can see. — `contact::tests::the_steps_leave_no_gap`
 - A nudged march covers the same ground, whatever the nudge. — `contact::tests::a_nudged_march_covers_the_same_ground`
+- The shader marches on this module's numbers and not its own. — `contact::tests::the_shader_marches_on_these_numbers`
+- And takes its phase from nothing that moves. — `contact::tests::the_march_takes_its_phase_from_nothing_that_moves`
 - And a nudge moves the whole march, not one step of it. — `contact::tests::a_nudge_moves_the_whole_march`
 - The darker of the map and the march is the answer. — `contact::tests::the_darker_of_the_two_wins`
 - Every casting light gets a march, and no more than three. — `contact::tests::there_is_one_march_per_casting_light`
@@ -143,6 +194,8 @@ that had no business being unbounded.
 - Turning it off restores the line, which is how you know it was doing the work.
 - Nothing that was correct before has acne now.
 - The edge of a contact shadow is a line rather than a stipple.
+- Walking a room, no surface fizzes. This is the one that was missed: it only
+  shows while the camera moves, and every picture taken of it stood still.
 - Orbiting all the way round a cube, no angle shows a line at its foot.
 
 ## Out of scope

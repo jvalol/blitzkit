@@ -88,6 +88,7 @@ const CONTACT_THICKEST: f32 = 0.6;
 const CONTACT_START: f32 = 0.01;
 const CONTACT_START_PER_UNIT: f32 = 0.004;
 const CONTACT_START_MOST: f32 = 0.4;
+const CONTACT_PHASE: f32 = 0.5;
 
 // What the depth buffer holds, as a distance from the camera. Matches
 // contact::linear_depth in Rust.
@@ -102,19 +103,10 @@ fn linear_depth(clip_depth: f32, near: f32, far: f32) -> f32 {
 
 // A short march towards the light through the depth buffer, for the range the
 // shadow maps cannot resolve. One lit, zero shadowed. See spec 0029.
-// A different number for every pixel, the same one every frame: interleaved
-// gradient noise. Nudging each pixel's march by a fraction of a step spreads
-// the edge of what it finds over the step, instead of leaving every pixel to
-// find it at the same few distances and the boundary to come out as a stipple.
-fn march_nudge(pixel: vec2<f32>) -> f32 {
-    return fract(52.9829189 * fract(dot(pixel, vec2<f32>(0.06711056, 0.00583715))));
-}
-
 fn contact_shadow(
     world_position: vec3<f32>,
     normal: vec3<f32>,
     to_light: vec3<f32>,
-    pixel: vec2<f32>,
 ) -> f32 {
     if uniforms.contact.x < 0.5 {
         return 1.0;
@@ -135,7 +127,7 @@ fn contact_shadow(
         reach * CONTACT_START_MOST,
     );
     let start = world_position + normal * off;
-    let nudge = max(march_nudge(pixel), 0.05);
+    let nudge = CONTACT_PHASE;
 
     // how far off the camera this surface itself is, to measure what the march
     // finds against
@@ -619,7 +611,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // way round, so the darker of the two is the answer. See spec 0029.
     let lit = min(
         shadow_factor(in.world_position, normal, to_light),
-        contact_shadow(in.world_position, normal, to_light, in.clip_position.xy),
+        contact_shadow(in.world_position, normal, to_light),
     );
 
     // the instance color tints what is sampled rather than replacing it
@@ -666,7 +658,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let towards = normalize(lamp.position_range.xyz - in.world_position);
             reaching = min(
                 point_shadow(lamp, u32(slot), in.world_position, normal),
-                contact_shadow(in.world_position, normal, towards, in.clip_position.xy),
+                contact_shadow(in.world_position, normal, towards),
             );
         }
 

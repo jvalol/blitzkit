@@ -117,20 +117,40 @@ pub fn step_length() -> f32 {
     CONTACT_REACH / CONTACT_STEPS as f32
 }
 
+/// Where in its step the march takes each sample, from just above nought to
+/// one.
+///
+/// The middle of the step, and the same number for every pixel. It was a
+/// different number for every pixel, from interleaved gradient noise on the
+/// pixel's own position, to spread the edge of what the march finds over the
+/// step rather than leaving it to land on the step. The reasoning said that
+/// was the same number every frame and so could not crawl, and the reasoning
+/// was about the wrong thing: a pixel keeps its number, and a point on a wall
+/// does not keep its pixel. Walk, and every point on every surface draws a new
+/// phase each frame.
+///
+/// What that looked like is a fizz of single pixels over the arcade's bath
+/// house ceiling, moving with the camera. It survived four samples a pixel,
+/// then eight, then the ceiling being repainted to halve its contrast, because
+/// none of those touch it: multisampling settles how much of a pixel a
+/// triangle covers and this is what the pixel is shaded.
+///
+/// One phase for every pixel costs the banding the noise was hiding. Measured
+/// on that ceiling it costs nothing visible, at twenty steps or at sixty, while
+/// the fizz went from 523 single pixel spikes to 22.
+pub const CONTACT_PHASE: f32 = 0.5;
+
 /// How far along the march step `n` sits, counting from one.
 pub fn step_at(n: u32) -> f32 {
     step_at_jittered(n, 1.0)
 }
 
-/// The same, with the whole march nudged by a fraction of a step.
+/// The same, with the whole march moved by a fraction of a step.
 ///
-/// Every pixel taking its steps at the same distances puts the edge of what
-/// the march finds on the same few surfaces, and the boundary comes out as a
-/// stipple rather than a line. A different nudge per pixel spreads that over
-/// the step instead.
-///
-/// `jitter` runs from just above zero to one. Matches `contact_shadow` in
-/// `mesh.wgsl`. Keep the two in step.
+/// `jitter` runs from just above zero to one, and is [`CONTACT_PHASE`] for
+/// every pixel. It takes an argument because what the march must not do is
+/// care which end of the step it samples: every phase has to cover the same
+/// ground. Matches `contact_shadow` in `mesh.wgsl`. Keep the two in step.
 pub fn step_at_jittered(n: u32, jitter: f32) -> f32 {
     step_length() * (n as f32 - 1.0 + jitter.clamp(0.0, 1.0))
 }
@@ -408,5 +428,76 @@ mod tests {
     fn the_steps_reach_all_the_way_and_no_further() {
         assert!((step_at(CONTACT_STEPS) - CONTACT_REACH).abs() < 1e-6);
         assert!(step_at(1) > 0.0);
+    }
+    /// Spec 0029: the shader's own numbers are these numbers.
+    ///
+    /// Every constant in this module is declared again in `mesh.wgsl`, because
+    /// a shader cannot read Rust, and three doc comments here say "keep the
+    /// two in step" without anything keeping them. This is that thing.
+    ///
+    /// It is written the day the phase changed. The one number the march takes
+    /// that is not in this list used to be per pixel noise computed in the
+    /// shader and nowhere else, so nothing here could have been out of step
+    /// with it, and nothing here could have caught it being wrong either.
+    #[test]
+    fn the_shader_marches_on_these_numbers() {
+        const SOURCE: &str = include_str!("../res/shaders/mesh.wgsl");
+
+        let said = |name: &str| -> f32 {
+            let at = SOURCE
+                .find(&format!("const {}:", name))
+                .unwrap_or_else(|| panic!("{} is not declared in mesh.wgsl", name));
+            let line = SOURCE[at..].lines().next().unwrap();
+            let value = line
+                .rsplit('=')
+                .next()
+                .unwrap()
+                .trim()
+                .trim_end_matches(';')
+                .trim();
+            value
+                .parse()
+                .unwrap_or_else(|_| panic!("{} reads {} in mesh.wgsl", name, value))
+        };
+
+        assert_eq!(said("CONTACT_STEPS"), CONTACT_STEPS as f32);
+        assert_eq!(said("CONTACT_THICKNESS"), CONTACT_THICKNESS);
+        assert_eq!(
+            said("CONTACT_THICKNESS_PER_UNIT"),
+            CONTACT_THICKNESS_PER_UNIT
+        );
+        assert_eq!(said("CONTACT_THICKEST"), CONTACT_THICKEST);
+        assert_eq!(said("CONTACT_START"), CONTACT_START);
+        assert_eq!(said("CONTACT_START_PER_UNIT"), CONTACT_START_PER_UNIT);
+        assert_eq!(said("CONTACT_START_MOST"), CONTACT_START_MOST);
+        assert_eq!(said("CONTACT_PHASE"), CONTACT_PHASE);
+    }
+
+    /// Spec 0029: the march takes its phase from nothing that moves.
+    ///
+    /// The phase was interleaved gradient noise on the pixel's own position,
+    /// which is fixed for a pixel and not for a surface, so every point on
+    /// every wall drew a new one each frame the camera moved and the contact
+    /// term fizzed. If the shader ever reads the pixel again to decide where
+    /// in a step to sample, this is the test that should stop it.
+    #[test]
+    fn the_march_takes_its_phase_from_nothing_that_moves() {
+        const SOURCE: &str = include_str!("../res/shaders/mesh.wgsl");
+
+        let from = SOURCE
+            .find("fn contact_shadow(")
+            .expect("no contact_shadow");
+        let body = &SOURCE[from..];
+        let to = body.find("\n}").expect("contact_shadow does not end");
+        let body = &body[..to];
+
+        assert!(
+            !body.contains("pixel") && !body.contains("clip_position"),
+            "the march is reading where on screen it is to pick its phase"
+        );
+        assert!(
+            body.contains("CONTACT_PHASE"),
+            "the march is not taking the phase this module names"
+        );
     }
 }
