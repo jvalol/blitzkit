@@ -19,6 +19,7 @@ WASD or the arrows to roll the ball. The camera follows it.
 
 - drag or move the mouse to swing the camera round
 - scroll to zoom
+- O outlines what is solid
 
 ![A ball on the floor of a walled room, three blocks standing on it, each
 casting a shadow](/media/rolling.png)
