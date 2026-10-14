@@ -67,11 +67,29 @@ foot of what casts it, which is the fault this whole section exists to answer.
 surface yet, so they still need the slack, and sharing constants with the sun
 would have taken it away from them. Spec 0021's own are separate now.
 
+**The map does not follow the light round.** Across, the box is the bounds'
+own sphere rather than a fit to the turned box. Fitted, a moving light covers a
+different patch of ground every frame: the texels change size and every shadow
+edge crawls against whatever is standing still. A sphere is the same width from
+every direction, so the map is the same map all day.
+
+It costs resolution, and the trade is deliberate. The arcade's building is 159
+across and its sphere is 225, so a texel goes from 78 millimetres to 110. A
+crawling edge is worse than a slightly softer one, and nothing noticed until
+spec 0019 of that game put a sun in motion for the first time.
+
+The usual companion to this is snapping the box's middle to whole texels, and
+it is deliberately absent. That is for a map that follows a camera about, where
+the box slides over the ground and the grid slides with it. A scene bounds does
+not move, so there is nothing for it to fix: it was written, could not be shown
+to change anything, and was taken out again.
+
 ## Acceptance criteria
 
 - The sun steps along the surface, and not at all where it shines square on. — `shadow::tests::the_sun_steps_along_the_surface_too`
 - The step is a texel or two, not a visible distance. — `shadow::tests::the_suns_step_is_a_texel_or_two`
 - A texel follows the bounds the game gave. — `shadow::tests::a_texel_of_the_sun_follows_the_bounds_it_was_given`
+- And not the light: a texel is the same width whichever way the light comes from. — `shadow::tests::the_suns_map_does_not_follow_it_round`
 - What a shadow lifts off what casts it is a fraction of what it was. — `shadow::tests::the_suns_shadow_no_longer_lifts_off_what_casts_it`
 - The spots keep the slack the sun gave up. — `shadow::tests::the_spots_keep_the_slack_the_sun_gave_up`
 

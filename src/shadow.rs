@@ -120,20 +120,45 @@ pub fn light_view_projection(direction: Vec3, bounds: &Aabb) -> Mat4 {
     let eye = center - direction * radius * 2.0;
     let view = glam::camera::rh::view::look_at_mat4(eye, center, up);
 
-    // fit the box exactly, in the light's own space
-    let mut min = Vec3::splat(f32::INFINITY);
-    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    // how deep the box goes, which is the one part of the fit that still
+    // follows the light round. The light looks down -z, so what is in front
+    // has negative z.
+    let mut near = f32::INFINITY;
+    let mut far = f32::NEG_INFINITY;
     for corner in corners(bounds) {
-        let in_light = (view * corner.extend(1.0)).xyz();
-        min = min.min(in_light);
-        max = max.max(in_light);
+        let z = -(view * corner.extend(1.0)).z;
+        near = near.min(z);
+        far = far.max(z);
     }
 
-    // the light looks down -z, so what is in front has negative z
-    let near = (-max.z).max(0.0);
-    let far = -min.z;
+    // **Across, the box is the bounds' own sphere and does not follow the
+    // light at all.** Fitted to the turned box instead, as this was, a moving
+    // light covers a different patch of ground every frame: the texels change
+    // size and the shadow edges crawl against whatever is standing still.
+    // A sphere is the same width from every direction, so the map is the same
+    // map all day.
+    //
+    // It costs resolution. The arcade's building is 159 across and its sphere
+    // is 225, so a texel goes from 78 millimetres to 110. A crawling edge is
+    // worse than a slightly softer one, and spec 0019 of that game put a sun
+    // in motion for the first time.
+    //
+    // The usual companion to this is snapping the box's middle to whole
+    // texels, and it is not here. That is for a map that follows a camera
+    // about, where the box slides over the ground and the grid slides with it.
+    // These bounds do not move, so there is nothing for it to fix, and a guard
+    // nobody can show a case for is a guard that goes.
+    let half = radius;
+    let middle = (view * center.extend(1.0)).xyz();
 
-    glam::camera::rh::proj::directx::orthographic(min.x, max.x, min.y, max.y, near, far) * view
+    glam::camera::rh::proj::directx::orthographic(
+        middle.x - half,
+        middle.x + half,
+        middle.y - half,
+        middle.y + half,
+        near.max(0.0),
+        far,
+    ) * view
 }
 
 /// How wide a spot's shadow map is. Smaller than the sun's, because a cone
@@ -431,6 +456,35 @@ pub fn point_is_lit(recorded: f32, distance: f32, range: f32, facing: f32) -> bo
 
 #[cfg(test)]
 mod tests {
+
+    /// Spec 0015: the map is the same map whichever way the light comes from.
+    ///
+    /// Fitted to the turned bounds, as this was, a moving light gives a
+    /// different patch of ground every frame: the texels change size and the
+    /// shadow edges crawl against whatever is standing still. Jake saw it the
+    /// hour spec 0019 of the arcade first put a sun in motion.
+    #[test]
+    fn the_suns_map_does_not_follow_it_round() {
+        let bounds = Aabb::from_center_size(Vec3::new(3.0, 1.0, -2.0), Vec3::new(30.0, 4.0, 18.0));
+        let mut widths = Vec::new();
+
+        for n in 0..24 {
+            let turn = n as f32 / 24.0 * std::f32::consts::TAU;
+            let from = Vec3::new(turn.cos(), turn.sin().abs() + 0.2, turn.sin()).normalize();
+
+            widths.push(texel_width(light_view_projection(-from, &bounds)));
+        }
+
+        let most = widths.iter().copied().fold(0.0f32, f32::max);
+        let least = widths.iter().copied().fold(f32::INFINITY, f32::min);
+
+        assert!(
+            (most - least).abs() < 1e-5,
+            "a texel is {} one way and {} another, so the shadows breathe",
+            least,
+            most
+        );
+    }
     use super::*;
 
     #[test]
