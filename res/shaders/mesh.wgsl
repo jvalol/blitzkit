@@ -72,7 +72,12 @@ struct Uniforms {
 
 // The whole scene's depth, written by spec 0029's prepass. Read, never sampled
 // with a comparison: the march wants the number, not a verdict.
-@group(3) @binding(0) var scene_depth: texture_depth_2d;
+// Multisampled, because the world is drawn into a multisampled attachment and
+// this is that attachment's depth. The march below loads one sample of it: the
+// march is a coarse walk along a ray looking for anything standing between a
+// surface and its light, and four readings of the same wall answer the same
+// way. Spec 0052.
+@group(3) @binding(0) var scene_depth: texture_depth_multisampled_2d;
 
 // Matches contact::CONTACT_STEPS, ::CONTACT_THICKNESS and ::CONTACT_START in
 // Rust. Keep the two in step.

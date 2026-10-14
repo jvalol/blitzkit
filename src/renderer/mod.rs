@@ -77,6 +77,12 @@ pub struct Renderer {
     /// Built here and resized with the surface. The pass that attaches it
     /// arrives with meshes in spec 0010; quads and text never use it.
     depth: depth::DepthTexture,
+    /// What the world is drawn into when the device multisamples, and which is
+    /// resolved onto the surface at the end of the mesh pass. Spec 0052.
+    ///
+    /// `None` on a device that will not have it, where the world goes straight
+    /// onto the surface as it always did.
+    colour: Option<wgpu::TextureView>,
     mesh_pipeline: wgpu::RenderPipeline,
     /// The prepass again for anything whose texture has holes in it, with the
     /// texture bound so the holes can be cut before the depth is written.
@@ -230,9 +236,21 @@ impl Renderer {
             .await
             .unwrap();
 
+        // Spec 0052: a device holds every format to what the WebGPU
+        // specification guarantees unless it is asked for the rest, and eight
+        // samples on a depth format is past the guarantee. The adapter saying
+        // the hardware has eight is not the device agreeing to use it.
+        let beyond_the_spec = adapter
+            .features()
+            .contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("Device"),
+                required_features: if beyond_the_spec {
+                    wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                } else {
+                    wgpu::Features::empty()
+                },
                 ..Default::default()
             })
             .await
@@ -310,7 +328,29 @@ impl Renderer {
             config.format,
         );
 
-        let depth = depth::DepthTexture::new(&device, config.width, config.height);
+        // How many samples a pixel is worked out from, asked of the device
+        // rather than assumed. Spec 0052: four is what everything this has run
+        // on supports, and a device that will not have it gets one and a
+        // staircase, which is what every device got before.
+        //
+        // Both formats have to agree, because they are attached to one pass.
+        let samples = {
+            let got = depth::samples(
+                adapter.get_texture_format_features(config.format).flags,
+                adapter.get_texture_format_features(depth::FORMAT).flags,
+                beyond_the_spec,
+            );
+
+            if got <= 1 {
+                log::warn!("this device will not multisample, so edges are drawn hard");
+            } else {
+                log::info!("drawing with {} samples a pixel", got);
+            }
+
+            got
+        };
+        let depth = depth::DepthTexture::new(&device, config.width, config.height, samples);
+        let colour = multisampled(&device, &config, samples);
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Texture Bind Group Layout"),
@@ -566,13 +606,16 @@ impl Renderer {
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Depth,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                        // the depth it reads is the one the world is drawn
+                        // into, so when that is multisampled this is too, and
+                        // the march in spec 0029 loads one sample of it
+                        multisampled: samples > 1,
                     },
                     count: None,
                 }],
             });
         let scene_depth_bind_group = scene_depth_group(&device, &scene_depth_layout, &depth);
-        let prepass_pipeline = create_prepass_pipeline(&device, &camera_bind_group_layout);
+        let prepass_pipeline = create_prepass_pipeline(&device, &camera_bind_group_layout, samples);
 
         let mesh_pipeline = create_mesh_pipeline(
             &device,
@@ -585,11 +628,13 @@ impl Renderer {
             },
             depth::mesh_primitive_state(),
             depth::read_only_state(),
+            samples,
         );
         let cutout_prepass_pipeline = create_cutout_prepass_pipeline(
             &device,
             &camera_bind_group_layout,
             &texture_bind_group_layout,
+            samples,
         );
 
         // the same shader twice more, for the far side of a translucent shape
@@ -606,11 +651,12 @@ impl Renderer {
                 },
                 depth::translucent_primitive_state(cull),
                 depth::translucent_state(),
+                samples,
             )
         });
         let instance_buffer = create_buffer(&device, 0, wgpu::BufferUsages::VERTEX);
         let outline_pipeline =
-            create_outline_pipeline(&device, &camera_bind_group_layout, config.format);
+            create_outline_pipeline(&device, &camera_bind_group_layout, config.format, samples);
         let outline_buffer = create_buffer(&device, 0, wgpu::BufferUsages::VERTEX);
 
         let mut renderer = Self {
@@ -631,6 +677,7 @@ impl Renderer {
             index_buffer,
             text_brush,
             depth,
+            colour,
             mesh_pipeline,
             cutout_prepass_pipeline,
             outline_pipeline,
@@ -1035,7 +1082,13 @@ impl Renderer {
             0,
             bytemuck::cast_slice(&screen_size(&self.config)),
         );
-        self.depth = depth::DepthTexture::new(&self.device, self.config.width, self.config.height);
+        self.depth = depth::DepthTexture::new(
+            &self.device,
+            self.config.width,
+            self.config.height,
+            self.depth.samples,
+        );
+        self.colour = multisampled(&self.device, &self.config, self.depth.samples);
         // the old view died with the old texture, and the march reads through
         // this one
         self.scene_depth_bind_group =
@@ -1315,12 +1368,20 @@ impl Renderer {
 
         // the world next, depth tested, then the interface painted on top
         {
+            // into the multisampled texture and resolved onto the surface at
+            // the end of this pass, per spec 0052. The interface is painted on
+            // afterwards, onto what came out, because text is already smoothed
+            // by its own atlas and a quad has no edge worth four samples.
+            let (into, onto) = match &self.colour {
+                Some(many) => (many, Some(&view)),
+                None => (&view, None),
+            };
             let mut mesh_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Mesh Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: into,
                     depth_slice: None,
-                    resolve_target: None,
+                    resolve_target: onto,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
@@ -1850,6 +1911,7 @@ fn create_outline_pipeline(
     device: &wgpu::Device,
     camera_bind_group_layout: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
+    samples: u32,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::include_wgsl!("../../res/shaders/outline.wgsl"));
 
@@ -1884,7 +1946,10 @@ fn create_outline_pipeline(
             ..Default::default()
         },
         depth_stencil: Some(depth::outline_state()),
-        multisample: wgpu::MultisampleState::default(),
+        multisample: wgpu::MultisampleState {
+            count: samples,
+            ..Default::default()
+        },
         multiview_mask: None,
         cache: None,
     })
@@ -1970,8 +2035,9 @@ fn scene_depth_group(
 fn create_prepass_pipeline(
     device: &wgpu::Device,
     camera_bind_group_layout: &wgpu::BindGroupLayout,
+    samples: u32,
 ) -> wgpu::RenderPipeline {
-    let shader = device.create_shader_module(wgpu::include_wgsl!("../../res/shaders/mesh.wgsl"));
+    let shader = mesh_shader(device, samples);
 
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Depth Prepass Pipeline Layout"),
@@ -1991,7 +2057,10 @@ fn create_prepass_pipeline(
         fragment: None,
         primitive: depth::mesh_primitive_state(),
         depth_stencil: Some(depth::state()),
-        multisample: wgpu::MultisampleState::default(),
+        multisample: wgpu::MultisampleState {
+            count: samples,
+            ..Default::default()
+        },
         multiview_mask: None,
         cache: None,
     })
@@ -2019,8 +2088,9 @@ fn create_cutout_prepass_pipeline(
     device: &wgpu::Device,
     camera_bind_group_layout: &wgpu::BindGroupLayout,
     texture_bind_group_layout: &wgpu::BindGroupLayout,
+    samples: u32,
 ) -> wgpu::RenderPipeline {
-    let shader = device.create_shader_module(wgpu::include_wgsl!("../../res/shaders/mesh.wgsl"));
+    let shader = mesh_shader(device, samples);
 
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Cutout Prepass Pipeline Layout"),
@@ -2048,7 +2118,10 @@ fn create_cutout_prepass_pipeline(
         }),
         primitive: depth::mesh_primitive_state(),
         depth_stencil: Some(depth::state()),
-        multisample: wgpu::MultisampleState::default(),
+        multisample: wgpu::MultisampleState {
+            count: samples,
+            ..Default::default()
+        },
         multiview_mask: None,
         cache: None,
     })
@@ -2069,8 +2142,9 @@ fn create_mesh_pipeline(
     layouts: MeshLayouts,
     primitive: wgpu::PrimitiveState,
     depth_stencil: wgpu::DepthStencilState,
+    samples: u32,
 ) -> wgpu::RenderPipeline {
-    let shader = device.create_shader_module(wgpu::include_wgsl!("../../res/shaders/mesh.wgsl"));
+    let shader = mesh_shader(device, samples);
 
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Mesh Pipeline Layout"),
@@ -2104,7 +2178,10 @@ fn create_mesh_pipeline(
         }),
         primitive,
         depth_stencil: Some(depth_stencil),
-        multisample: wgpu::MultisampleState::default(),
+        multisample: wgpu::MultisampleState {
+            count: samples,
+            ..Default::default()
+        },
         multiview_mask: None,
         cache: None,
     })
@@ -2194,6 +2271,76 @@ fn uniform_bind_group_layout(
 /// The screen size uniform the quad shader converts pixel positions with.
 fn screen_size(config: &wgpu::SurfaceConfiguration) -> [f32; 4] {
     [config.width as f32, config.height as f32, 0.0, 0.0]
+}
+
+/// The mesh shader, built for however many samples the device gave.
+///
+/// **The depth binding's type is part of the shader**, and it has to agree
+/// with the bind group layout or the pipeline will not build at all. Written
+/// multisampled and nothing else, as it was first, this engine crashed on
+/// startup on any device that would not give four samples: the fallback that
+/// spec 0052 promised drew as it always did could not even open a window.
+///
+/// It was not caught because the one run that exercised it was read wrong. The
+/// window never appeared, and that was taken for a screenshot that missed
+/// rather than a game that had died.
+///
+/// `textureLoad`'s third argument means the mip level on a plain texture and
+/// the sample on a multisampled one, and nought is right either way, so the
+/// type is the whole of the difference.
+fn mesh_shader(device: &wgpu::Device, samples: u32) -> wgpu::ShaderModule {
+    device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("Mesh Shader"),
+        source: wgpu::ShaderSource::Wgsl(mesh_source(samples)),
+    })
+}
+
+/// The mesh shader's source, for a given sample count.
+///
+/// Its own function so the substitution can be checked without a device, which
+/// is the whole of what went wrong: the only thing that exercised the fallback
+/// was a run of the game, and a run of the game that died looked the same as a
+/// screenshot that missed.
+pub fn mesh_source(samples: u32) -> std::borrow::Cow<'static, str> {
+    const SOURCE: &str = include_str!("../../res/shaders/mesh.wgsl");
+
+    if samples > 1 {
+        std::borrow::Cow::Borrowed(SOURCE)
+    } else {
+        std::borrow::Cow::Owned(SOURCE.replace("texture_depth_multisampled_2d", "texture_depth_2d"))
+    }
+}
+
+/// The texture the world is drawn into when the device multisamples.
+///
+/// One of these and not several: the surface's own texture cannot be
+/// multisampled, because it is what gets presented, so the samples live here
+/// and are resolved onto it. Nothing samples this, so it needs no binding.
+fn multisampled(
+    device: &wgpu::Device,
+    config: &wgpu::SurfaceConfiguration,
+    samples: u32,
+) -> Option<wgpu::TextureView> {
+    if samples <= 1 {
+        return None;
+    }
+
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Multisampled Colour"),
+        size: wgpu::Extent3d {
+            width: config.width.max(1),
+            height: config.height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: samples,
+        dimension: wgpu::TextureDimension::D2,
+        format: config.format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+
+    Some(texture.create_view(&wgpu::TextureViewDescriptor::default()))
 }
 
 fn create_render_pipeline(

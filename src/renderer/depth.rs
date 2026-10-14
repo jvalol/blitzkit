@@ -6,10 +6,60 @@
 /// Depth only, 32 bit float. No stencil, because nothing here uses one.
 pub const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
+/// How many samples a pixel may be worked out from, best first.
+///
+/// Spec 0052: every edge in every game on this engine was a staircase, because
+/// nothing here was ever multisampled. It shows worst on thin repeated
+/// geometry seen at a glancing angle, where the arcade's bath house ceiling
+/// ribs turned into a shimmering band about ten metres out, and it is paid for
+/// everywhere else in jagged outlines nobody named.
+///
+/// **A ladder and not one number.** Four was it, on the usual reasoning that
+/// four is what everything supports and is most of what there is to win. Four
+/// is not most of it on a shallow edge: four samples give five levels of
+/// coverage and a near horizontal edge needs more than five to stop reading as
+/// a staircase, which the ribs went on doing. Eight gives nine.
+///
+/// The best the device will give, so a device that has eight gets eight and
+/// one that has only four is not dropped to one for it.
+pub const SAMPLES: [u32; 3] = [8, 4, 1];
+
+/// The counts the WebGPU specification guarantees of every format, and so the
+/// only ones a device will take until it has been asked to answer for itself.
+pub const GUARANTEED: [u32; 2] = [4, 1];
+
+/// The best of them this device will give for both formats.
+///
+/// Both, because the colour and the depth hang off one pass and have to agree.
+///
+/// `beyond_the_spec` is whether the device was built with
+/// `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`, and without it the answer is
+/// capped at [`GUARANTEED`] however much the flags offer. The flags come off
+/// the adapter and say what the hardware can do; the device says what it will
+/// accept, and the two are not the same question. Asked only the first, this
+/// engine put eight samples on a depth buffer on a machine whose hardware has
+/// eight and whose device had not been told it could use them, and died in
+/// validation on startup.
+pub fn samples(
+    colour: wgpu::TextureFormatFeatureFlags,
+    deep: wgpu::TextureFormatFeatureFlags,
+    beyond_the_spec: bool,
+) -> u32 {
+    SAMPLES
+        .iter()
+        .copied()
+        .filter(|count| beyond_the_spec || GUARANTEED.contains(count))
+        .find(|count| colour.sample_count_supported(*count) && deep.sample_count_supported(*count))
+        .unwrap_or(1)
+}
+
 /// The depth buffer is the size of the surface, and is rebuilt whenever that
 /// changes. A stale one would test this frame's fragments against last size's
 /// depths.
-pub fn descriptor(width: u32, height: u32) -> wgpu::TextureDescriptor<'static> {
+///
+/// Multisampled to match the colour it is attached beside, because a pass's
+/// attachments must agree on how many samples they hold.
+pub fn descriptor(width: u32, height: u32, samples: u32) -> wgpu::TextureDescriptor<'static> {
     wgpu::TextureDescriptor {
         label: Some("Depth Texture"),
         size: wgpu::Extent3d {
@@ -18,7 +68,7 @@ pub fn descriptor(width: u32, height: u32) -> wgpu::TextureDescriptor<'static> {
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: 1,
+        sample_count: samples.max(1),
         dimension: wgpu::TextureDimension::D2,
         format: FORMAT,
         // sampled as well as attached, because spec 0029 marches through it
@@ -106,16 +156,20 @@ pub fn translucent_primitive_state(cull: wgpu::Face) -> wgpu::PrimitiveState {
 pub struct DepthTexture {
     pub view: wgpu::TextureView,
     pub size: (u32, u32),
+    /// How many samples it holds, which everything attached beside it and
+    /// every pipeline drawing into it has to agree with.
+    pub samples: u32,
 }
 
 impl DepthTexture {
-    pub fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
-        let descriptor = descriptor(width, height);
+    pub fn new(device: &wgpu::Device, width: u32, height: u32, samples: u32) -> Self {
+        let descriptor = descriptor(width, height, samples);
         let texture = device.create_texture(&descriptor);
 
         Self {
             view: texture.create_view(&wgpu::TextureViewDescriptor::default()),
             size: (descriptor.size.width, descriptor.size.height),
+            samples: descriptor.sample_count,
         }
     }
 }
@@ -265,7 +319,7 @@ mod tests {
 
     #[test]
     fn depth_texture_matches_the_surface() {
-        let descriptor = descriptor(1280, 720);
+        let descriptor = descriptor(1280, 720, SAMPLES[0]);
 
         assert_eq!(descriptor.size.width, 1280);
         assert_eq!(descriptor.size.height, 720);
@@ -277,13 +331,39 @@ mod tests {
 
     #[test]
     fn resizing_recreates_the_depth_texture() {
-        let before = descriptor(800, 600);
-        let after = descriptor(1024, 768);
+        let before = descriptor(800, 600, SAMPLES[0]);
+        let after = descriptor(1024, 768, SAMPLES[0]);
 
         assert_ne!(before.size, after.size);
         // a minimized window reports zero, which is not a legal texture size
-        assert_eq!(descriptor(0, 0).size.width, 1);
-        assert_eq!(descriptor(0, 0).size.height, 1);
+        assert_eq!(descriptor(0, 0, SAMPLES[0]).size.width, 1);
+        assert_eq!(descriptor(0, 0, SAMPLES[0]).size.height, 1);
+    }
+
+    /// Spec 0052: the depth buffer holds as many samples as the colour beside
+    /// it, because a pass's attachments must agree on that.
+    ///
+    /// And a device that will not multisample gets one rather than nothing:
+    /// `sample_count` of nought is not a texture at all, and a window that has
+    /// been minimized already proved this function is asked for sizes nobody
+    /// meant.
+    #[test]
+    fn the_depth_buffer_holds_as_many_samples_as_it_is_asked_for() {
+        assert_eq!(descriptor(800, 600, SAMPLES[0]).sample_count, SAMPLES[0]);
+        // and the ladder is a ladder: best first, ending at one, which is the
+        // answer for a device that will give nothing. A ladder out of order
+        // would hand back the worst count the device happens to support.
+        assert!(
+            SAMPLES.windows(2).all(|two| two[0] > two[1]),
+            "the sample counts are not in order, best first: {:?}",
+            SAMPLES
+        );
+        assert_eq!(SAMPLES.last().copied(), Some(1), "the ladder has no bottom");
+        assert_eq!(descriptor(800, 600, 1).sample_count, 1);
+        assert_eq!(descriptor(800, 600, 0).sample_count, 1);
+        // and nothing here asserts that SAMPLES[0] itself is over one. That is a
+        // constant, so an assertion about it cannot fail and proves nothing,
+        // which clippy says and this repo has learned the hard way five times.
     }
 
     #[test]
@@ -301,6 +381,70 @@ mod tests {
 
         assert_eq!(primitive.cull_mode, Some(wgpu::Face::Back));
         assert_eq!(primitive.front_face, wgpu::FrontFace::Ccw);
+    }
+
+    /// Spec 0052: the best count the device will give, and both formats have
+    /// to give it.
+    ///
+    /// The ladder exists because the fallback used to be a cliff: anything
+    /// that would not give the one count this engine asked for got one sample
+    /// and a staircase, where most of those devices would have given four.
+    #[test]
+    fn the_best_count_both_formats_will_give() {
+        use wgpu::TextureFormatFeatureFlags as Flags;
+
+        let all = Flags::MULTISAMPLE_X2 | Flags::MULTISAMPLE_X4 | Flags::MULTISAMPLE_X8;
+        let four = Flags::MULTISAMPLE_X2 | Flags::MULTISAMPLE_X4;
+        let none = Flags::empty();
+
+        assert_eq!(super::samples(all, all, true), 8);
+        assert_eq!(super::samples(four, four, true), 4);
+        assert_eq!(super::samples(none, none, true), 1);
+        // and the lower of the two wins, because they hang off one pass
+        assert_eq!(
+            super::samples(all, four, true),
+            4,
+            "the depth was asked for more than it has"
+        );
+        assert_eq!(
+            super::samples(four, all, true),
+            4,
+            "the colour was asked for more than it has"
+        );
+    }
+
+    /// Spec 0052: a device that answers only for the specification is not
+    /// asked past it.
+    ///
+    /// This is the crash. The adapter on this machine reports eight samples on
+    /// both formats, because the hardware has eight. A device built without
+    /// `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES` holds every format to what
+    /// the WebGPU specification guarantees, which is one sample or four, and
+    /// refuses the eight its own adapter just offered. The first build of the
+    /// ladder asked the adapter, believed it, and aborted in
+    /// `Device::create_texture` before a window ever opened.
+    #[test]
+    fn a_device_answering_only_for_the_spec_is_not_asked_past_it() {
+        use wgpu::TextureFormatFeatureFlags as Flags;
+
+        let all = Flags::MULTISAMPLE_X2 | Flags::MULTISAMPLE_X4 | Flags::MULTISAMPLE_X8;
+
+        assert_eq!(super::samples(all, all, true), 8);
+        assert_eq!(
+            super::samples(all, all, false),
+            4,
+            "the hardware has eight and the device will not take eight"
+        );
+
+        // every rung of the ladder is either past the spec or guaranteed by
+        // it, so nothing can be dropped to one by the cap alone
+        for count in super::SAMPLES {
+            assert!(
+                count > 4 || super::GUARANTEED.contains(&count),
+                "{} is neither guaranteed nor past the guarantee",
+                count
+            );
+        }
     }
 }
 
@@ -368,5 +512,42 @@ impl Depth {
     /// worth comparing.
     pub fn widest(&self) -> f32 {
         self.resolves_at(self.far)
+    }
+}
+
+#[cfg(test)]
+mod shader {
+    /// Spec 0052: the mesh shader's depth type matches the samples it is built
+    /// for.
+    ///
+    /// The bind group layout says whether the scene depth is multisampled and
+    /// the shader says it again in its own type, and a pipeline whose two
+    /// disagree does not build. Written multisampled and nothing else, as it
+    /// was first, this engine could not open a window on any device that would
+    /// not give four samples: the fallback spec 0052 promised drew as it
+    /// always did crashed on startup instead.
+    ///
+    /// It went unnoticed because the one run that exercised it was read wrong.
+    /// No window appeared, and that was taken for a screenshot that missed
+    /// rather than a game that had died.
+    #[test]
+    fn the_shader_asks_for_the_depth_it_is_given() {
+        let many = crate::renderer::mesh_source(super::SAMPLES[0]);
+        let one = crate::renderer::mesh_source(1);
+
+        assert!(
+            many.contains("texture_depth_multisampled_2d"),
+            "the multisampled shader asks for a plain depth texture"
+        );
+        assert!(
+            one.contains("texture_depth_2d") && !one.contains("texture_depth_multisampled_2d"),
+            "the fallback shader asks for a multisampled depth texture, so it will not build"
+        );
+        // and nothing else about the shader moved
+        assert_eq!(
+            many.len() - one.len(),
+            "_multisampled".len(),
+            "the two shaders differ by more than the depth type"
+        );
     }
 }

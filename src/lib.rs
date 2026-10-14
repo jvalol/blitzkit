@@ -115,8 +115,17 @@ pub fn clamp_delta_time(seconds: f32) -> f32 {
     seconds.min(MAX_DELTA_TIME)
 }
 
+/// What the log shows when nothing asks for more.
+///
+/// `env_logger` on its own shows errors only, so every warning this engine
+/// writes went nowhere: the one saying a device would not multisample had
+/// never once been seen when spec 0052 claimed a refusal says so in the log.
+/// Warnings show now, and this engine's own notes with them, while wgpu stays
+/// at warnings because it says a great deal at info.
+pub const LOG: &str = "warn,blitzkit=info";
+
 pub fn start(title: &str, game: Box<dyn Game>) {
-    env_logger::init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(LOG)).init();
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
 
