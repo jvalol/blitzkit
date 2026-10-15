@@ -19,3 +19,63 @@
      Jake's wording, verbatim. Do not adapt it here. */}}
   <p class="ai-disclosure">I asked AI to draft this for me. I've edited it. Any surviving AI smells are my oversight.</p>
 {{ end }}
+
+{{ if .HasShortcode "clip" }}
+  {{/* The example clips play only while they are near the screen.
+
+     Fourteen of them autoplaying at once is fourteen video decoders and about
+     eight megabytes, nearly all of it for examples nobody has scrolled to.
+     Measured on the built page: a second after load, every one of the
+     fourteen reported itself playing, with one of them in view.
+
+     Done by asking each clip where it is rather than with an
+     IntersectionObserver, which is the obvious tool and was the first answer.
+     The observer is fine code and it never fired once in the browser this was
+     checked in: fourteen clips observed, no callbacks, every clip left
+     paused. A page that goes dead when one API stays quiet is worse than the
+     bandwidth it saves, and a rect is a thing that can be measured here.
+
+     Only on the page that has them, hence the shortcode test. Nothing else on
+     this site carries a video. */}}
+  <script>
+    (function () {
+      var clips = [].slice.call(document.querySelectorAll('video.clip'));
+      if (!clips.length) return;
+
+      var near = 300;
+      var waiting = null;
+
+      function settle() {
+        var high = window.innerHeight || document.documentElement.clientHeight;
+
+        clips.forEach(function (clip) {
+          var box = clip.getBoundingClientRect();
+          var showing = box.bottom > -near && box.top < high + near;
+
+          if (showing && clip.paused) {
+            var playing = clip.play();
+            if (playing && playing.catch) playing.catch(function () {});
+          } else if (!showing && !clip.paused) {
+            clip.pause();
+          }
+        });
+      }
+
+      function soon() {
+        if (waiting) return;
+        waiting = window.requestAnimationFrame(function () {
+          waiting = null;
+          settle();
+        });
+      }
+
+      clips.forEach(function (clip) {
+        clip.pause();
+      });
+      settle();
+
+      window.addEventListener('scroll', soon, { passive: true });
+      window.addEventListener('resize', soon, { passive: true });
+    })();
+  </script>
+{{ end }}

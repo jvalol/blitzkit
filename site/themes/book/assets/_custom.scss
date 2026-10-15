@@ -1,3 +1,15 @@
 /* You can add custom styles here. */
 
 // @import "plugins/numbered";
+
+// The examples page shows each one as a looping clip rather than a still.
+// Sized the way the markdown images beside it are, so a page of both does not
+// step in and out.
+video.clip {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1rem 0;
+  border-radius: 4px;
+  background: #000;
+}

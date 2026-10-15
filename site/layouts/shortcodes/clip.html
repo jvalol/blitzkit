@@ -1,0 +1,21 @@
+{{- /*
+  A looping silent clip of an example, with its still as the poster.
+
+  Raw HTML in markdown is off in config.yaml, on purpose and with its reason
+  written there, so a page cannot grow markup no template accounts for. This
+  is how a page says "video" within that rule: the markup lives here, where
+  the rule intends it to.
+
+  autoplay needs muted, and playsinline keeps a phone from taking the clip
+  full screen. A browser that refuses to autoplay anyway shows the poster and
+  the controls, which is worse and is not broken.
+
+  The poster is the same still the readmes use, pulled out of the middle of
+  the clip rather than off its first frame: the first frame of a thing about
+  to happen is a picture of nothing happening.
+*/ -}}
+<video class="clip"
+  src="{{ .Get "src" }}"
+  poster="{{ .Get "poster" }}"
+  autoplay loop muted playsinline controls preload="metadata"
+  aria-label="{{ .Get "alt" }}"></video>

@@ -12,7 +12,11 @@ cd "$(dirname "$0")/.." || exit 1
 
 # media/ is at the repo root, shared with both readmes. Hugo can only serve
 # what is under site/, so take a copy at build time instead of keeping two.
+#
+# Clips as well as stills. The examples page shows each example as a looping
+# clip with its still as the poster, per ../refresh-examples, and a build that
+# copied only the pictures published a page of posters that never played.
 mkdir -p static/media
-cp ../media/*.png static/media/
+cp ../media/*.png ../media/*.mp4 static/media/
 
 hugo --gc --minify

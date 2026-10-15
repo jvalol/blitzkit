@@ -21,8 +21,8 @@ WASD or the arrows to roll the ball. The camera follows it.
 - scroll to zoom
 - O outlines what is solid
 
-![A ball on the floor of a walled room, three blocks standing on it, each
-casting a shadow](/media/rolling.png)
+{{< clip src="/media/rolling.mp4" poster="/media/rolling.png"
+    alt="A ball on the floor of a walled room, three blocks standing on it, each casting a shadow" >}}
 
 ## stacking
 
@@ -47,8 +47,8 @@ four rows slump into two while the column at the far end stands there untouched.
 - drag with the right button to turn the camera
 - scroll to zoom
 
-![A column of five spheres, a heap of green blocks, and a pyramid of ten
-spheres between two low rails, standing on a grey floor](/media/stacking.png)
+{{< clip src="/media/stacking.mp4" poster="/media/stacking.png"
+    alt="A column of five spheres, a heap of green blocks, and a pyramid of ten spheres between two low rails, standing on a grey floor" >}}
 
 ## tower
 
@@ -66,8 +66,8 @@ cargo run --release --example tower
 - drag with the right button to turn the camera
 - scroll to zoom
 
-![A tall hollow tower of forty blocks, two to a level and turned a quarter turn
-each level, standing on a grey floor](/media/tower.png)
+{{< clip src="/media/tower.mp4" poster="/media/tower.png"
+    alt="A tall hollow tower of forty blocks, two to a level and turned a quarter turn each level, standing on a grey floor" >}}
 
 ## cubes
 
@@ -90,8 +90,8 @@ The camera orbits on its own, or drag to turn it yourself.
 - space locks the cursor
 - L switches which lights are on
 
-![Four cubes on a dark checkered floor lit by one lamp, each throwing its
-shadow off in a different direction](/media/cubes.png)
+{{< clip src="/media/cubes.mp4" poster="/media/cubes.png"
+    alt="Four cubes on a dark checkered floor lit by one lamp, each throwing its shadow off in a different direction" >}}
 
 ## teapot
 
@@ -110,9 +110,11 @@ Drag to turn it, or use the arrows.
 - R puts it back
 - space locks the cursor
 
-![The Utah teapot in white, casting a teapot shaped shadow](/media/teapot.png)
+{{< clip src="/media/teapot.mp4" poster="/media/teapot.png"
+    alt="The Utah teapot in white, casting a teapot shaped shadow" >}}
 
-![The same teapot, translucent](/media/teapot-glass.png)
+{{< clip src="/media/teapot-glass.mp4" poster="/media/teapot-glass.png"
+    alt="The same teapot, translucent" >}}
 
 ## klein
 
@@ -125,11 +127,11 @@ cargo run --release --example klein
 
 Same controls as the teapot, plus M to swap the wire mesh for the solid surface.
 
-![A Klein bottle as a wire mesh, its neck curving over and back down into its
-body, casting a lattice shadow](/media/klein.png)
+{{< clip src="/media/klein.mp4" poster="/media/klein.png"
+    alt="A Klein bottle as a wire mesh, its neck curving over and back down into its body, casting a lattice shadow" >}}
 
-![The same bottle, translucent, the neck carrying on inside the body after it
-passes through the wall](/media/klein-glass.png)
+{{< clip src="/media/klein-glass.mp4" poster="/media/klein-glass.png"
+    alt="The same bottle, translucent, the neck carrying on inside the body after it passes through the wall" >}}
 
 ## tunnel
 
@@ -147,8 +149,8 @@ brushing the wall costs you speed.
 - space locks the cursor
 - R starts over
 
-![Looking down a tunnel of dark and light checks receding to a vanishing point,
-with a gold ring hanging off centre](/media/tunnel.png)
+{{< clip src="/media/tunnel.mp4" poster="/media/tunnel.png"
+    alt="Looking down a tunnel of dark and light checks receding to a vanishing point, with a gold ring hanging off centre" >}}
 
 ## sierpinski
 
@@ -160,7 +162,8 @@ cargo run --release --example sierpinski
 
 Up and down change how deep it goes. Drag to turn it, scroll to move closer, R puts it back.
 
-![A Sierpinski tetrahedron at depth four, its shadow on the floor carrying the same holes](/media/sierpinski.png)
+{{< clip src="/media/sierpinski.mp4" poster="/media/sierpinski.png"
+    alt="A Sierpinski tetrahedron at depth four, its shadow on the floor carrying the same holes" >}}
 
 ## menger
 
@@ -172,7 +175,8 @@ cargo run --release --example menger
 
 Up and down change how deep it goes. Drag to turn it, scroll to move closer, R puts it back.
 
-![A Menger sponge at depth three, passages going right through it, a square hole in its shadow](/media/menger.png)
+{{< clip src="/media/menger.mp4" poster="/media/menger.png"
+    alt="A Menger sponge at depth three, passages going right through it, a square hole in its shadow" >}}
 
 ## hilbert
 
@@ -184,7 +188,8 @@ cargo run --release --example hilbert
 
 Up and down change how deep it goes. Drag to turn it, scroll to move closer, R puts it back.
 
-![A Hilbert curve of order three drawn as a tube, winding through a cube without touching itself](/media/hilbert.png)
+{{< clip src="/media/hilbert.mp4" poster="/media/hilbert.png"
+    alt="A Hilbert curve of order three drawn as a tube, winding through a cube without touching itself" >}}
 
 ## ripple
 
@@ -196,7 +201,8 @@ cargo run --release --example ripple
 
 Space drops a ball, 1 and 2 choose cork or granite, R empties it. Drag to turn the camera, scroll to move closer.
 
-![A rectangular pool of blue water in a grey basin, waves running across the surface, a pale ball floating at one end and two dark ones under the water, one of them still going in](/media/ripple.png)
+{{< clip src="/media/ripple.mp4" poster="/media/ripple.png"
+    alt="A rectangular pool of blue water in a grey basin, waves running across the surface, a pale ball floating at one end and two dark ones under the water, one of them still going in" >}}
 
 ## chain
 
@@ -213,4 +219,5 @@ A slack rope holds nothing, which is what lets the chain fold rather than shove.
 The readout carries how far it has stretched: a heavy ball on light beads
 stretches further, because the solver passes the weight up one link a pass.
 
-![A heavy grey ball on a chain of sixteen beads hanging over a grey floor, with a tan brick wall to its right half knocked down, loose blocks lying out across the floor and the standing part leaning](/media/chain.png)
+{{< clip src="/media/chain.mp4" poster="/media/chain.png"
+    alt="A heavy grey ball on a chain of sixteen beads hanging over a grey floor, with a tan brick wall to its right half knocked down, loose blocks lying out across the floor and the standing part leaning" >}}
