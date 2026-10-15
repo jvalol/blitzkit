@@ -1,6 +1,8 @@
-# Hugo's output, and the screenshots scripts/build copies in from ../media.
-# Both are generated: media/ at the repo root is the one copy that is kept.
+# Hugo's output, and what scripts/build copies in: the pictures and clips from
+# ../media and the examples built for a browser from ../web. All of it is
+# generated, and the copies at the repo root are the ones that are kept.
 /public/
 /static/media/
+/static/web/
 /resources/
 /.hugo_build.lock

@@ -1,0 +1,23 @@
+{{- /*
+  An example: its clip, and a button that swaps the clip for the thing itself.
+
+  The clip is spec 0052's and plays on its own. The button is spec 0053's: the
+  same example built for a browser, fetched when somebody asks for it and not
+  before. Twelve of them on one page is nineteen megabytes, and nobody wants
+  eleven examples they did not scroll to.
+
+  One at a time, through the address bar rather than in place. A page that
+  started a second example would have two of them holding the browser's one
+  thread and both asking for a canvas by the same name, and a winit loop is
+  not a thing that can be stopped once it is going. Reloading is honest, it
+  costs a fifth of a second, and it leaves a link: ?play=ripple is an example
+  somebody can send to somebody.
+*/ -}}
+<figure class="example" data-example="{{ .Get "name" }}">
+  <video class="clip"
+    src="{{ .Get "src" }}"
+    poster="{{ .Get "poster" }}"
+    autoplay loop muted playsinline controls preload="metadata"
+    aria-label="{{ .Get "alt" }}"></video>
+  <button type="button" class="play" data-example="{{ .Get "name" }}">play it</button>
+</figure>

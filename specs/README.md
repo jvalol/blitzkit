@@ -59,6 +59,7 @@ not a priority, and it never changes once a spec exists.
 | [0050](0050-what-a-camera-can-see.md) | The six planes of what a camera can see, so a game can throw away a lamp whose reach never meets the picture |
 | [0051](0051-the-world-from-the-eye.md) | Everything the GPU is handed is measured from the camera, so a thing thirty kilometres from the world origin is drawn as precisely as one next door |
 | [0052](0052-smoothing-the-edges.md) | The best of eight, four and one samples a pixel that the device will give, so an edge is an edge rather than a staircase |
+| [0053](0053-the-engine-in-a-browser.md) | The engine in a browser, and every example on the site made playable |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.

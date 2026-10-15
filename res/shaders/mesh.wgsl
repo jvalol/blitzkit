@@ -226,13 +226,26 @@ fn shadow_factor(world_position: vec3<f32>, normal: vec3<f32>, to_light: vec3<f3
     let uv = vec2<f32>(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5);
     let bias = MIN_BIAS + MAX_BIAS * grazing;
 
-    // nine samples in a small square, so edges are soft rather than stepped
+    // nine samples in a small square, so edges are soft rather than stepped.
+    //
+    // `textureSampleCompareLevel` and not `textureSampleCompare`, which is
+    // the same sample with the mip level pinned rather than worked out from
+    // the derivatives. A sample that works its own level out has to be
+    // reached by every lane in the group together, and none of these three
+    // are: a shadow is looked up inside `if lambert <= 0.0`, and whether a
+    // surface faces a light is as non-uniform as a value gets.
+    //
+    // Nothing on a machine ever said so, because naga lets it through. The
+    // browser does not, and all three came back as validation errors the
+    // first time this ran in one: no mesh pipeline, no depth prepass, no
+    // cutout prepass, so nothing drew at all. A shadow map has one level
+    // anyway, so pinning it changes no picture.
     let texel = 1.0 / f32(textureDimensions(shadow_map).x);
     var lit = 0.0;
     for (var y = -1; y <= 1; y++) {
         for (var x = -1; x <= 1; x++) {
             let offset = vec2<f32>(f32(x), f32(y)) * texel;
-            lit += textureSampleCompare(shadow_map, shadow_sampler, uv + offset, ndc.z - bias);
+            lit += textureSampleCompareLevel(shadow_map, shadow_sampler, uv + offset, ndc.z - bias);
         }
     }
 
@@ -308,7 +321,7 @@ fn spot_shadow(
     for (var y = -1; y <= 1; y++) {
         for (var x = -1; x <= 1; x++) {
             let offset = vec2<f32>(f32(x), f32(y)) * texel;
-            lit += textureSampleCompare(
+            lit += textureSampleCompareLevel(
                 spot_shadow_maps,
                 shadow_sampler,
                 uv + offset,
@@ -505,7 +518,7 @@ fn point_shadow(
     for (var y = -1; y <= 1; y++) {
         for (var x = -1; x <= 1; x++) {
             let offset = vec2<f32>(f32(x), f32(y)) * texel;
-            lit += textureSampleCompare(
+            lit += textureSampleCompareLevel(
                 point_shadow_maps,
                 shadow_sampler,
                 uv + offset,

@@ -347,6 +347,13 @@ impl Renderer {
                 log::info!("drawing with {} samples a pixel", got);
             }
 
+            // and how big a surface, which is the other thing worth knowing
+            // from a machine somebody else is sitting at. A window has a size
+            // because something gave it one; a canvas has whatever winit was
+            // told, and a surface one pixel across is a canvas of one flat
+            // colour stretched over however wide the page lays it out.
+            log::info!("drawing {} by {}", config.width, config.height);
+
             got
         };
         let depth = depth::DepthTexture::new(&device, config.width, config.height, samples);
@@ -1087,6 +1094,7 @@ impl Renderer {
         if new_size.width == 0 || new_size.height == 0 {
             return;
         }
+        log::info!("drawing {} by {}", new_size.width, new_size.height);
         self.config.width = new_size.width;
         self.config.height = new_size.height;
         self.surface.configure(&self.device, &self.config);

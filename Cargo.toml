@@ -67,6 +67,23 @@ ab_glyph = "0.2"
 pollster = "1"
 bytemuck = "1.4"
 rodio = { version = "0.22", default-features = false, features = ["playback"] }
+# A clock that works in a browser as well as on a machine. `std::time::Instant`
+# compiles for wasm and panics the first time anything asks it what time it is,
+# which is once a frame.
+web-time = "1"
+
+# What the engine needs to be a web page, and nothing a native build pays for.
+# See `start`.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+console_error_panic_hook = "0.1"
+console_log = "1"
+web-sys = { version = "0.3", features = ["Document", "Window", "Element", "HtmlCanvasElement"] }
+# Both of these are in the tree already, through other crates, and both refuse
+# to build for a browser until they are told which source of randomness to use.
+getrandom = { version = "0.4", features = ["wasm_js"] }
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 
 [dev-dependencies]
 # The named shapes two examples draw. A dev-dependency, so it is not in the

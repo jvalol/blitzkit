@@ -20,7 +20,82 @@
   <p class="ai-disclosure">I asked AI to draft this for me. I've edited it. Any surviving AI smells are my oversight.</p>
 {{ end }}
 
-{{ if .HasShortcode "clip" }}
+{{ if .HasShortcode "play" }}
+  {{/* Swaps an example's clip for the example, per spec 0053.
+
+     One at a time and through the address bar, for the reasons written on the
+     shortcode. What this does on load is read `?play=`, find that figure, and
+     put a canvas where its clip was; what it does on a click is set the
+     address and let the page come back.
+
+     winit takes the canvas marked `data-blitzkit`, so the canvas is given
+     that mark to be claimed and loses it once the example has started. It is
+     a mark on a canvas rather than an identifier because an identifier
+     collides: this was `id="blitzkit"` until the engine's own landing page,
+     where Hugo had already given the `# blitzkit` heading that name.
+
+     The module is fetched here and not in the head, which is the whole point:
+     a page nobody plays anything on downloads none of it. */}}
+  <script type="module">
+    (function () {
+      const asked = new URLSearchParams(location.search).get('play');
+
+      for (const button of document.querySelectorAll('button.play')) {
+        button.addEventListener('click', function () {
+          const where = new URL(location.href);
+          where.searchParams.set('play', button.dataset.example);
+          where.hash = button.dataset.example;
+          location.href = where.toString();
+        });
+      }
+
+      if (!asked) return;
+
+      const figure = document.querySelector('figure.example[data-example="' + asked + '"]');
+      if (!figure) return;
+
+      const clip = figure.querySelector('video');
+      const button = figure.querySelector('button.play');
+      const say = (text, bad) => {
+        button.textContent = text;
+        button.disabled = true;
+        if (bad) button.classList.add('bad');
+      };
+
+      if (!navigator.gpu) {
+        say('this browser has no WebGPU, so there is nothing to draw with', true);
+        return;
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.setAttribute('data-blitzkit', '');
+      canvas.className = 'live';
+      clip.replaceWith(canvas);
+      say('loading…');
+
+      import('/web/' + asked + '.js')
+        .then(function (module) { return module.default(); })
+        .then(function () {
+          canvas.removeAttribute('data-blitzkit');
+          canvas.id = 'playing-' + asked;
+          button.textContent = 'running. Click it, then use the keys above.';
+          // scrolled here rather than left to the anchor in the address. The
+          // canvas replaces the clip after the page has settled, which moves
+          // everything below it, so by the time there is anything to look at
+          // the browser has long since jumped to where the heading used to
+          // be.
+          figure.scrollIntoView({ block: 'center' });
+          canvas.focus();
+        })
+        .catch(function (e) {
+          say('it would not start: ' + e, true);
+          canvas.replaceWith(clip);
+        });
+    })();
+  </script>
+{{ end }}
+
+{{ if or (.HasShortcode "clip") (.HasShortcode "play") }}
   {{/* The example clips play only while they are near the screen.
 
      Fourteen of them autoplaying at once is fourteen video decoders and about

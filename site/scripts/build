@@ -19,4 +19,11 @@ cd "$(dirname "$0")/.." || exit 1
 mkdir -p static/media
 cp ../media/*.png ../media/*.mp4 static/media/
 
+# and the examples built for a browser, per spec 0053. Same reason as above:
+# Hugo serves what is under site/, and these are kept at the repo root so
+# there is one copy of them. Netlify never sees a Rust toolchain; ../build-web
+# is run on a machine that has one, and what it leaves behind is committed.
+mkdir -p static/web
+cp ../web/*.js ../web/*.wasm static/web/
+
 hugo --gc --minify

@@ -24,8 +24,15 @@ use renderer::scene::Scene;
 use renderer::*;
 use sound::SoundSystem;
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Instant;
+
+// A clock, and not `std::time`'s. `std::time::Instant` compiles for a browser
+// and panics the first time anything asks it what time it is, which here is
+// once a frame. `web-time` is that same type on a machine and
+// `performance.now` in a browser, and nothing below can tell.
+use web_time::Instant;
 
 use glam::{vec2, Vec2};
 use winit::{
@@ -125,22 +132,196 @@ pub fn clamp_delta_time(seconds: f32) -> f32 {
 pub const LOG: &str = "warn,blitzkit=info";
 
 pub fn start(title: &str, game: Box<dyn Game>) {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(LOG)).init();
+    talk();
+
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
 
-    let mut app = App {
+    let app = App {
         title: title.to_string(),
         game,
         running: None,
+        arriving: Rc::new(RefCell::new(None)),
+        asked: false,
     };
+
+    run(event_loop, app);
+}
+
+/// Where the log goes.
+#[cfg(not(target_arch = "wasm32"))]
+fn talk() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(LOG)).init();
+}
+
+/// The same, in a browser, where there is no environment to read a filter out
+/// of and no stderr to write to.
+///
+/// The panic hook is the other half of it and matters more than the log.
+/// Without one, a panic in here reaches the console as "unreachable executed"
+/// with no message and no line, which is a day of guessing.
+#[cfg(target_arch = "wasm32")]
+fn talk() {
+    console_error_panic_hook::set_once();
+    let _ = console_log::init_with_level(log::Level::Info);
+}
+
+/// What the window is asked for.
+#[cfg(not(target_arch = "wasm32"))]
+fn attributes(title: &str) -> winit::window::WindowAttributes {
+    Window::default_attributes().with_title(title)
+}
+
+/// What a page marks the canvas it wants drawn into with.
+///
+/// **An attribute on a canvas, and not an identifier.** It was
+/// `getElementById("blitzkit")`, which is the obvious thing and collides with
+/// anything else a page has called that. On the engine's own landing page
+/// that is the heading: Hugo gives `# blitzkit` the identifier `blitzkit`, so
+/// the lookup found an `h1`, the cast to a canvas failed, the engine took
+/// that for a page with no canvas and quietly appended one of its own to the
+/// end of the document. What the reader got was an empty box where the
+/// example should be, a one pixel canvas below everything else, and nothing
+/// anywhere saying so.
+///
+/// A selector that names the element as well as the mark cannot do that.
+#[cfg(target_arch = "wasm32")]
+const MARKED: &str = "canvas[data-blitzkit]";
+
+/// The same, in a browser, where a window is a canvas on somebody's page.
+///
+/// The canvas marked with [`MARKED`] if the page has one, so a page can put
+/// the thing where it wants it and style it, and a canvas of its own appended
+/// to the body if not, so a page that is nothing but a script still works.
+///
+/// No size is asked for, because asking does nothing. `with_inner_size` was
+/// tried and the surface still came up one pixel square: winit sizes a canvas
+/// from its own observer and in its own time. What matters is that the size
+/// it settles on is picked up whenever it lands, which is `wanted`.
+#[cfg(target_arch = "wasm32")]
+fn attributes(title: &str) -> winit::window::WindowAttributes {
+    use wasm_bindgen::JsCast;
+    use winit::platform::web::WindowAttributesExtWebSys;
+
+    let found = web_sys::window()
+        .and_then(|page| page.document())
+        .and_then(|doc| doc.query_selector(MARKED).ok().flatten())
+        .and_then(|found| found.dyn_into::<web_sys::HtmlCanvasElement>().ok());
+
+    let asked = Window::default_attributes().with_title(title);
+
+    match found {
+        Some(canvas) => asked.with_canvas(Some(canvas)),
+        None => asked.with_append(true),
+    }
+}
+
+/// How big the thing being drawn into actually is.
+#[cfg(not(target_arch = "wasm32"))]
+fn wanted(window: &Window) -> winit::dpi::PhysicalSize<u32> {
+    window.inner_size()
+}
+
+/// The same, in a browser, where it is the canvas that knows and not winit.
+///
+/// **A canvas is not given a size by anything.** A window on a machine has
+/// one before it has a surface, because something runs the windows. A canvas
+/// has whatever winit decided, which starts at one pixel square and is
+/// brought up to the laid-out size by an observer, in its own time, and
+/// `with_inner_size` at creation does not change that: it was tried and the
+/// surface still came up one by one.
+///
+/// A surface one pixel across is not a small picture, it is one pixel of the
+/// scene stretched by the browser over however wide the page lays the canvas
+/// out. Jake's recording of 2026-10-15 is a canvas of flat dark teal in one
+/// frame and flat black in the next, which is that single pixel watching the
+/// water move. It drew correctly on this machine throughout, which is why it
+/// took a recording to see.
+///
+/// So the canvas is asked, every frame, rather than winit being waited on.
+/// Times the pixel ratio, so a retina screen gets the sharpness it has.
+#[cfg(target_arch = "wasm32")]
+fn wanted(window: &Window) -> winit::dpi::PhysicalSize<u32> {
+    use winit::platform::web::WindowExtWebSys;
+
+    let ratio = web_sys::window().map_or(1.0, |page| page.device_pixel_ratio());
+
+    match window.canvas() {
+        Some(canvas) => {
+            let across = |css: i32| ((css as f64 * ratio).round() as u32).max(1);
+
+            winit::dpi::PhysicalSize::new(
+                across(canvas.client_width()),
+                across(canvas.client_height()),
+            )
+        }
+        None => window.inner_size(),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run(event_loop: EventLoop<()>, mut app: App) {
     event_loop.run_app(&mut app).unwrap();
 }
+
+/// The same, in a browser, where the loop cannot be run.
+///
+/// A browser gives a page one thread and takes it back between frames.
+/// `run_app` never returns, so calling it hangs the tab before anything is
+/// drawn. `spawn_app` hands the loop to the browser's own and returns.
+#[cfg(target_arch = "wasm32")]
+fn run(event_loop: EventLoop<()>, app: App) {
+    use winit::platform::web::EventLoopExtWebSys;
+
+    event_loop.spawn_app(app);
+}
+
+/// Waits for the graphics device, however this platform waits.
+#[cfg(not(target_arch = "wasm32"))]
+fn waiting<F>(asking: F, then: impl FnOnce(Renderer) + 'static)
+where
+    F: std::future::Future<Output = Renderer> + 'static,
+{
+    then(pollster::block_on(asking));
+}
+
+/// The same, in a browser, where it cannot be waited for at all.
+///
+/// Asking for a device is asynchronous everywhere and only here is that more
+/// than a formality: the page has one thread, so blocking on the answer
+/// blocks the thing that was going to deliver it. The ask is handed to the
+/// browser and the answer turns up a few frames later.
+#[cfg(target_arch = "wasm32")]
+fn waiting<F>(asking: F, then: impl FnOnce(Renderer) + 'static)
+where
+    F: std::future::Future<Output = Renderer> + 'static,
+{
+    wasm_bindgen_futures::spawn_local(async move {
+        then(asking.await);
+    });
+}
+
+/// A window and the renderer for it, once asking for one has been answered.
+///
+/// Shared and in a cell because in a browser the answer arrives after the
+/// asking returns, and the thing that takes delivery is a closure the browser
+/// calls rather than anything that can reach the app.
+type Arriving = Rc<RefCell<Option<(Arc<Window>, Renderer)>>>;
 
 struct App {
     title: String,
     game: Box<dyn Game>,
     running: Option<Running>,
+    /// The window and its renderer, once there is one.
+    ///
+    /// A browser cannot be made to wait for a graphics device, so `resumed`
+    /// asks for one and returns, and the answer lands in here whenever it
+    /// lands. What it does not do is set the game up, because the game lives
+    /// in this struct and the thing taking delivery cannot reach it. That
+    /// happens on the next frame, in `settle`.
+    arriving: Arriving,
+    /// Whether a device has been asked for, so it is asked for once.
+    asked: bool,
 }
 
 /// Everything that needs a window, which winit only hands out once the app has resumed.
@@ -156,39 +337,21 @@ struct Running {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.running.is_some() {
+        if self.running.is_some() || self.asked {
             return;
         }
 
-        let window = Arc::new(
-            event_loop
-                .create_window(Window::default_attributes().with_title(&self.title))
-                .unwrap(),
-        );
+        self.asked = true;
+
+        let window = Arc::new(event_loop.create_window(attributes(&self.title)).unwrap());
         let instance_desc = wgpu::InstanceDescriptor::new_with_display_handle(Box::new(
             event_loop.owned_display_handle(),
         ));
-        let mut renderer = pollster::block_on(Renderer::new(window.clone(), instance_desc));
-        self.game.load(&mut renderer);
-        let mut geometry = Geometry::new();
-        let mut text_renderer = TextRenderer::new();
-        let sound_system = SoundSystem::new();
+        let arriving = self.arriving.clone();
+        let held = window.clone();
 
-        self.game.initialize(
-            &mut geometry,
-            &mut text_renderer,
-            &sound_system,
-            (renderer.width(), renderer.height()),
-        );
-
-        self.running = Some(Running {
-            window,
-            renderer,
-            geometry,
-            text_renderer,
-            scene: Scene::new(),
-            sound_system,
-            last_update: Instant::now(),
+        waiting(Renderer::new(window, instance_desc), move |renderer| {
+            arriving.replace(Some((held, renderer)));
         });
     }
 
@@ -198,6 +361,8 @@ impl ApplicationHandler for App {
         window_id: WindowId,
         event: WindowEvent,
     ) {
+        self.settle();
+
         let running = match self.running.as_mut() {
             Some(running) if running.window.id() == window_id => running,
             _ => return,
@@ -294,9 +459,105 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        self.settle();
+        self.sized();
+
         if let Some(running) = self.running.as_ref() {
             running.window.request_redraw();
         }
+    }
+}
+
+impl App {
+    /// Sets the game up, once there is a renderer for it to be set up on.
+    ///
+    /// This is the half of `resumed` that has to wait, and it waits here
+    /// rather than there because the game is a field of this struct and the
+    /// thing that takes delivery of the renderer cannot reach it. The order
+    /// is the order it always was: load, then initialize, then the first
+    /// frame.
+    fn settle(&mut self) {
+        if self.running.is_some() {
+            return;
+        }
+
+        let Some((window, mut renderer)) = self.arriving.borrow_mut().take() else {
+            return;
+        };
+
+        self.game.load(&mut renderer);
+
+        let mut geometry = Geometry::new();
+        let mut text_renderer = TextRenderer::new();
+        let sound_system = SoundSystem::new();
+
+        self.game.initialize(
+            &mut geometry,
+            &mut text_renderer,
+            &sound_system,
+            (renderer.width(), renderer.height()),
+        );
+
+        self.running = Some(Running {
+            window,
+            renderer,
+            geometry,
+            text_renderer,
+            scene: Scene::new(),
+            sound_system,
+            last_update: Instant::now(),
+        });
+
+        // and the size, now, from the window rather than from an event.
+        //
+        // **A resize that lands before the renderer does is a resize nobody
+        // hears.** `window_event` drops everything until there is something
+        // to draw with, and winit does not send it again, because as far as
+        // it knows the size has not changed since.
+        //
+        // That is nothing on a machine, where a window has its size before it
+        // has a surface. In a browser a canvas starts one pixel square and
+        // grows to its laid-out size a moment later, and a graphics device
+        // takes a few frames to arrive, so which of the two happens first is
+        // a race. The surface stayed one pixel across on every machine that
+        // lost it, which draws the whole canvas in one flat colour: black
+        // while that pixel looks at the dark, water blue once a scroll brings
+        // the pool under it. It looked right here for a day because this
+        // machine kept winning.
+        self.sized();
+    }
+
+    /// Tells the renderer and the game how big the window is now, if it has
+    /// changed.
+    ///
+    /// Asked every frame rather than waited for. A `Resized` that lands
+    /// before the renderer does is dropped by `window_event`, and winit does
+    /// not send it again because as far as it knows nothing has changed
+    /// since; and in a browser the size can go on changing afterwards for
+    /// reasons no event reaches us for at all. Checking is two integers.
+    fn sized(&mut self) {
+        let Some(running) = self.running.as_mut() else {
+            return;
+        };
+
+        let size = wanted(&running.window);
+        if size.width <= 1 || size.height <= 1 {
+            return;
+        }
+        if size.width == running.renderer.width() as u32
+            && size.height == running.renderer.height() as u32
+        {
+            return;
+        }
+
+        // asked of winit as well, so that anything it works out for itself
+        // from here agrees with what is actually being drawn into. What it
+        // gives back is what it managed, which in a browser is nothing we can
+        // act on.
+        let _ = running.window.request_inner_size(size);
+        running.renderer.resize(size);
+        self.game
+            .resized((running.renderer.width(), running.renderer.height()));
     }
 }
 
