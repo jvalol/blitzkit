@@ -65,8 +65,29 @@ Everything drawn has its ceiling, because a room with no ceiling drawn is a
 room you can see the sky through. So `Renderer::check_fighting_faces` takes a
 `Body` and does the fill itself over the frame's boxes.
 
+**A fill too big to build is pulled in around where it starts.** `MOST` is a
+refusal and the refusal is an empty reach, which is the same shape as a reach
+that found nothing. A caller cannot tell those apart, and spec 0048's check
+could not: it narrows its report to the pairs a body can stand in front of,
+and an empty reach kept every one of them instead. In the arcade that was 716
+of 716, including every ceiling top the narrowing exists to remove, and the
+measurement recorded in that game's spec 0014 drifted from 2 pairs to 716
+without anything saying so. The engine did say so, in a warning nothing
+printed until 2026-10-14.
+
+So the box is halved around the starting point until it fits. What made that
+world too big was never a building: the arcade draws spec 0015's solar system
+at true scale, so its drawn world is 72 kilometres across and wants 2.4e16
+cells of a quarter metre. Pulled in, the same call gets the building back and
+the answer is 2 again.
+
+Halved rather than solved for, because the shape matters as much as the
+volume. A building is wide and thin, and an exact answer for the side of a
+cube would throw away most of the height it could afford.
+
 ## Acceptance criteria
 
+- A fill too big to build is pulled in around where it starts. — `reach::tests::a_fill_is_pulled_in_until_it_can_be_built`
 - A sealed room keeps the fill in, and a doorway a body fits through lets it out. — `reach::tests::a_sealed_room_keeps_it_in_and_a_doorway_lets_it_out`
 - A gap of 0.30 is not a way out for a body 0.90 across. — `reach::tests::a_crack_too_narrow_for_the_body_is_not_a_way_out`
 - A flight of treads is climbed and the same height in one piece is not. — `reach::tests::a_stair_is_climbed_and_a_ledge_is_not`

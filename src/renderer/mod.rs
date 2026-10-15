@@ -943,19 +943,32 @@ impl Renderer {
                     world = world.union(box_);
                 }
 
+                // pulled in around the camera until it is a fill that can be
+                // built. Handed the whole drawn world it refused and came
+                // back empty, and an empty reach keeps every pair rather than
+                // none: the narrowing this body is for became a no-op without
+                // saying so. See `reach::fillable`.
+                let within = crate::reach::Reach::fillable(
+                    world.expanded(glam::Vec3::splat(1.0)),
+                    self.camera.position,
+                    crate::reach::STEP,
+                );
                 let reach = crate::reach::Reach::found(
                     self.camera.position,
                     body,
                     &found.boxes,
-                    world.expanded(glam::Vec3::splat(1.0)),
+                    within,
                     crate::reach::STEP,
                 );
                 let kept = found.only_seen_from(&reach);
 
                 log::info!(
-                    "a body can be in {} cells of {:.2}, and {} of {} fighting pairs are in front of one",
+                    "a body can be in {} cells of {:.2} over {:.0} by {:.0} by {:.0}, and {} of {} fighting pairs are in front of one",
                     reach.cells(),
                     reach.step(),
+                    within.size().x,
+                    within.size().y,
+                    within.size().z,
                     kept.fights.len(),
                     every
                 );

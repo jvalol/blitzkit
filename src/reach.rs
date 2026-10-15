@@ -107,6 +107,55 @@ impl Reach {
     /// happens when the body starts inside a wall. The fill comes back empty
     /// and says so, and a caller should read empty as "no answer" rather than
     /// as "nowhere", because those look the same from here.
+    /// The part of `within` a fill can actually be built over, drawn in
+    /// around `at` until it fits under [`MOST`].
+    ///
+    /// A caller that hands over its whole drawn world gets a refusal and an
+    /// empty reach, and an empty reach is indistinguishable from a reach that
+    /// found nothing: spec 0048's coplanar check narrows its report to what a
+    /// body can stand in front of, and when the fill came back empty it kept
+    /// every pair instead. In the arcade that was 716 of 716, including all
+    /// the ceiling tops the narrowing exists to remove, and the recorded
+    /// measurement in that game's spec 0014 went from 2 pairs of 236 to 716
+    /// of 5911 with nobody noticing, because the engine's warning about it
+    /// was one of the ones nothing printed until 2026-10-14.
+    ///
+    /// What makes a world too big is rarely the building. It was the solar
+    /// system: the arcade draws spec 0018's bodies at true scale, so its
+    /// drawn world is 72 kilometres across and wants 2.4e16 cells. Pulled in
+    /// around the camera, the same call gets the building back.
+    ///
+    /// Halved rather than solved for, because the shape matters as much as
+    /// the volume. A building is wide and thin, and an exact answer for the
+    /// side of a cube would throw away most of the height it could afford.
+    pub fn fillable(within: Aabb, at: Vec3, step: f32) -> Aabb {
+        let step = step.max(1e-3);
+        let cells = |box_: &Aabb| {
+            let size = box_.size();
+            ((size.x / step).ceil() as usize)
+                .max(1)
+                .saturating_mul(((size.y / step).ceil() as usize).max(1))
+                .saturating_mul(((size.z / step).ceil() as usize).max(1))
+        };
+
+        let mut out = within;
+
+        // a camera outside its own world still gets a box round itself, which
+        // is the honest answer to "what can be reached from there"
+        let mut half = out.size() * 0.5;
+
+        for _ in 0..64 {
+            if cells(&out) <= MOST {
+                return out;
+            }
+
+            half *= 0.5;
+            out = Aabb::new((at - half).max(within.min), (at + half).min(within.max));
+        }
+
+        out
+    }
+
     pub fn found(at: Vec3, body: Body, colliders: &[Aabb], within: Aabb, step: f32) -> Self {
         let step = step.max(1e-3);
         let size = within.size();
@@ -722,6 +771,57 @@ mod tests {
             got.any_in(under_the_lid),
             "the air under the ceiling was not reached either, so the test above \
              proves nothing"
+        );
+    }
+
+    /// Spec 0049: a fill is pulled in around the camera until it can be built.
+    ///
+    /// Handed a world it cannot fill, `found` refuses and returns an empty
+    /// reach, and empty is indistinguishable from "reached nothing". Spec
+    /// 0048's coplanar check narrows its report to what a body can stand in
+    /// front of, and an empty reach made it keep every pair instead: in the
+    /// arcade, 716 of 716 rather than 2, for a year of drawn frames with the
+    /// refusal logged where nothing printed it.
+    ///
+    /// What made that world too big was not a building. It was the solar
+    /// system drawn at true scale, 72 kilometres of it, wanting 2.4e16 cells.
+    #[test]
+    fn a_fill_is_pulled_in_until_it_can_be_built() {
+        let cells = |box_: &Aabb, step: f32| {
+            let size = box_.size();
+            ((size.x / step).ceil() as usize)
+                .max(1)
+                .saturating_mul(((size.y / step).ceil() as usize).max(1))
+                .saturating_mul(((size.z / step).ceil() as usize).max(1))
+        };
+
+        // a building, which is already fillable and must come back untouched
+        let building = Aabb::new(Vec3::new(-95.0, -5.0, -90.0), Vec3::new(95.0, 6.0, 89.0));
+        let got = Reach::fillable(building, Vec3::ZERO, STEP);
+
+        assert_eq!(got.min, building.min, "a fillable world was pulled in");
+        assert_eq!(got.max, building.max, "a fillable world was pulled in");
+
+        // and the same building with a solar system drawn beside it
+        let world = Aabb::new(Vec3::splat(-36_000.0), Vec3::splat(36_000.0));
+        let at = Vec3::new(0.0, 1.55, 7.3);
+        let got = Reach::fillable(world, at, STEP);
+
+        assert!(
+            cells(&got, STEP) <= MOST,
+            "pulled in to {:?}, which still wants {} cells",
+            got.size(),
+            cells(&got, STEP)
+        );
+        assert!(
+            got.min.cmple(at).all() && got.max.cmpge(at).all(),
+            "pulled in to {:?}, which does not contain the camera",
+            got
+        );
+        assert!(
+            got.size().min_element() > 8.0,
+            "pulled in to {:?}, which is smaller than a room",
+            got.size()
         );
     }
 }
