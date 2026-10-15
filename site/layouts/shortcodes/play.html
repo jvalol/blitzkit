@@ -14,10 +14,16 @@
   somebody can send to somebody.
 */ -}}
 <figure class="example" data-example="{{ .Get "name" }}">
+  {{- if .Get "src" -}}
   <video class="clip"
     src="{{ .Get "src" }}"
     poster="{{ .Get "poster" }}"
     autoplay loop muted playsinline controls preload="metadata"
     aria-label="{{ .Get "alt" }}"></video>
+  {{- else -}}
+  {{/* no clip, so the still stands in. The arcade is the one of these: a
+     building rather than an example, with nobody filming it yet. */}}
+  <img class="clip" src="{{ .Get "poster" }}" alt="{{ .Get "alt" }}">
+  {{- end }}
   <button type="button" class="play" data-example="{{ .Get "name" }}">play it</button>
 </figure>

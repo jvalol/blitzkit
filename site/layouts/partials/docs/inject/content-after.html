@@ -54,7 +54,7 @@
       const figure = document.querySelector('figure.example[data-example="' + asked + '"]');
       if (!figure) return;
 
-      const clip = figure.querySelector('video');
+      const clip = figure.querySelector('video, img.clip');
       const button = figure.querySelector('button.play');
       const say = (text, bad) => {
         button.textContent = text;

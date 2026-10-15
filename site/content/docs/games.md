@@ -14,6 +14,8 @@ the same way you would.
 An arcade with games built on this engine, and thirty three kilometres of
 solar system behind one of its walls.
 
+[Walk round it in a browser]({{< relref "arcade" >}}).
+
 [github.com/jvalol/arcade](https://github.com/jvalol/arcade)
 
 ![Saturn, its rings open, with Titan a speck nine metres off and a galaxy above them both](https://raw.githubusercontent.com/jvalol/arcade/main/media/screenshot.png)
