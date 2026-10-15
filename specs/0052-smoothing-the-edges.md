@@ -150,7 +150,10 @@ instrument was wrong and not the picture.
   Struck the day it was written. It is better and it is not fixed: from
   (-27.15, -3.00, 1.21) looking down the room the band is still there at eight
   samples. See the measurement above for why more samples will not do it.
-- Nothing else in any game looks different beyond its edges being smoother.
+- ~~Nothing else in any game looks different beyond its edges being smoother.~~
+  Not checked, and it cannot be from here: every game was shot on 2026-10-14
+  and none of them looks wrong, but there is no picture of any of them from
+  before this landed to hold it against. Written as though it had been.
 - A device that will not multisample draws as it always did and says so once.
   Forced to one sample by hand, the arcade opens and runs.
 

@@ -188,12 +188,27 @@ that had no business being unbounded.
 
 ### Verified by hand
 
+Done 2026-10-14, after the phase changed, because that change reaches every
+game and was checked in one room of one game. The cubes example's orbit is
+driven by its clock, so it was pinned to six fixed times and each shot twice,
+with the march and without, which is the only way two frames of it can be
+compared at all.
+
 - A cube on a floor has no line of lit floor at its foot, at any camera angle.
-- The cubes example's spinning cube keeps contact all the way round.
+  Six angles, and at every one the march only ever darkens, between 152 and 568
+  pixels of the frame. It cannot add light and it did not.
+- The cubes example's spinning cube keeps contact all the way round. The same
+  six.
 - Walking a lantern corridor, a candle set down has its own foot shadowed.
-- Turning it off restores the line, which is how you know it was doing the work.
-- Nothing that was correct before has acne now.
-- The edge of a contact shadow is a line rather than a stipple.
+  `lantern --screenshot` stages exactly that, and it is.
+- Turning it off restores the line, which is how you know it was doing the
+  work. With it off the yellow cube's foot runs lit right up to the base and
+  the cube floats.
+- Nothing that was correct before has acne now. Every game shot with the march
+  and without: none shows the single pixel spikes this fizz is counted by.
+- The edge of a contact shadow is a line rather than a stipple. On the cubes it
+  is a soft band. On the arcade's ceiling ribs it is the dashed line this spec
+  says above it has no setting for, which is why that game turns the march off.
 - Walking a room, no surface fizzes. This is the one that was missed: it only
   shows while the camera moves, and every picture taken of it stood still.
 - Orbiting all the way round a cube, no angle shows a line at its foot.
