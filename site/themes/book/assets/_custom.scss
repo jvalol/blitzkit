@@ -59,3 +59,19 @@ figure.example {
     }
   }
 }
+
+
+// No play button on a phone. Spec 0053.
+//
+// Everything here is driven with WASD and a mouse, and a touch screen has
+// neither. The button on a phone is four and a half megabytes spent on
+// something there is no way to move, so it is not offered: a reader with no
+// keyboard gets the clip, which is what the page would have been anyway.
+//
+// Coarse and no hover together, which is a touch screen and not a laptop
+// with a touch screen: those report a mouse as their first pointer.
+@media (pointer: coarse) and (hover: none) {
+  figure.example button.play {
+    display: none;
+  }
+}

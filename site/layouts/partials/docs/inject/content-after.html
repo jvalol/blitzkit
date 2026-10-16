@@ -38,6 +38,14 @@
      a page nobody plays anything on downloads none of it. */}}
   <script type="module">
     (function () {
+      // Nothing is offered or started on a touch screen, because all of it
+      // wants WASD and a mouse. The button is hidden by the stylesheet; this
+      // is the other half, for a ?play= link somebody was sent, which would
+      // otherwise spend megabytes on something they cannot move.
+      const byHand = window.matchMedia
+        && window.matchMedia('(pointer: coarse) and (hover: none)').matches;
+      if (byHand) return;
+
       const asked = new URLSearchParams(location.search).get('play');
 
       for (const button of document.querySelectorAll('button.play')) {
