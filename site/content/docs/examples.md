@@ -7,6 +7,88 @@ weight: 2
 
 Examples live in the engine to demonstrate improvements as they land.
 
+## cubes
+
+In which the lighting is shown off. There's a sun, two spotlights moving
+around, and a lamp. Press L to cycle through the permutations.
+
+The sun is a direction with no position, so there's nothing to draw for it and
+turning it off is the only way to _see_ what it was doing. The spotlights cast down
+their cones. The lamp casts every way at once, which takes six projections
+instead of one.
+
+```
+cargo run --release --example cubes
+```
+
+The camera orbits on its own, or drag to turn it yourself.
+
+- left and right turn it, up and down raise and lower it
+- scroll moves closer
+- space locks the cursor
+- L switches which lights are on
+
+{{< play name="cubes" src="/media/cubes.mp4" poster="/media/cubes.png"
+    alt="Four cubes on a dark checkered floor lit by one lamp, each throwing its shadow off in a different direction" >}}
+
+## tunnel
+
+In which you soar down the inside of a meandering tunnel collecting rings. It
+demonstrates one of the hardest things you can ask of mipmaps: a checkered field
+running away to a vanishing point.
+
+```
+cargo run --release --example tunnel
+```
+
+Steer with the mouse. It flies itself, faster the further you get, and
+brushing the wall costs you speed.
+
+- space locks the cursor
+- R starts over
+
+{{< play name="tunnel" src="/media/tunnel.mp4" poster="/media/tunnel.png"
+    alt="Looking down a tunnel of dark and light checks receding to a vanishing point, with a gold ring hanging off centre" >}}
+
+## sierpinski
+
+In which a tetrahedron is made of four smaller copies of itself.
+
+```
+cargo run --release --example sierpinski
+```
+
+Up and down change how deep it goes. Drag to turn it, scroll to move closer, R puts it back.
+
+{{< play name="sierpinski" src="/media/sierpinski.mp4" poster="/media/sierpinski.png"
+    alt="A Sierpinski tetrahedron at depth four, its shadow on the floor carrying the same holes" >}}
+
+## menger
+
+In which a cube is made of twenty smaller copies of itself.
+
+```
+cargo run --release --example menger
+```
+
+Up and down change how deep it goes. Drag to turn it, scroll to move closer, R puts it back.
+
+{{< play name="menger" src="/media/menger.mp4" poster="/media/menger.png"
+    alt="A Menger sponge at depth three, passages going right through it, a square hole in its shadow" >}}
+
+## hilbert
+
+In which a single line winds through every cell of a cube without ever crossing itself.
+
+```
+cargo run --release --example hilbert
+```
+
+Up and down change how deep it goes. Drag to turn it, scroll to move closer, R puts it back.
+
+{{< play name="hilbert" src="/media/hilbert.mp4" poster="/media/hilbert.png"
+    alt="A Hilbert curve of order three drawn as a tube, winding through a cube without touching itself" >}}
+
 ## rolling
 
 In which collision detection is demonstrated. Roll a ball around a walled room and watch it slide along said walls.
@@ -69,30 +151,6 @@ cargo run --release --example tower
 {{< play name="tower" src="/media/tower.mp4" poster="/media/tower.png"
     alt="A tall hollow tower of forty blocks, two to a level and turned a quarter turn each level, standing on a grey floor" >}}
 
-## cubes
-
-In which the lighting is shown off. There's a sun, two spotlights moving
-around, and a lamp. Press L to cycle through the permutations.
-
-The sun is a direction with no position, so there's nothing to draw for it and
-turning it off is the only way to _see_ what it was doing. The spotlights cast down
-their cones. The lamp casts every way at once, which takes six projections
-instead of one.
-
-```
-cargo run --release --example cubes
-```
-
-The camera orbits on its own, or drag to turn it yourself.
-
-- left and right turn it, up and down raise and lower it
-- scroll moves closer
-- space locks the cursor
-- L switches which lights are on
-
-{{< play name="cubes" src="/media/cubes.mp4" poster="/media/cubes.png"
-    alt="Four cubes on a dark checkered floor lit by one lamp, each throwing its shadow off in a different direction" >}}
-
 ## teapot
 
 In which the classic Utah teapot is rendered. Built from the points Newell measured off a
@@ -132,64 +190,6 @@ Same controls as the teapot, plus M to swap the wire mesh for the solid surface.
 
 {{< clip src="/media/klein-glass.mp4" poster="/media/klein-glass.png"
     alt="The same bottle, translucent, the neck carrying on inside the body after it passes through the wall" >}}
-
-## tunnel
-
-In which you soar down the inside of a meandering tunnel collecting rings. It
-demonstrates one of the hardest things you can ask of mipmaps: a checkered field
-running away to a vanishing point.
-
-```
-cargo run --release --example tunnel
-```
-
-Steer with the mouse. It flies itself, faster the further you get, and
-brushing the wall costs you speed.
-
-- space locks the cursor
-- R starts over
-
-{{< play name="tunnel" src="/media/tunnel.mp4" poster="/media/tunnel.png"
-    alt="Looking down a tunnel of dark and light checks receding to a vanishing point, with a gold ring hanging off centre" >}}
-
-## sierpinski
-
-In which a tetrahedron is made of four smaller copies of itself.
-
-```
-cargo run --release --example sierpinski
-```
-
-Up and down change how deep it goes. Drag to turn it, scroll to move closer, R puts it back.
-
-{{< play name="sierpinski" src="/media/sierpinski.mp4" poster="/media/sierpinski.png"
-    alt="A Sierpinski tetrahedron at depth four, its shadow on the floor carrying the same holes" >}}
-
-## menger
-
-In which a cube is made of twenty smaller copies of itself.
-
-```
-cargo run --release --example menger
-```
-
-Up and down change how deep it goes. Drag to turn it, scroll to move closer, R puts it back.
-
-{{< play name="menger" src="/media/menger.mp4" poster="/media/menger.png"
-    alt="A Menger sponge at depth three, passages going right through it, a square hole in its shadow" >}}
-
-## hilbert
-
-In which a single line winds through every cell of a cube without ever crossing itself.
-
-```
-cargo run --release --example hilbert
-```
-
-Up and down change how deep it goes. Drag to turn it, scroll to move closer, R puts it back.
-
-{{< play name="hilbert" src="/media/hilbert.mp4" poster="/media/hilbert.png"
-    alt="A Hilbert curve of order three drawn as a tube, winding through a cube without touching itself" >}}
 
 ## ripple
 
