@@ -62,6 +62,7 @@ not a priority, and it never changes once a spec exists.
 | [0053](0053-the-engine-in-a-browser.md) | The engine in a browser, and every example on the site made playable |
 | [0054](0054-the-order-of-the-examples.md) | What the examples page shows and in what order: worth looking at rather than chronological, groups kept whole, and tower gone altogether because cairn is the better example of the same thing |
 | [0055](0055-everything-playable-in-the-page.md) | Every game playable in the page the way the examples are: what already holds, what fourteen repos will cost, and what is not decided |
+| [0056](0056-what-a-frame-costs.md) | What a frame costs and how to measure it, since nothing here has ever been timed: vsync, the delta cap, and a scene with dials on it (draft) |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.
