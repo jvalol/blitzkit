@@ -20,6 +20,30 @@
   publish = "public"
   command = "./scripts/build"
 
+  # **Build every time, and do not be clever about it.**
+  #
+  # Netlify's default for a project with a `base` is to skip the build when
+  # nothing under that base changed. That is wrong here and was wrong from the
+  # day `base` was set: the clips, the stills and the browser builds live at
+  # the repo root on purpose, because both readmes link them by absolute URL
+  # and there is one copy of each, and `scripts/build` copies them in. Netlify
+  # never gets as far as running that, so it cannot see them.
+  #
+  # It went unnoticed because every push until 2026-10-17 happened to carry a
+  # change under site/ along with them. Two that did not were cancelled with
+  # "No changes detected in base directory", and the site quietly served the
+  # old clips and an arcade without the room at the end of the aisle. Nothing
+  # in the repo could have told us: ./check-fresh compares the repo against
+  # itself and was perfectly happy.
+  #
+  # The precise fix is an ignore command naming the paths that matter. It is
+  # not used, because a subtly wrong one fails the same silent way as the
+  # default did and it took a screenshot of the deploy log to find this one.
+  # `false` exits non-zero, which is Netlify's way of saying build it. The
+  # site is a Hugo run of about a tenth of a second and a file copy, so what
+  # this costs is nothing and what it buys is never having to wonder.
+  ignore = "false"
+
 [build.environment]
   # Keep aligned with the Hugo that jva.lol pins and that is installed locally.
   HUGO_VERSION = "0.166.0"
