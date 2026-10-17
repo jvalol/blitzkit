@@ -1,6 +1,6 @@
 # 0053 The engine in a browser
 
-**Status:** implemented, 2026-10-15
+**Status:** implemented, 2026-10-15. The page got its colour back 2026-10-17.
 
 ## Goal
 
@@ -191,12 +191,42 @@ renderer wants multisampled depth for spec 0029's contact shadows, which
 WebGL2 has no answer for, so a browser without WebGPU gets nothing rather than
 something worse.
 
+### A browser cannot be given an sRGB surface
+
+Jake, clicking play on the arcade: it got dark. It was, and so was every
+other example in the page, and the clips beside them were not: the browser
+build had been drawing without the sRGB encode since the day it was built.
+
+The shader works in linear light and the surface is what turns that into what
+a screen wants. Native surfaces offer an sRGB format and the renderer took
+one, so this never showed up on this machine. WebGPU lets a canvas be
+configured as `rgba8unorm`, `bgra8unorm` or `rgba16float` and nothing else,
+so wgpu's web backend advertises exactly those three, the search for an sRGB
+format found none, and the fallback was the plain one. Linear values shown as
+though they were already encoded: every mid tone dark, and the lamps and the
+neon still bright, which is a building with the power off rather than a
+picture that looks wrong.
+
+What WebGPU does allow is an sRGB *view* of that canvas, declared as a view
+format when the surface is configured. So there are two formats now. The
+surface is configured as what it will take, and every pipeline, the
+multisampled target and the frame's own view are made with that format plus
+sRGB. On a native surface the two are the same value and none of it does
+anything, which is the other half of why it went unnoticed.
+
 ## Acceptance criteria
 
-Nothing here is a test, and that is a gap rather than a decision. What a test
-could hold is that the engine builds for `wasm32-unknown-unknown`, which is a
-line in the gate and not a Rust test, and that is the first thing to add if
-this goes past one example.
+- What is drawn through is sRGB whatever the surface offers, the browser's
+  three formats included, and the surface itself is only ever configured as
+  something it was offered. — `renderer::tests::what_is_drawn_through_is_always_srgb`
+
+Watched failing both ways round: drawing through the surface's own format,
+which is what the bug was, and configuring the surface as the sRGB view
+format, which a browser refuses.
+
+The rest of this is still not tested, and that is a gap rather than a
+decision. What a test could hold is that the engine builds for
+`wasm32-unknown-unknown`, which is a line in the gate and not a Rust test.
 
 ## By hand
 
@@ -204,6 +234,10 @@ Build it, point a browser at it, and drop a ball in the pool.
 
 - The canvas is not black, which is the shader rule above and the one that
   gives no useful error.
+- And not dark either, which is a different fault with a worse disguise: the
+  page looked like a game with moody lighting for two days. Put the clip and
+  the thing playing in the page side by side rather than judging the page on
+  its own.
 - The readout counts the balls up, which is the keyboard arriving.
 - Dragging swings the camera, which is the mouse arriving.
 - The console says how many samples a pixel, which is the device arriving.

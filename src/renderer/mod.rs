@@ -60,6 +60,9 @@ pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
+    /// What everything is drawn through, which is `config.format` with sRGB
+    /// on it. See where it is worked out, in `new`.
+    drawn: wgpu::TextureFormat,
     pipeline: wgpu::RenderPipeline,
     screen_buffer: wgpu::Buffer,
     screen_bind_group: wgpu::BindGroup,
@@ -257,15 +260,15 @@ impl Renderer {
             .unwrap();
 
         let capabilities = surface.get_capabilities(&adapter);
-        let format = capabilities
-            .formats
-            .iter()
-            .copied()
-            .find(|format| format.is_srgb())
-            .unwrap_or(capabilities.formats[0]);
+        let (format, drawn) = formats(&capabilities.formats);
         let config = wgpu::SurfaceConfiguration {
             format,
             present_mode: wgpu::PresentMode::Fifo,
+            view_formats: if drawn == format {
+                Vec::new()
+            } else {
+                vec![drawn]
+            },
             ..surface
                 .get_default_config(&adapter, size.width.max(1), size.height.max(1))
                 .unwrap()
@@ -316,7 +319,7 @@ impl Renderer {
             }],
         });
 
-        let pipeline = create_render_pipeline(&device, config.format, &screen_bind_group_layout);
+        let pipeline = create_render_pipeline(&device, drawn, &screen_bind_group_layout);
 
         let vertex_buffer = create_buffer(&device, 0, wgpu::BufferUsages::VERTEX);
         let index_buffer = create_buffer(&device, 0, wgpu::BufferUsages::INDEX);
@@ -325,7 +328,7 @@ impl Renderer {
             &device,
             config.width,
             config.height,
-            config.format,
+            drawn,
         );
 
         // How many samples a pixel is worked out from, asked of the device
@@ -336,7 +339,7 @@ impl Renderer {
         // Both formats have to agree, because they are attached to one pass.
         let samples = {
             let got = depth::samples(
-                adapter.get_texture_format_features(config.format).flags,
+                adapter.get_texture_format_features(drawn).flags,
                 adapter.get_texture_format_features(depth::FORMAT).flags,
                 beyond_the_spec,
             );
@@ -357,7 +360,7 @@ impl Renderer {
             got
         };
         let depth = depth::DepthTexture::new(&device, config.width, config.height, samples);
-        let colour = multisampled(&device, &config, samples);
+        let colour = multisampled(&device, &config, drawn, samples);
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Texture Bind Group Layout"),
@@ -626,7 +629,7 @@ impl Renderer {
 
         let mesh_pipeline = create_mesh_pipeline(
             &device,
-            config.format,
+            drawn,
             MeshLayouts {
                 camera: &camera_bind_group_layout,
                 texture: &texture_bind_group_layout,
@@ -649,7 +652,7 @@ impl Renderer {
         let translucent_pipelines = [wgpu::Face::Front, wgpu::Face::Back].map(|cull| {
             create_mesh_pipeline(
                 &device,
-                config.format,
+                drawn,
                 MeshLayouts {
                     camera: &camera_bind_group_layout,
                     texture: &texture_bind_group_layout,
@@ -663,7 +666,7 @@ impl Renderer {
         });
         let instance_buffer = create_buffer(&device, 0, wgpu::BufferUsages::VERTEX);
         let outline_pipeline =
-            create_outline_pipeline(&device, &camera_bind_group_layout, config.format, samples);
+            create_outline_pipeline(&device, &camera_bind_group_layout, drawn, samples);
         let outline_buffer = create_buffer(&device, 0, wgpu::BufferUsages::VERTEX);
 
         let mut renderer = Self {
@@ -673,6 +676,7 @@ impl Renderer {
             device,
             queue,
             config,
+            drawn,
             pipeline,
             screen_buffer,
             screen_bind_group,
@@ -1109,7 +1113,7 @@ impl Renderer {
             self.config.height,
             self.depth.samples,
         );
-        self.colour = multisampled(&self.device, &self.config, self.depth.samples);
+        self.colour = multisampled(&self.device, &self.config, self.drawn, self.depth.samples);
         // the old view died with the old texture, and the march reads through
         // this one
         self.scene_depth_bind_group =
@@ -1162,9 +1166,10 @@ impl Renderer {
                 return;
             }
         };
-        let view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
+        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.drawn),
+            ..Default::default()
+        });
 
         self.queue.write_buffer(
             &self.camera_buffer,
@@ -2332,6 +2337,39 @@ pub fn mesh_source(samples: u32) -> std::borrow::Cow<'static, str> {
     }
 }
 
+/// What the surface is configured as, and what everything is drawn through.
+///
+/// **What is drawn into is not always what is presented.**
+///
+/// The shader works in linear light and the surface is what turns that into
+/// what a screen wants, so an sRGB one is not a preference: a plain one shows
+/// linear values as though they were already encoded, and every mid tone
+/// comes out dark. In the arcade that was a lit hall with its lamps and its
+/// neon still bright and everything else nearly black, which reads as a
+/// building with the power off. Jake, clicking play on the site: it got dark.
+///
+/// A browser cannot be given one. WebGPU lets a canvas be configured as
+/// `rgba8unorm`, `bgra8unorm` or `rgba16float` and nothing else, so wgpu's
+/// web backend advertises exactly those three and a search for an sRGB format
+/// among them finds nothing. What WebGPU does allow is an sRGB *view* of that
+/// canvas, declared up front as a view format, and drawing through that view
+/// encodes on the way out. Spec 0053.
+///
+/// So there are two formats. The first is what the surface is configured as
+/// and is all the surface ever hears about; the second is what every
+/// pipeline, the multisampled target and the frame's own view are made with.
+/// On a native surface they are the same value and none of this does
+/// anything, which is why it went unnoticed for as long as it did.
+fn formats(offered: &[wgpu::TextureFormat]) -> (wgpu::TextureFormat, wgpu::TextureFormat) {
+    let format = offered
+        .iter()
+        .copied()
+        .find(|format| format.is_srgb())
+        .unwrap_or_else(|| offered.first().copied().unwrap_or(crate::texture::FORMAT));
+
+    (format, format.add_srgb_suffix())
+}
+
 /// The texture the world is drawn into when the device multisamples.
 ///
 /// One of these and not several: the surface's own texture cannot be
@@ -2340,6 +2378,7 @@ pub fn mesh_source(samples: u32) -> std::borrow::Cow<'static, str> {
 fn multisampled(
     device: &wgpu::Device,
     config: &wgpu::SurfaceConfiguration,
+    format: wgpu::TextureFormat,
     samples: u32,
 ) -> Option<wgpu::TextureView> {
     if samples <= 1 {
@@ -2356,7 +2395,7 @@ fn multisampled(
         mip_level_count: 1,
         sample_count: samples,
         dimension: wgpu::TextureDimension::D2,
-        format: config.format,
+        format,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         view_formats: &[],
     });
@@ -2573,6 +2612,56 @@ mod text_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Spec 0053: what is drawn through is sRGB whatever the surface offers.
+    ///
+    /// The browser's list is the case this exists for. A canvas can be
+    /// configured as `rgba8unorm`, `bgra8unorm` or `rgba16float` and nothing
+    /// else, so there is no sRGB format in it to find, and drawing linear
+    /// light into one of those without the encode is what took the arcade's
+    /// lights out on the site.
+    #[test]
+    fn what_is_drawn_through_is_always_srgb() {
+        use wgpu::TextureFormat::*;
+
+        // a browser, which offers nothing sRGB at all
+        let (surface, drawn) = formats(&[Bgra8Unorm, Rgba8Unorm, Rgba16Float]);
+        assert_eq!(surface, Bgra8Unorm, "the canvas takes what it can be given");
+        assert_eq!(drawn, Bgra8UnormSrgb, "and is drawn through sRGB");
+        assert!(drawn.is_srgb());
+
+        // a native surface, which offers one, and where the two are one thing
+        let (surface, drawn) = formats(&[Bgra8Unorm, Bgra8UnormSrgb]);
+        assert_eq!(surface, Bgra8UnormSrgb, "an sRGB surface is taken as it is");
+        assert_eq!(drawn, surface, "and nothing is laid over it");
+
+        // and whatever is offered, what is drawn through encodes
+        for offered in [
+            vec![Rgba8Unorm],
+            vec![Bgra8Unorm],
+            vec![Rgba8UnormSrgb, Rgba8Unorm],
+            vec![Bgra8Unorm, Rgba8Unorm],
+        ] {
+            let (surface, drawn) = formats(&offered);
+
+            assert!(
+                drawn.is_srgb(),
+                "offered {:?}, drawn through {:?}",
+                offered,
+                drawn
+            );
+            assert!(
+                offered.contains(&surface),
+                "the surface was configured as {:?}, which was not offered",
+                surface
+            );
+            assert_eq!(
+                drawn.remove_srgb_suffix(),
+                surface.remove_srgb_suffix(),
+                "the view and the surface are the same format underneath"
+            );
+        }
+    }
 
     /// Spec 0042: a buffer that can take the new bytes is written into rather
     /// than replaced, which is what makes a surface stepped every frame cost
