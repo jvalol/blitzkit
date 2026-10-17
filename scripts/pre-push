@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+#
+# pre-push — do not publish a site that does not match the engine.
+#
+# Pushing this repo is deploying it: Netlify builds on a push to main, so
+# whatever is in web/ at that moment is what a stranger plays. On 2026-10-16
+# the published arcade was a day old and a whole room was missing from it, and
+# nothing anywhere said so. check-listings asks whether a build exists and is
+# offered, never whether it is current.
+#
+# **It refuses rather than building.** Building takes minutes and, worse,
+# would leave the rebuilt files uncommitted behind the push, so the thing that
+# went out and the thing in the tree would disagree in a new way. A refusal
+# with the command in it is slower to obey and leaves the repo honest.
+#
+# Only the browser builds are a gate. The clips and the stills drift too, and
+# ./check-fresh reports on them, but what they are made from is the whole
+# engine and a gate on that would refuse every push after any engine change.
+#
+# Install: ln -sf ../../scripts/pre-push .git/hooks/pre-push
+# Skip once, knowing what it is for: git push --no-verify
+
+set -uo pipefail
+
+# The project root, which is a directory up from this repo and holds the
+# scripts this needs. Found by looking for them rather than by counting
+# directories: git runs a hook as .git/hooks/pre-push and this file lives at
+# scripts/pre-push, so how far up ".." goes depends on which path git hands
+# over, and a hook that silently does nothing is worse than no hook.
+root=$(git rev-parse --show-toplevel 2>/dev/null)/..
+root=$(cd "$root" 2>/dev/null && pwd) || exit 0
+
+if [ ! -x "$root/check-fresh" ]; then
+  echo "pre-push: no ./check-fresh above this repo, so nothing was checked." >&2
+  exit 0
+fi
+
+cd "$root" || exit 0
+
+# the gate this repo already had, which is about copy and not about freshness
+if [ -x blitzkit/scripts/ship-check ]; then
+  if ! blitzkit/scripts/ship-check; then
+    echo
+    echo "pre-push: stopped by ship-check above."
+    exit 1
+  fi
+fi
+
+[ -x ./check-fresh ] || exit 0
+
+behind=$(./check-fresh 2>/dev/null |
+  awk '/^== the examples built for a browser/ {on = 1; next} /^$/ {on = 0} on && /behind/ {print}')
+
+if [ -n "$behind" ]; then
+  echo "pre-push: the browser builds are behind the engine, and pushing this"
+  echo "          repo publishes them."
+  echo
+  echo "$behind"
+  echo
+  echo "  ./build-web          to bring them all up"
+  echo "  ./build-web arcade   for one"
+  echo
+  echo "then commit web/ and push again. git push --no-verify skips this."
+  exit 1
+fi
+
+exit 0

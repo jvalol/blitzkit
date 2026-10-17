@@ -1,0 +1,37 @@
+# What each thing here was made from, and when.
+#
+# Written by ./stamp, called from ./build-web and ./refresh-examples.
+# Read by ./check-fresh, which reports how far behind the engine each
+# one is. A + on the commit means the engine's tree was dirty, so what
+# was built is not quite that commit.
+#
+# These first lines were not written as the files were made. They are
+# reconstructed from each file's date: the engine commit that was
+# current when the file was last written. Close enough to start from
+# and replaced the first time anything is remade.
+#
+# file	engine	made
+arcade.js	8fef4a0	2026-10-16T18:32
+arcade_bg.wasm	8fef4a0	2026-10-16T18:32
+chain.js	8fef4a0	2026-10-16T18:32
+chain_bg.wasm	8fef4a0	2026-10-16T18:32
+cubes.js	8fef4a0	2026-10-16T18:32
+cubes_bg.wasm	8fef4a0	2026-10-16T18:32
+hilbert.js	8fef4a0	2026-10-16T18:32
+hilbert_bg.wasm	8fef4a0	2026-10-16T18:32
+klein.js	8fef4a0	2026-10-16T18:32
+klein_bg.wasm	8fef4a0	2026-10-16T18:32
+menger.js	8fef4a0	2026-10-16T18:32
+menger_bg.wasm	8fef4a0	2026-10-16T18:32
+ripple.js	8fef4a0	2026-10-16T18:32
+ripple_bg.wasm	8fef4a0	2026-10-16T18:32
+rolling.js	8fef4a0	2026-10-16T18:32
+rolling_bg.wasm	8fef4a0	2026-10-16T18:32
+sierpinski.js	8fef4a0	2026-10-16T18:32
+sierpinski_bg.wasm	8fef4a0	2026-10-16T18:32
+stacking.js	8fef4a0	2026-10-16T18:32
+stacking_bg.wasm	8fef4a0	2026-10-16T18:32
+teapot.js	8fef4a0	2026-10-16T18:32
+teapot_bg.wasm	8fef4a0	2026-10-16T18:32
+tunnel.js	8fef4a0	2026-10-16T18:32
+tunnel_bg.wasm	8fef4a0	2026-10-16T18:32
