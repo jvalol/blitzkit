@@ -10,6 +10,7 @@
 pub mod coplanar;
 mod culling;
 pub mod depth;
+mod kept;
 pub mod outline;
 pub mod render_text;
 pub mod scene;
@@ -121,6 +122,8 @@ pub struct Renderer {
     /// Whether the march happens at all. A cost, and a game with nothing
     /// resting on anything does not need it.
     contact_shadows: bool,
+    /// Where every kept run lies in the instance buffer. Spec 0059.
+    kept: kept::Kept,
     /// Whether each pass leaves out what it cannot see. Spec 0057.
     ///
     /// On, because a game should not have to ask not to draw the room behind
@@ -751,6 +754,7 @@ impl Renderer {
             scene_depth_layout,
             scene_depth_bind_group,
             contact_shadows: true,
+            kept: kept::Kept::default(),
             culling: true,
             translucent_pipelines,
             meshes: Vec::new(),
@@ -1757,9 +1761,6 @@ impl Renderer {
     /// A run is one of four kinds, so the instances of a kind lie together and
     /// a kind is a span rather than a list of indices.
     fn upload_instances(&mut self, scene: &Scene) -> Drawn {
-        // the world is handed over moved so that the eye is at the origin,
-        // per spec 0051
-        let eye = self.camera.position;
         let views = self.views(scene);
         let batches = scene.batches();
         let mut pushed: Vec<culling::Pushed> = Vec::with_capacity(batches.len());
@@ -1782,48 +1783,101 @@ impl Renderer {
                 texture,
                 bounds: self.meshes[mesh.0].bounds,
                 instances,
+                lies_at: None,
+                quarters: None,
                 round: None,
             });
         }
 
         // and what the game handed over once rather than this frame, per
-        // spec 0058. Same picking, with a sphere round each run that the
-        // view is asked about before any of its instances are.
-        let mut kept: Vec<culling::Pushed> = Vec::new();
+        // spec 0058: laid out in the buffer first, so a run that nothing has
+        // touched is already where it needs to be and this frame writes
+        // nothing for it. Spec 0059.
+        let holding: Vec<&crate::renderer::scene::Keeping> = scene
+            .keepings()
+            .filter(|keeping| {
+                if keeping.mesh.0 >= self.meshes.len() {
+                    log::warn!(
+                        "a scene kept mesh {:?}, which was never added",
+                        keeping.mesh
+                    );
+                    return false;
+                }
+                if keeping.texture.0 >= self.textures.len() {
+                    log::warn!(
+                        "a scene kept texture {:?}, which was never added",
+                        keeping.texture
+                    );
+                    return false;
+                }
 
-        for keeping in scene.keepings() {
-            if keeping.mesh.0 >= self.meshes.len() {
-                log::warn!(
-                    "a scene kept mesh {:?}, which was never added",
-                    keeping.mesh
-                );
-                continue;
-            }
-            if keeping.texture.0 >= self.textures.len() {
-                log::warn!(
-                    "a scene kept texture {:?}, which was never added",
-                    keeping.texture
-                );
-                continue;
-            }
+                true
+            })
+            .collect();
 
-            kept.push(culling::of_a_keeping(
-                keeping,
-                self.meshes[keeping.mesh.0].bounds,
-            ));
+        let laid: Vec<(u64, u64, u32)> = holding
+            .iter()
+            .map(|keeping| (keeping.id, keeping.version, keeping.instances.len() as u32))
+            .collect();
+        let (writing, swept) = self.kept.lay_out(&laid);
+        let after = self.kept.len();
+
+        let kept: Vec<culling::Pushed> = holding
+            .iter()
+            .map(|keeping| {
+                culling::of_a_keeping(
+                    keeping,
+                    self.meshes[keeping.mesh.0].bounds,
+                    self.kept.lies_at(keeping.id),
+                )
+            })
+            .collect();
+
+        let (instances, drawn) = culling::pick(&views, &pushed, &kept, after);
+
+        // the buffer holds the kept region and then this frame's own. It is
+        // made again when either outgrows it, and everything kept goes back
+        // into it when that happens: a run's range is a promise to the draw
+        // calls that name it.
+        let wanted = (after as u64 + instances.len() as u64) * Instance::SIZE;
+        let made_again = wanted > self.instance_buffer.size();
+
+        if made_again {
+            self.instance_buffer = create_buffer(
+                &self.device,
+                wanted.max(self.instance_buffer.size() * 2),
+                wgpu::BufferUsages::VERTEX,
+            );
         }
 
-        let (instances, drawn) = culling::pick(&views, &pushed, &kept, eye);
+        let write = |first: u32, instances: &[Instance]| {
+            if instances.is_empty() {
+                return;
+            }
 
-        if drawn.anything {
-            let bytes: &[u8] = bytemuck::cast_slice(&instances);
-            if bytes.len() as u64 > self.instance_buffer.size() {
-                self.instance_buffer =
-                    create_buffer_init(&self.device, bytes, wgpu::BufferUsages::VERTEX);
-            } else {
-                self.queue.write_buffer(&self.instance_buffer, 0, bytes);
+            self.queue.write_buffer(
+                &self.instance_buffer,
+                first as u64 * Instance::SIZE,
+                bytemuck::cast_slice(instances),
+            );
+        };
+
+        // everything kept, if the buffer is new or the region was laid out
+        // again, and otherwise only what changed
+        let again = made_again || swept;
+        let writing: Vec<kept::Writing> = if again {
+            self.kept.all_of_it()
+        } else {
+            writing
+        };
+
+        for one in writing {
+            if let Some(keeping) = holding.iter().find(|keeping| keeping.id == one.id) {
+                write(one.first, &keeping.instances);
             }
         }
+
+        write(after, &instances);
 
         drawn
     }
@@ -2103,6 +2157,12 @@ struct SceneUniform {
     /// nothing can be compared in world units until that is undone. See spec
     /// 0029.
     contact: [f32; 4],
+    /// Where the eye is, in the world's own coordinates, so the vertex
+    /// stage can take it off a model matrix. Spec 0059: an instance reaches
+    /// the GPU where it stands, and the subtraction spec 0051 used to do on
+    /// the CPU happens here instead, which is what lets a kept run be
+    /// written once and left alone.
+    eye: [f32; 4],
 }
 
 unsafe impl bytemuck::Pod for SceneUniform {}
@@ -2168,6 +2228,7 @@ impl SceneUniform {
                 camera.far,
                 crate::contact::CONTACT_REACH,
             ],
+            eye: eye.extend(0.0).to_array(),
         }
     }
 }
@@ -3251,7 +3312,17 @@ mod uniform_tests {
         // a uniform block wants each field on a 16 byte boundary
         assert_eq!(
             std::mem::size_of::<SceneUniform>(),
-            64 + 16 * 4 + 64 + 16 + 32 * MAX_POINT_LIGHTS + 16 + 128 * MAX_SPOT_LIGHTS + 16 + 16
+            64 + 16 * 4
+                + 64
+                + 16
+                + 32 * MAX_POINT_LIGHTS
+                + 16
+                + 128 * MAX_SPOT_LIGHTS
+                + 16
+                + 16
+                // and the eye, per spec 0059, which the vertex stage takes
+                // off a model matrix now that one arrives in world space
+                + 16
         );
         assert_eq!(
             std::mem::offset_of!(SceneUniform, light_view_projection),

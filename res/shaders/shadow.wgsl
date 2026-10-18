@@ -26,9 +26,32 @@ struct Uniforms {
     point_lights: array<PointLight, 8>,
     spot_light_count: vec4<u32>,
     spot_lights: array<SpotLight, MAX_SPOT_LIGHTS>,
+    // these two are read by mesh.wgsl and not here, and they are declared
+    // anyway because the field after them is read here and a uniform struct
+    // is read by where its fields lie
+    point_shadow: vec4<u32>,
+    contact: vec4<f32>,
+    // where the eye is, in the world's own coordinates. Spec 0059: a model
+    // matrix arrives in world space and the eye comes off it here.
+    eye: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+
+// A model matrix with the eye taken off its translation, per spec 0059.
+fn taken_off(
+    model_0: vec4<f32>,
+    model_1: vec4<f32>,
+    model_2: vec4<f32>,
+    model_3: vec4<f32>,
+) -> mat4x4<f32> {
+    return mat4x4<f32>(
+        model_0,
+        model_1,
+        model_2,
+        vec4<f32>(model_3.xyz - uniforms.eye.xyz, model_3.w),
+    );
+}
 
 // Which light this pass is filling the map for. Anything below MAX_SPOT_LIGHTS
 // is that spot; anything at or above it is the sun. One pipeline fills every
@@ -50,7 +73,7 @@ fn vs_main(
     @location(5) model_2: vec4<f32>,
     @location(6) model_3: vec4<f32>,
 ) -> @builtin(position) vec4<f32> {
-    let model = mat4x4<f32>(model_0, model_1, model_2, model_3);
+    let model = taken_off(model_0, model_1, model_2, model_3);
     let world = model * vec4<f32>(position, 1.0);
 
     if which.index.x >= MAX_SPOT_LIGHTS {
@@ -95,7 +118,7 @@ fn vs_point(
     @location(5) model_2: vec4<f32>,
     @location(6) model_3: vec4<f32>,
 ) -> PointOut {
-    let model = mat4x4<f32>(model_0, model_1, model_2, model_3);
+    let model = taken_off(model_0, model_1, model_2, model_3);
     let world = model * vec4<f32>(position, 1.0);
 
     var out: PointOut;

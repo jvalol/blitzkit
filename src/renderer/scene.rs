@@ -88,6 +88,14 @@ impl Instance {
     /// Only the translation column moves. The rotation and scale of a model
     /// are about its own origin and do not care where the camera is, and the
     /// normal matrix is built from those, so it is left alone.
+    /// The same instance, with the eye taken off where it stands.
+    ///
+    /// **The mirror of what the vertex stage does**, since spec 0059: an
+    /// instance reaches the GPU where it stands in the world and
+    /// `taken_off` in `mesh.wgsl` and `shadow.wgsl` does this to it there.
+    /// Kept here because it is the arithmetic spec 0051 is about and the
+    /// tests below are the record of why, and held to the shader's own
+    /// formula by `taking_the_eye_off_lands_where_it_did`.
     pub fn from_the_eye(&self, eye: Vec3) -> Self {
         let mut moved = *self;
         moved.model[3][0] -= eye.x;
@@ -128,6 +136,11 @@ pub struct Scene {
     /// A slot that was dropped is left as `None` rather than taken out, so
     /// the handles to everything after it go on meaning what they meant.
     kept: Vec<Option<Keeping>>,
+    /// What the next kept run will be called, which is a number nobody
+    /// reuses: a slot can be dropped and filled again, and the renderer
+    /// holds a range of its buffer against the run that was in it. Spec
+    /// 0059.
+    next_kept: u64,
     /// The sun. A game changes it like anything else, and it persists, because
     /// a sun does.
     pub light: Light,
@@ -387,11 +400,16 @@ impl Scene {
     /// and left: the eye moves and the world does not.
     pub fn keep(&mut self, mesh: MeshId, texture: TextureId, instances: &[Instance]) -> Kept {
         let holding = Keeping {
+            id: self.next_kept,
+            version: 0,
             mesh,
             texture,
             round: Round::of(instances),
+            quarters: quarters_of(instances),
             instances: instances.to_vec(),
         };
+
+        self.next_kept += 1;
 
         // the first free slot, so a dropped run's room comes back without
         // moving anybody else's handle
@@ -433,6 +451,8 @@ impl Scene {
 
         *instance = Instance::new(transform, color, shininess);
         holding.round = Round::of(&holding.instances);
+        holding.quarters = quarters_of(&holding.instances);
+        holding.version += 1;
     }
 
     /// Lets go of a kept run. Its handle stops answering.
@@ -483,10 +503,84 @@ pub struct Kept(usize);
 /// One kept run: what it is, where it is, and what holds all of it.
 #[derive(Debug)]
 pub(crate) struct Keeping {
+    /// What this run is called for as long as it lives, and what the
+    /// renderer holds a range of its buffer against. Spec 0059.
+    pub(crate) id: u64,
+    /// Bumped whenever the instances change, so the renderer knows to write
+    /// the range again and knows when not to.
+    pub(crate) version: u64,
     pub(crate) mesh: MeshId,
     pub(crate) texture: TextureId,
     pub(crate) instances: Vec<Instance>,
     pub(crate) round: Round,
+    /// Where each kind of instance lies inside the run, when each kind lies
+    /// together. Spec 0059.
+    pub(crate) quarters: Option<Quarters>,
+}
+
+/// Where the four kinds of instance lie in a run: solid, glowing,
+/// see-through, and see-through and glowing, each as a first and a count.
+///
+/// **Worked out when the run is kept and never per frame.** A frame that
+/// draws a kept run otherwise has to walk every instance of it four times to
+/// find out which kind each one is, which at a million instances is most of
+/// what the frame costs. A run whose kinds are mixed up through it gets
+/// nothing here and is walked, because a draw call takes a span and not a
+/// list.
+pub(crate) type Quarters = [(u32, u32); 4];
+
+/// Where each kind of instance lies in a run, when each kind lies together.
+///
+/// Public to the crate so the picking and its tests ask the same thing.
+pub(crate) fn quarters_of(instances: &[Instance]) -> Option<Quarters> {
+    <Quarters as TellsItsKinds>::of(instances)
+}
+
+pub(crate) struct Sorting;
+
+impl Sorting {
+    /// Which of the four an instance is: the order matches the one the
+    /// picking walks, per spec 0018 and spec 0039.
+    pub(crate) fn of(instance: &Instance) -> usize {
+        match (instance.is_translucent(), instance.glows()) {
+            (false, false) => 0,
+            (false, true) => 1,
+            (true, false) => 2,
+            (true, true) => 3,
+        }
+    }
+}
+
+trait TellsItsKinds {
+    fn of(instances: &[Instance]) -> Option<Quarters>;
+}
+
+impl TellsItsKinds for Quarters {
+    fn of(instances: &[Instance]) -> Option<Quarters> {
+        let mut spans: Quarters = [(0, 0); 4];
+        let mut seen = [false; 4];
+        let mut last: Option<usize> = None;
+
+        for (n, instance) in instances.iter().enumerate() {
+            let kind = Sorting::of(instance);
+
+            if Some(kind) != last {
+                // a kind that has been left and come back to is a run whose
+                // kinds are mixed up through it, which no span can describe
+                if seen[kind] {
+                    return None;
+                }
+
+                seen[kind] = true;
+                spans[kind].0 = n as u32;
+                last = Some(kind);
+            }
+
+            spans[kind].1 += 1;
+        }
+
+        Some(spans)
+    }
 }
 
 /// The sphere that holds a run, which is what a view is asked about before
@@ -1044,6 +1138,61 @@ mod tests {
         assert_eq!(moved.normal, instance.normal);
         assert_eq!(moved.color, instance.color);
         assert_eq!(moved.shininess, instance.shininess);
+    }
+
+    /// Spec 0059: the shader's arithmetic lands a vertex where the CPU's
+    /// used to land it.
+    ///
+    /// The subtraction moved to the vertex stage so that a kept run can be
+    /// written once and drawn for as long as it lives, and moving it is only
+    /// safe if it is the same subtraction. Measured where it matters, which
+    /// is a long way from the origin: the same world matrix, taken off by
+    /// `Instance::from_the_eye` and by the formula in `taken_off`, has to
+    /// put every vertex in exactly the same place.
+    #[test]
+    fn taking_the_eye_off_lands_where_it_did() {
+        // what the shader does, written the way the shader writes it
+        let taken_off = |model: &[[f32; 4]; 4], eye: Vec3| {
+            let mut off = *model;
+
+            off[3][0] -= eye.x;
+            off[3][1] -= eye.y;
+            off[3][2] -= eye.z;
+
+            glam::Mat4::from_cols_array_2d(&off)
+        };
+
+        for (at, eye) in [
+            (glam::vec3(3.0, 1.0, 2.0), glam::vec3(1.0, 1.6, -2.0)),
+            (
+                glam::vec3(0.0, 0.0, 33_280.0),
+                glam::vec3(0.0, 0.0, 33_279.98),
+            ),
+            (
+                glam::vec3(-29_000.0, 400.0, 12_000.0),
+                glam::vec3(-29_001.5, 401.6, 11_998.0),
+            ),
+        ] {
+            let turned = Transform::at(at)
+                .with_rotation(glam::Quat::from_rotation_y(0.7))
+                .with_scale(glam::vec3(2.0, 3.0, 4.0));
+            let instance = Instance::new(&turned, Vec4::ONE, 8.0);
+            let theirs = glam::Mat4::from_cols_array_2d(&instance.from_the_eye(eye).model);
+            let mine = taken_off(&instance.model, eye);
+
+            for corner in [
+                glam::vec3(0.0, 0.0, 0.0),
+                glam::vec3(0.5, 0.5, 0.5),
+                glam::vec3(-0.5, 0.25, -0.5),
+            ] {
+                assert_eq!(
+                    mine * corner.extend(1.0),
+                    theirs * corner.extend(1.0),
+                    "a vertex of a thing at {:?} landed somewhere else",
+                    at
+                );
+            }
+        }
     }
 
     /// Spec 0051: and this is what it is for. A two centimetre marble thirty

@@ -27,6 +27,21 @@ struct SpotLight {
 };
 
 // The camera, the sun, the lamps and the spots, written once per frame.
+// A model matrix with the eye taken off its translation, per spec 0059.
+fn taken_off(
+    model_0: vec4<f32>,
+    model_1: vec4<f32>,
+    model_2: vec4<f32>,
+    model_3: vec4<f32>,
+) -> mat4x4<f32> {
+    return mat4x4<f32>(
+        model_0,
+        model_1,
+        model_2,
+        vec4<f32>(model_3.xyz - uniforms.eye.xyz, model_3.w),
+    );
+}
+
 struct Uniforms {
     view_projection: mat4x4<f32>,
     // xyz is the camera, w is unused padding
@@ -54,6 +69,9 @@ struct Uniforms {
     // depth buffer holds clip depth and nothing can be compared in world units
     // until that is undone. See spec 0029.
     contact: vec4<f32>,
+    // where the eye is, in the world's own coordinates. Spec 0059: a model
+    // matrix arrives in world space and the eye comes off it here.
+    eye: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -278,7 +296,12 @@ fn vs_main(
     @location(10) color: vec4<f32>,
     @location(11) shininess: f32,
 ) -> VertexOutput {
-    let model = mat4x4<f32>(model_0, model_1, model_2, model_3);
+    // **The eye comes off here and not on the CPU.** An instance is written
+    // where it stands, so a kept run can be written once and drawn for as
+    // long as it lives, per spec 0059. The subtraction is the one spec 0051
+    // has always done: it is what keeps the product below small, which is
+    // where the precision would otherwise go at thirty kilometres.
+    let model = taken_off(model_0, model_1, model_2, model_3);
     let normal_matrix = mat3x3<f32>(normal_0, normal_1, normal_2);
     let world = model * vec4<f32>(position, 1.0);
 
