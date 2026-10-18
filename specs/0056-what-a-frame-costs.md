@@ -1,6 +1,7 @@
 # 0056 What a frame costs
 
-**Status:** draft, nothing built.
+**Status:** built, 2026-10-17, comparison included, and on the site to be
+played with rather than only run from a checkout.
 **Date:** 2026-10-17
 
 ## Goal
@@ -101,47 +102,192 @@ attributed to something rather than wondered about.
 before a change and a run after it are a diff rather than two screenshots. The
 same reason spec 0048 prefers arithmetic to a photograph.
 
-## The comparison with another engine
+## What Bevy came to
 
-Bevy, because it is Rust and it is wgpu. The operating system, the driver, the
-GPU, the windowing and the graphics API are then the same on both sides and
-what differs is the engine, which is the only comparison worth drawing. An
-engine on a different API on a different machine tells you about the machine.
+Bevy 0.20, its own `many_cubes` stress test, built outside these repos because
+it is five hundred crates and three gigabytes of build and none of that
+belongs in this project's target directory. Run with `--no-frustum-culling`,
+because blitzkit has no culling and a comparison where one side draws six
+thousand of sixty five thousand cubes is not a comparison. 1920 by 1080
+against blitzkit's 1600 by 1200, and four samples a pixel against eight, both
+of which favour Bevy on fill and neither of which matters much to the thing
+being measured.
 
-The same scene in both: the same cube count, the same lights, the same shadow
-setting, the same camera path, the same window size, vsync off in both.
+Its number is the time between frames, which is what its own diagnostic
+reports, so 8.33 means comfortably inside a frame rather than a measurement.
 
-**What it will say and what it will not.** It compares two scenes that two
-people wrote, on one machine, with one driver, at one moment. It is a fair
-answer to what this costs on Jake's Mac next to the obvious alternative. It is
-not an answer to which engine is faster, it is not evidence about any other
-machine, and no number out of it belongs in a readme.
+| cubes | blitzkit, a mesh each | Bevy, per entity | blitzkit, instanced | Bevy, batched |
+| --- | --- | --- | --- | --- |
+| 1024 | 8.33 | 8.33 | 8.33 | 8.33 |
+| 4096 | 8.37 | 9.10 | 8.33 | 8.33 |
+| 16384 | 27.4 | 31.1 | 8.33 | 8.33 |
+| 65536 | 116.6 | 119.6 | 8.33 | 8.33 |
+
+**Drawing things one at a time, the two engines cost about the same.** Within
+ten per cent at the top end and with blitzkit slightly ahead in the middle,
+which is close enough to call a draw given what the next section says about
+how steady these numbers are. That is a better result than the prediction
+expected, and the reason is that there is not much to a draw call: a bind, a
+buffer, an indexed draw. An engine with more machinery between the scene and
+the queue has more to do per entity, not less.
+
+**The difference is that Bevy does not have to.** Its batching is automatic,
+so a scene of sixty five thousand separate cubes costs it nothing at all and
+the per-entity column only exists because its stress test has a switch to
+turn batching off. blitzkit has no such thing: a game that hands it one mesh
+and sixty five thousand transforms gets 6.8 milliseconds of work, and a game
+that hands it sixty five thousand meshes gets 116, and nothing in the engine
+will close that gap on the author's behalf.
+
+**So the honest answer to how this compares** is that the per-draw cost is
+competitive and the engine around it is not clever. What Bevy buys is not
+speed at the thing both of them do; it is never being in the slow case by
+accident.
+
+### How steady any of this is
+
+Not very. The same sweep run twice twenty minutes apart gave 0.87 and 1.92
+milliseconds for the same thousand instanced cubes, and 19.6 and 27.2 for the
+same sixteen thousand separate ones: a factor of between one and a half and
+two and a bit, across the board, because the second run shared the machine
+with two browsers and Spotlight. The shape of the curve held exactly; the
+height of it did not.
+
+Both halves of the comparison above were run in the same twenty minutes, on
+the same busy machine, which is why they can be read against each other and
+why neither column should be quoted on its own.
+
+That settles the question this spec left open about a threshold in the gate.
+Not until a run can be made on a quiet machine and shown to repeat.
+
+### Why Bevy and what it does not say
+
+Bevy because it is Rust and it is wgpu, so the operating system, the driver,
+the GPU, the windowing and the graphics API are the same on both sides and
+what differs is the engine. An engine on a different API tells you about the
+API.
+
+What was not matched: the window is 1920 by 1080 against 1600 by 1200, the
+samples are four against eight, the camera paths differ, and blitzkit's rows
+carry one directional shadow pass that Bevy's do not. All of those are fill
+and none of them moves the per-entity cost that the comparison turns on, but
+they are the reason the two columns should not be subtracted from each other.
+
+And it compares two scenes that two people wrote, on one machine, with one
+driver, at one moment. It is a fair answer to what this costs on this Mac
+next to the obvious alternative. It is not an answer to which engine is
+faster, and no number out of it belongs in a readme.
+
+## What building it found
+
+Three things, and the first two are the reason the numbers in this repo have
+always been nothing.
+
+**The window is paced by the display whatever the surface is asked for.** The
+surface takes `Immediate` on this machine and says so, and every scene it can
+draw inside a frame still arrives exactly 8.33 milliseconds after the last
+one. Past that it goes to 16.67 and then 25: a staircase in whole frames,
+which is vsync wearing a different name. macOS redraws a composited window
+when the display says so.
+
+So the loop times itself, from the top of the frame to the end of the submit.
+That is the engine's number and it moves smoothly with the scene.
+
+The cap is the compositor's rather than the surface's, which turned up by
+accident while filming the clip: with the screen being recorded the same
+scene ran at 3.65 milliseconds a frame, nearly three hundred a second. So
+`Immediate` does reach the layer, and something about an ordinary composited
+window on this machine hands back redraws at the display's rate anyway. Worth
+knowing and not worth chasing: the work clock does not care either way.
+
+**Most of that is spent asking for the next surface texture.** Timed on its
+own, `get_current_texture` is the whole of the difference: measured around it,
+every scene from sixty four cubes to sixteen thousand came out at 8.28
+milliseconds, and with it taken out they run from 0.8 to 1.5. The wait is
+real and it is the display's, not the engine's, so `work_seconds` has it
+subtracted and `wait_seconds` reports it separately.
+
+**The GPU's own clock is only honest with vsync on.** Without it the wait for
+a drawable moves out of the acquire and into the frame's execution, and the
+timestamps span it: the same scene reports 10.0 milliseconds free and 2.2
+with vsync, while the CPU work is 0.95 either way. Two is the true one. That
+is a limitation of this measurement rather than a thing the engine does, and
+it is written on the example so nobody reads the wrong column.
+
+## What it cost, on this machine
+
+Apple M5 Max, 1600 by 1200, eight samples a pixel, `--sweep` on
+2026-10-17. Median of a window of 240 frames.
+
+| scene | draws | work | gpu |
+| --- | --- | --- | --- |
+| 64 cubes, one mesh instanced | 4 | 0.82 ms | 2.9 ms |
+| 1024 cubes, one mesh instanced | 4 | 0.87 ms | 2.2 ms |
+| 16384 cubes, one mesh instanced | 4 | 1.46 ms | 2.5 ms |
+| 1024 cubes, a mesh each | 3073 | 1.76 ms | 1.6 ms |
+| 4096 cubes, a mesh each | 12289 | 5.06 ms | 5.1 ms |
+| 16384 cubes, a mesh each | 49153 | 19.61 ms | 10.4 ms |
+| 1024 cubes, 64 lamps | 4 | 0.96 ms | 2.8 ms |
+| 1024 cubes, 64 lamps, 2 casting | 16 | 1.00 ms | 2.9 ms |
+
+**Instancing is nearly free and distinct meshes are not.** Sixteen thousand
+cubes as one mesh cost 1.46 milliseconds; the same sixteen thousand as their
+own meshes cost 19.6, which is about four tenths of a microsecond per draw
+call and is the whole of the difference. The engine does nothing to batch
+them because nothing in it knows they are the same shape, which is what the
+prediction said and is now a number.
+
+**And the prediction about shadows was wrong.** Sixty four lamps cost the
+same as one, and turning casting on cost four hundredths of a millisecond,
+because `MAX_SHADOWING_POINT_LIGHTS` is two: at most twelve extra draws over
+a scene that is already one instanced call. A shadow pass is expensive when
+it is a pass over a large scene, and this scene is not large in the way that
+matters.
 
 ## Acceptance criteria
 
-Nothing here is written. These are the claims that would have to hold, and
-each one is arithmetic rather than a picture, which is the point.
-
-- A window of frame costs gives a median and a 95th percentile, and one slow
-  frame in twenty moves the 95th and leaves the median alone. — `load::tests::one_slow_frame_moves_the_tail_and_not_the_middle`
+- A window with a tenth of its frames slow moves the 95th percentile and
+  leaves the median alone, where a mean would report neither. — `cost::tests::one_slow_frame_moves_the_tail_and_not_the_middle`
+- And the one bad frame a percentile cannot see is in the worst, which is why
+  there are three numbers. — `cost::tests::one_bad_frame_is_in_the_worst_and_nowhere_else`
 - The window is fixed, so a run that has been going for an hour reports the
-  last few seconds rather than the hour. — `load::tests::the_window_forgets`
-- The counted draws and triangles are what the scene pushed. — `load::tests::the_counts_are_what_went_in`
-- A configuration written out as a line reads back as the same
-  configuration. — `load::tests::a_configuration_round_trips`
-- A device without timestamps reports that it has none rather than a
-  zero. — `load::tests::no_timestamps_is_not_nought`
+  last few seconds rather than the hour. — `cost::tests::the_window_forgets`
+- Every number reported is a frame that actually ran, rather than an
+  interpolation between two of them. — `cost::tests::a_percentile_names_a_frame_that_ran`
+- An empty window has no numbers rather than noughts. — `cost::tests::nothing_seen_is_not_nought`
+- A device without timestamps says so rather than reporting nought, and one
+  that misses a frame reports the frames it has. — `cost::tests::no_timestamps_is_not_nought`
+- The counts are the newest frame's rather than the window's. — `cost::tests::the_counts_are_the_frame_that_just_went`
+- A game that waits for the display always gets `Fifo`, and one that does not
+  gets the best the surface will give it, asked rather than assumed. — `renderer::tests::the_present_mode_is_what_the_surface_will_give`
+- A draw is counted with its instances, so one instanced call of a thousand
+  cubes is one draw and twelve thousand triangles. — `renderer::tests::a_draw_is_counted_with_its_instances`
+
+The round trip this spec first asked for is not written and is not wanted:
+nothing reads a row back. They are for a person and for `diff`.
 
 ### Verified by hand
 
-- With vsync off, the frame cost rises as the dial rises. With it on, it does
-  not move until the scene passes the display's own frame, which is the whole
-  reason this spec starts where it does.
+- The work rises as the dial rises, and the time between frames does not
+  until the work overruns a frame, which is the whole reason this spec starts
+  where it does. Both are on the screen at once so the difference is visible
+  rather than argued about.
 - A thousand cubes as one mesh instanced is one draw call, and as a thousand
-  meshes is a thousand, and the readout says so both times.
-- The same scene in Bevy looks like the same scene. Two pictures side by side,
-  because a benchmark comparing a scene against a different scene is the
-  classic way to publish a wrong number.
+  meshes is a thousand, and the readout says so both times. It says four and
+  three thousand and seventy three, because the depth prepass and the two
+  dimensional layer draw as well.
+- The same scene in Bevy is **not** the same scene, and that was checked by
+  looking rather than assumed. Its stress test lays its cubes on a sphere
+  around a camera that flies through them; this one stands them in a grid and
+  orbits it. The counts, the culling and the draw calls match and the picture
+  does not, which is the honest limit of the comparison above.
+- And the first attempt at it measured nothing at all. `many_cubes` applies
+  its culling and batching switches only on one of its three layouts, and
+  `--layout cube` ignores the instance count entirely: every configuration
+  came back at 8.33 milliseconds, which read as a flat line and was the same
+  fixed scene eight times. A benchmark that cannot fail is worth less than no
+  benchmark. The sphere layout honours all of it, and its readout says how
+  many meshes were visible, which is how this was caught.
 
 ## Out of scope
 
@@ -153,9 +299,18 @@ flatter the change.
 numbers that are stable across runs on a machine that is also doing other
 things, and whether these are is itself something to find out first.
 
-**The browser.** WebGPU's timing is coarser, the wasm build has costs of its
-own, and spec 0053's surface is configured through a canvas. Worth doing, and
-not in the same breath as the native measurement.
+**A browser as the place the numbers are taken.** It is on the site and the
+dials work there, per spec 0053, because a person who wants to know what this
+engine costs should be able to turn the dials themselves rather than clone a
+repo. That is not the same as measuring in a browser: the canvas is smaller,
+the sample count and the surface differ, and the page is one tab among
+however many. Chrome did give the GPU's own clock, which was not expected.
+The numbers in this spec are the native ones.
+
+The top step of the dial is left off in a browser. Sixty five thousand
+separate meshes is sixty five thousand buffers and a fair chance of a tab
+that does not come back, and the shape of the curve is plain by sixteen
+thousand.
 
 **A published claim.** The number is for deciding what to build next, not for
 telling anybody anything.

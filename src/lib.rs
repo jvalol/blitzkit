@@ -1,6 +1,7 @@
 pub mod camera;
 pub mod collision;
 pub mod contact;
+pub mod cost;
 pub mod geometry;
 pub mod keyboard;
 pub mod lighting;
@@ -91,6 +92,21 @@ pub trait Game {
     /// Not called while the window is minimized.
     #[allow(unused_variables)]
     fn resized(&mut self, window_size: (f32, f32)) {}
+    /// Whether the surface waits for the display, per spec 0056.
+    ///
+    /// Asked once, before the surface is configured, and every game but the
+    /// one that measures frame cost wants the answer that is already here.
+    fn presenting(&self) -> renderer::Presenting {
+        renderer::Presenting::WaitForTheDisplay
+    }
+    /// Whether the GPU is asked to time its own frames, per spec 0056.
+    ///
+    /// Off, because it costs two timestamps, a buffer copy and a mapped read
+    /// a frame, and a game that does not show the number should not pay for
+    /// it. Asked once, with `presenting`, before the device is created.
+    fn timing(&self) -> bool {
+        false
+    }
 }
 
 /// Empties everything a frame fills, before the frame fills it.
@@ -350,9 +366,15 @@ impl ApplicationHandler for App {
         let arriving = self.arriving.clone();
         let held = window.clone();
 
-        waiting(Renderer::new(window, instance_desc), move |renderer| {
-            arriving.replace(Some((held, renderer)));
-        });
+        let presenting = self.game.presenting();
+        let timing = self.game.timing();
+
+        waiting(
+            Renderer::new(window, instance_desc, presenting, timing),
+            move |renderer| {
+                arriving.replace(Some((held, renderer)));
+            },
+        );
     }
 
     fn window_event(
@@ -373,8 +395,16 @@ impl ApplicationHandler for App {
                 self.game.before_frame(&mut running.renderer);
 
                 let now = Instant::now();
-                let dt = clamp_delta_time((now - running.last_update).as_secs_f32());
+                let since = (now - running.last_update).as_secs_f32();
+                let dt = clamp_delta_time(since);
                 running.last_update = now;
+
+                // the uncapped one as well, for anything measuring rather
+                // than simulating. Spec 0056: `dt` stops at
+                // `MAX_DELTA_TIME`, so a frame of a fifth of a second
+                // arrives as a twentieth and a readout fed from it reports
+                // a flat line exactly where the interesting part starts.
+                running.renderer.frame_took(since);
 
                 between_frames(
                     &mut running.scene,
@@ -395,6 +425,12 @@ impl ApplicationHandler for App {
                 running
                     .renderer
                     .render(&running.scene, &running.geometry, &running.text_renderer);
+
+                // what the frame's own work came to, which is not the same as
+                // the time from one frame to the next. Spec 0056: on a
+                // machine that paces redraws to the display, the gap between
+                // frames is the display's and the work is the engine's.
+                running.renderer.worked(now.elapsed().as_secs_f32());
             }
             WindowEvent::KeyboardInput {
                 event:

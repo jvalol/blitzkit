@@ -13,6 +13,10 @@ pub mod outline;
 pub mod render_text;
 pub mod scene;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use web_time::Instant;
+
 use crate::camera::Camera;
 use crate::collision::Aabb;
 use crate::geometry::vertex::*;
@@ -63,6 +67,16 @@ pub struct Renderer {
     /// What everything is drawn through, which is `config.format` with sRGB
     /// on it. See where it is worked out, in `new`.
     drawn: wgpu::TextureFormat,
+    /// What the last frame's drawing came to. Spec 0056.
+    counted: Counted,
+    /// And what the GPU said it took, where the device will say. Spec 0056.
+    timing: Option<Timing>,
+    /// What the last frame's work came to on this side, in seconds, and how
+    /// much of that was spent waiting for the display to hand back a surface.
+    worked: f32,
+    waited: f32,
+    /// And how long it was from the previous frame to this one, uncapped.
+    took: f32,
     pipeline: wgpu::RenderPipeline,
     screen_buffer: wgpu::Buffer,
     screen_bind_group: wgpu::BindGroup,
@@ -226,7 +240,12 @@ impl Renderer {
         self.config.height as f32
     }
 
-    pub async fn new(window: Arc<Window>, instance_desc: wgpu::InstanceDescriptor) -> Self {
+    pub async fn new(
+        window: Arc<Window>,
+        instance_desc: wgpu::InstanceDescriptor,
+        presenting: Presenting,
+        timing: bool,
+    ) -> Self {
         let size = window.inner_size();
 
         let instance = wgpu::Instance::new(instance_desc);
@@ -246,6 +265,15 @@ impl Renderer {
         let beyond_the_spec = adapter
             .features()
             .contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
+        // Spec 0056: and the GPU's own clock, for the one game that measures.
+        // Asked for only when it is wanted, so no other game pays two
+        // timestamps and a buffer read a frame for a number it never shows.
+        let clocked = timing && adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
+
+        if timing && !clocked {
+            log::warn!("this device will not time a frame, so only the wall clock is measured");
+        }
+
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("Device"),
@@ -253,17 +281,28 @@ impl Renderer {
                     wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
                 } else {
                     wgpu::Features::empty()
+                } | if clocked {
+                    wgpu::Features::TIMESTAMP_QUERY
+                } else {
+                    wgpu::Features::empty()
                 },
                 ..Default::default()
             })
             .await
             .unwrap();
+        let timing = clocked.then(|| Timing::new(&device, &queue));
 
         let capabilities = surface.get_capabilities(&adapter);
         let (format, drawn) = formats(&capabilities.formats);
+        let present_mode = presenting.out_of(&capabilities.present_modes);
+
+        if presenting != Presenting::WaitForTheDisplay {
+            log::info!("presenting {:?}, asked for {:?}", present_mode, presenting);
+        }
+
         let config = wgpu::SurfaceConfiguration {
             format,
-            present_mode: wgpu::PresentMode::Fifo,
+            present_mode,
             view_formats: if drawn == format {
                 Vec::new()
             } else {
@@ -677,6 +716,11 @@ impl Renderer {
             queue,
             config,
             drawn,
+            counted: Counted::default(),
+            timing,
+            worked: 0.0,
+            waited: 0.0,
+            took: 0.0,
             pipeline,
             screen_buffer,
             screen_bind_group,
@@ -1124,11 +1168,23 @@ impl Renderer {
     }
 
     pub fn render(&mut self, scene: &Scene, geometry: &Geometry, text_renderer: &TextRenderer) {
+        // Tallied into locals rather than into the field, because every pass
+        // below holds a borrow of `self` for as long as it is open. Spec 0056.
+        let mut counted = Counted::default();
         // before anything is asked of the surface, so a frame that turns out
         // not to draw still answers a check that was owed
         self.answer_fights(scene);
 
+        // **Timed, because this is where a frame waits.** Asking for the
+        // next surface texture blocks until the display hands one back, so a
+        // frame measured around this call reports the display's pace and not
+        // the engine's: every scene this machine can draw inside a frame
+        // comes out at exactly one frame, however little it cost. Spec 0056.
+        let asking = Instant::now();
         let got = self.surface.get_current_texture();
+
+        self.waited = asking.elapsed().as_secs_f32();
+
         let asked = Asked::at(&got);
 
         if asked.reconfigure {
@@ -1242,7 +1298,7 @@ impl Renderer {
                         }),
                         stencil_ops: None,
                     }),
-                    timestamp_writes: None,
+                    timestamp_writes: timing_writes(&mut self.timing, false),
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
@@ -1272,6 +1328,7 @@ impl Renderer {
                     }
                     shadow_pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                     shadow_pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    counted.saw(mesh.index_count, *count);
                     shadow_pass.draw_indexed(0..mesh.index_count, 0, *first..(*first + *count));
                 }
             }
@@ -1292,7 +1349,7 @@ impl Renderer {
                         }),
                         stencil_ops: None,
                     }),
-                    timestamp_writes: None,
+                    timestamp_writes: timing_writes(&mut self.timing, false),
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
@@ -1323,6 +1380,7 @@ impl Renderer {
                     }
                     shadow_pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                     shadow_pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    counted.saw(mesh.index_count, *count);
                     shadow_pass.draw_indexed(0..mesh.index_count, 0, *first..(*first + *count));
                 }
             }
@@ -1343,7 +1401,7 @@ impl Renderer {
                     }),
                     stencil_ops: None,
                 }),
-                timestamp_writes: None,
+                timestamp_writes: timing_writes(&mut self.timing, false),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -1368,6 +1426,7 @@ impl Renderer {
                     }
                     prepass.set_vertex_buffer(0, mesh.vertices.slice(..));
                     prepass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    counted.saw(mesh.index_count, *count);
                     prepass.draw_indexed(0..mesh.index_count, 0, *first..(*first + *count));
                 }
 
@@ -1387,6 +1446,7 @@ impl Renderer {
                     prepass.set_bind_group(1, &self.textures[texture_id.0], &[]);
                     prepass.set_vertex_buffer(0, mesh.vertices.slice(..));
                     prepass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    counted.saw(mesh.index_count, *count);
                     prepass.draw_indexed(0..mesh.index_count, 0, *first..(*first + *count));
                 }
             }
@@ -1425,7 +1485,7 @@ impl Renderer {
                     depth_ops: None,
                     stencil_ops: None,
                 }),
-                timestamp_writes: None,
+                timestamp_writes: timing_writes(&mut self.timing, false),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -1462,6 +1522,7 @@ impl Renderer {
                         mesh_pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                         mesh_pass
                             .set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                        counted.saw(mesh.index_count, *count);
                         mesh_pass.draw_indexed(0..mesh.index_count, 0, *first..(*first + *count));
                     }
                 }
@@ -1474,6 +1535,7 @@ impl Renderer {
                 mesh_pass.set_pipeline(&self.outline_pipeline);
                 mesh_pass.set_bind_group(0, &self.camera_bind_group, &[]);
                 mesh_pass.set_vertex_buffer(0, self.outline_buffer.slice(..));
+                counted.draws += 1;
                 mesh_pass.draw(0..outlines, 0..1);
             }
         }
@@ -1491,7 +1553,7 @@ impl Renderer {
                     },
                 })],
                 depth_stencil_attachment: None,
-                timestamp_writes: None,
+                timestamp_writes: timing_writes(&mut self.timing, true),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -1503,14 +1565,160 @@ impl Renderer {
                 render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                 render_pass
                     .set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                counted.saw(num_indices, 1);
                 render_pass.draw_indexed(0..num_indices, 0, 0..1);
             }
 
             self.text_brush.draw(&mut render_pass);
+            counted.draws += 1;
+        }
+
+        // the pair of ticks out of the query set and on its way back, per
+        // spec 0056. Before the submit, because it is the same encoder.
+        if let Some(timing) = self.timing.as_mut() {
+            if timing.started {
+                encoder.resolve_query_set(&timing.set, 0..2, &timing.resolved, 0);
+                encoder.copy_buffer_to_buffer(&timing.resolved, 0, &timing.read, 0, Timing::BYTES);
+            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
         self.queue.present(frame);
+
+        self.counted = counted;
+        self.read_the_clock();
+    }
+
+    /// What the last frame's drawing came to. Spec 0056.
+    pub fn counted(&self) -> Counted {
+        self.counted
+    }
+
+    /// Told by the loop what the frame's own work came to, in seconds.
+    ///
+    /// **Not the time from one frame to the next, which is the display's.**
+    /// On this machine a window is redrawn when the display says so, and
+    /// asking the surface not to wait does not change that: a scene that
+    /// costs a millisecond and one that costs seven both arrive 8.33
+    /// milliseconds apart, and the gap only moves once the work overruns a
+    /// frame, in steps of a whole frame. Measured between frames, this
+    /// engine would look flat up to the point where it looks like a
+    /// staircase, and neither is a reading of the engine.
+    ///
+    /// So the loop times itself: everything from the top of the frame to the
+    /// end of the submit. That is what the engine costs to use, and it moves
+    /// smoothly with the scene.
+    pub fn worked(&mut self, seconds: f32) {
+        self.worked = (seconds - self.waited).max(0.0);
+    }
+
+    /// What that came to, with the wait for the display taken out of it.
+    pub fn work_seconds(&self) -> f32 {
+        self.worked
+    }
+
+    /// Told by the loop how long it has been since the previous frame, with
+    /// no cap on it. Spec 0056.
+    pub fn frame_took(&mut self, seconds: f32) {
+        self.took = seconds;
+    }
+
+    /// What that came to, which is the number a person actually feels and on
+    /// a machine that paces redraws is the display's rather than the
+    /// engine's until the work overruns a frame.
+    pub fn frame_seconds(&self) -> f32 {
+        self.took
+    }
+
+    /// And how much of the frame was that wait, which is the display's number
+    /// rather than the engine's and is most of a frame on anything this
+    /// machine can draw comfortably.
+    pub fn wait_seconds(&self) -> f32 {
+        self.waited
+    }
+
+    /// How many samples a pixel is drawn from, which dominates the fill and
+    /// therefore most of what the GPU's own clock reports.
+    pub fn samples(&self) -> u32 {
+        self.depth.samples
+    }
+
+    /// And how big the surface is, for the same reason.
+    pub fn surface_size(&self) -> (u32, u32) {
+        (self.config.width, self.config.height)
+    }
+
+    /// What the GPU said its own last frame took, in seconds, where the
+    /// device will say at all. Spec 0056.
+    ///
+    /// Some frames behind what is on the screen, because a timestamp is
+    /// written by the GPU and cannot be read until the work has run. What
+    /// comes back is a real frame from a moment ago, which for a number
+    /// averaged over a window of them is the same number.
+    pub fn gpu_seconds(&self) -> Option<f32> {
+        self.timing.as_ref().and_then(|timing| timing.last)
+    }
+
+    /// Whether this device agreed to time a frame at all, which is a
+    /// different thing from whether a reading has landed yet. Spec 0056.
+    pub fn times_frames(&self) -> bool {
+        self.timing.is_some()
+    }
+
+    /// Ask for the pair of ticks, or pick them up if they have landed.
+    ///
+    /// One read in flight at a time. A second would be a second pair of
+    /// timestamps written over the pair being read, and the answer would be
+    /// two halves of different frames.
+    fn read_the_clock(&mut self) {
+        let Some(timing) = self.timing.as_mut() else {
+            return;
+        };
+
+        if !timing.reading {
+            if !timing.started {
+                return;
+            }
+
+            let landed = timing.landed.clone();
+
+            timing
+                .read
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |got| {
+                    landed.store(got.is_ok(), Ordering::Release);
+                });
+            timing.reading = true;
+            timing.started = false;
+        }
+
+        // the callback only runs while the device is polled, and nothing else
+        // here polls it
+        let _ = self.device.poll(wgpu::PollType::Poll);
+
+        let Some(timing) = self.timing.as_mut() else {
+            return;
+        };
+
+        if timing.reading && timing.landed.swap(false, Ordering::AcqRel) {
+            if let Ok(got) = timing.read.slice(..).get_mapped_range() {
+                let ticks: &[u64] = bytemuck::cast_slice(&got);
+
+                // a pair that went backwards is a frame the device gave up
+                // on rather than a frame that took no time
+                timing.last = (ticks[1] > ticks[0])
+                    .then(|| (ticks[1] - ticks[0]) as f32 * timing.period * 1e-9);
+            }
+
+            timing.read.unmap();
+            timing.reading = false;
+        }
+    }
+
+    /// Whether the surface is waiting for the display, which is what a
+    /// readout has to say before any number it prints means anything.
+    pub fn waiting_for_the_display(&self) -> bool {
+        self.config.present_mode == wgpu::PresentMode::Fifo
     }
 
     /// Packs every instance into one buffer and says where each mesh's run
@@ -2609,9 +2817,248 @@ mod text_tests {
     }
 }
 
+/// Whether the surface waits for the display. Spec 0056.
+///
+/// **A frame rate with this on is a reading of the display.** Everything in
+/// this engine has always waited, which is right for a game: it is the
+/// cheapest way to have no tearing and no frames nobody sees. It also means
+/// that a scene costing four milliseconds and one costing fifteen both report
+/// sixty a second, so there is no way to tell from the picture whether
+/// something got slower until it gets slow enough to miss a frame, which is a
+/// cliff rather than a measurement.
+///
+/// So a game can ask for the other one. The only one that does is the one
+/// whose whole job is to say what a frame costs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Presenting {
+    /// Wait for the display, which is what every game wants.
+    #[default]
+    WaitForTheDisplay,
+    /// Draw as fast as the device will, tearing and all.
+    AsFastAsItWill,
+}
+
+/// What a pass writes into the query set, if anything is timing at all.
+///
+/// A free function rather than a method, because every call site has a render
+/// pass descriptor half built out of `self` and a method would be a second
+/// borrow of it.
+fn timing_writes(
+    timing: &mut Option<Timing>,
+    last: bool,
+) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
+    timing.as_mut().and_then(|timing| timing.writes(last))
+}
+
+impl Counted {
+    /// One instanced draw of a mesh with this many indices.
+    fn saw(&mut self, indices: u32, instances: u32) {
+        self.draws += 1;
+        self.triangles += indices / 3 * instances;
+    }
+}
+
+/// The GPU's own time for a frame, where the device will give it. Spec 0056.
+///
+/// **A frame's cost on the CPU is mostly waiting.** The loop measures the
+/// wall clock between one frame and the next, which on a scene the GPU is
+/// struggling with is the GPU's time arriving late rather than the work the
+/// CPU did. So the device is asked directly, and what comes back is a pair of
+/// ticks written either side of the frame's passes.
+///
+/// Two things make this fiddly rather than one line. The timestamps are
+/// written by the GPU, so they are only readable once the frame has actually
+/// run, which is some frames after it was submitted: this keeps one read in
+/// flight and picks it up whenever it lands, so what the readout shows is a
+/// real frame a moment ago rather than nothing. And on this machine the
+/// device gives `TIMESTAMP_QUERY` and neither of the two that allow a
+/// timestamp anywhere other than the edge of a render pass, which is why the
+/// beginning is written by whichever pass happens to run first and the end by
+/// the one that always runs last.
+struct Timing {
+    set: wgpu::QuerySet,
+    resolved: wgpu::Buffer,
+    read: wgpu::Buffer,
+    /// Nanoseconds a tick, from the queue.
+    period: f32,
+    /// Whether a read is in flight, and whether it has landed.
+    reading: bool,
+    landed: Arc<AtomicBool>,
+    /// Whether this frame has written its first timestamp yet.
+    started: bool,
+    /// The last frame the GPU actually reported.
+    last: Option<f32>,
+}
+
+impl Timing {
+    /// How many ticks are kept, which is one frame's pair.
+    const BYTES: u64 = 16;
+
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+        Self {
+            set: device.create_query_set(&wgpu::QuerySetDescriptor {
+                label: Some("Frame Timestamps"),
+                ty: wgpu::QueryType::Timestamp,
+                count: 2,
+            }),
+            resolved: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Timestamps Resolved"),
+                size: Self::BYTES,
+                usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }),
+            read: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Timestamps Read"),
+                size: Self::BYTES,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            period: queue.get_timestamp_period(),
+            reading: false,
+            landed: Arc::new(AtomicBool::new(false)),
+            started: false,
+            last: None,
+        }
+    }
+
+    /// What a pass writes, which is the beginning if nothing has yet and the
+    /// end if this is the pass that always runs last.
+    fn writes(&mut self, last: bool) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
+        // nothing is written while a read is in flight, or the pair being
+        // read would be overwritten by the frame that is reading it
+        if self.reading {
+            return None;
+        }
+
+        let beginning = (!self.started).then(|| {
+            self.started = true;
+            0
+        });
+
+        if beginning.is_none() && !last {
+            return None;
+        }
+
+        Some(wgpu::RenderPassTimestampWrites {
+            query_set: &self.set,
+            beginning_of_pass_write_index: beginning,
+            end_of_pass_write_index: last.then_some(1),
+        })
+    }
+}
+
+impl Presenting {
+    /// Which of the surface's own modes that is.
+    ///
+    /// Asked of the surface rather than assumed, like the sample count in
+    /// spec 0052 and the sRGB view in 0053. `Immediate` is the one that never
+    /// waits and not every device has it; `Mailbox` still waits for the
+    /// display to swap but never blocks the game, which is the next best
+    /// thing; `Fifo` is the one every device has.
+    pub fn out_of(self, offered: &[wgpu::PresentMode]) -> wgpu::PresentMode {
+        let wanted: &[wgpu::PresentMode] = match self {
+            Presenting::WaitForTheDisplay => &[wgpu::PresentMode::Fifo],
+            Presenting::AsFastAsItWill => &[
+                wgpu::PresentMode::Immediate,
+                wgpu::PresentMode::Mailbox,
+                wgpu::PresentMode::Fifo,
+            ],
+        };
+
+        wanted
+            .iter()
+            .copied()
+            .find(|mode| offered.contains(mode))
+            .unwrap_or(wgpu::PresentMode::Fifo)
+    }
+}
+
+/// What one frame of drawing came to, which travels with its time in
+/// [`crate::cost::Frame`]. Spec 0056.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Counted {
+    /// Every draw call the frame made, in every pass: the shadow maps and the
+    /// depth prepass as well as the picture, because they are what the frame
+    /// cost and leaving them out would make a scene with shadows look free.
+    pub draws: u32,
+    /// And the triangles those calls asked for, instances counted.
+    pub triangles: u32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Spec 0056: a game that waits for the display always gets Fifo, and one
+    /// that does not gets the best the surface will give it.
+    ///
+    /// Asked of the surface rather than assumed, like the sample count in
+    /// spec 0052. `Immediate` is the one that never waits and not every
+    /// device has it.
+    #[test]
+    fn the_present_mode_is_what_the_surface_will_give() {
+        use wgpu::PresentMode::*;
+
+        // every game but the one that measures, on any surface at all
+        for offered in [
+            vec![Fifo],
+            vec![Fifo, Immediate, Mailbox],
+            vec![Mailbox, Fifo],
+            vec![],
+        ] {
+            assert_eq!(
+                Presenting::WaitForTheDisplay.out_of(&offered),
+                Fifo,
+                "offered {:?}",
+                offered
+            );
+        }
+
+        // and the one that does not wait takes the best on offer
+        assert_eq!(
+            Presenting::AsFastAsItWill.out_of(&[Fifo, Mailbox, Immediate]),
+            Immediate,
+            "Immediate is the one that never waits"
+        );
+        assert_eq!(
+            Presenting::AsFastAsItWill.out_of(&[Fifo, Mailbox]),
+            Mailbox,
+            "and Mailbox is the next best"
+        );
+        assert_eq!(
+            Presenting::AsFastAsItWill.out_of(&[Fifo]),
+            Fifo,
+            "a surface with neither still has to draw"
+        );
+        assert_eq!(
+            Presenting::AsFastAsItWill.out_of(&[]),
+            Fifo,
+            "and so does one that offers nothing"
+        );
+    }
+
+    /// Spec 0056: what a frame drew is counted as it is drawn, instances and
+    /// all, so a number that moves can be attributed.
+    #[test]
+    fn a_draw_is_counted_with_its_instances() {
+        let mut counted = Counted::default();
+
+        // one cube, which is twelve triangles
+        counted.saw(36, 1);
+        assert_eq!(counted.draws, 1);
+        assert_eq!(counted.triangles, 12);
+
+        // and a thousand of them in one instanced call, which is one draw
+        // and a thousand times the triangles
+        counted.saw(36, 1000);
+        assert_eq!(counted.draws, 2, "instancing is one draw");
+        assert_eq!(counted.triangles, 12 + 12_000);
+
+        // a mesh with no indices is not a draw at all
+        let mut empty = Counted::default();
+        empty.saw(0, 10);
+        assert_eq!(empty.triangles, 0);
+    }
 
     /// Spec 0053: what is drawn through is sRGB whatever the surface offers.
     ///
