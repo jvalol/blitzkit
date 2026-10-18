@@ -11,7 +11,6 @@ pub mod coplanar;
 mod culling;
 pub mod depth;
 mod hidden;
-mod kept;
 pub mod outline;
 pub mod render_text;
 pub mod scene;
@@ -123,8 +122,6 @@ pub struct Renderer {
     /// Whether the march happens at all. A cost, and a game with nothing
     /// resting on anything does not need it.
     contact_shadows: bool,
-    /// Where every kept run lies in the instance buffer. Spec 0059.
-    kept: kept::Kept,
     /// What a wall hides, per spec 0061: what is known, what is being
     /// asked, and the pipeline that asks it.
     hidden: hidden::Hidden,
@@ -806,7 +803,6 @@ impl Renderer {
             scene_depth_layout,
             scene_depth_bind_group,
             contact_shadows: true,
-            kept: kept::Kept::default(),
             hidden: hidden::Hidden::default(),
             asking: None,
             hidden_pipeline,
@@ -1981,7 +1977,6 @@ impl Renderer {
                 texture,
                 bounds: self.meshes[mesh.0].bounds,
                 instances,
-                lies_at: None,
                 quarters: None,
                 hidden: false,
                 round: None,
@@ -2014,13 +2009,6 @@ impl Renderer {
             })
             .collect();
 
-        let laid: Vec<(u64, u64, u32)> = holding
-            .iter()
-            .map(|keeping| (keeping.id, keeping.version, keeping.instances.len() as u32))
-            .collect();
-        let (writing, swept) = self.kept.lay_out(&laid);
-        let after = self.kept.len();
-
         // what to ask the depth buffer about this frame, and the boxes to
         // ask with. Everything kept is asked, including what is already
         // known to be hidden, or a run that goes behind a wall once never
@@ -2028,15 +2016,12 @@ impl Renderer {
         self.asked_count = self.ask_what_is_hidden(&holding);
 
         let frame = self.frame;
+        let eye = self.camera.position;
 
         let kept: Vec<culling::Pushed> = holding
             .iter()
             .map(|keeping| {
-                let mut kept = culling::of_a_keeping(
-                    keeping,
-                    self.meshes[keeping.mesh.0].bounds,
-                    self.kept.lies_at(keeping.id),
-                );
+                let mut kept = culling::of_a_keeping(keeping, self.meshes[keeping.mesh.0].bounds);
 
                 kept.hidden = self.occluding && self.hidden.is_hidden(keeping.id, frame);
 
@@ -2044,22 +2029,21 @@ impl Renderer {
             })
             .collect();
 
-        let (instances, drawn) = culling::pick(&views, &pushed, &kept, after);
+        let (instances, drawn) = culling::pick(&views, &pushed, &kept, eye);
 
-        // the buffer holds the kept region and then this frame's own. It is
-        // made again when either outgrows it, and everything kept goes back
-        // into it when that happens: a run's range is a promise to the draw
-        // calls that name it.
-        let wanted = (after as u64 + instances.len() as u64) * Instance::SIZE;
-        let made_again = wanted > self.instance_buffer.size();
+        // **Written again every frame, kept or pushed.** What reaches the
+        // GPU has the eye taken out of it, per spec 0051, and the eye moves.
+        // Spec 0059 moved that subtraction into the vertex stage so a kept
+        // run could be written once and left alone, and the sun's shadows
+        // went with it; the subtraction is back on the CPU and so is this.
+        let wanted = instances.len() as u64 * Instance::SIZE;
 
-        if made_again {
+        if wanted > self.instance_buffer.size() {
             // asked for twice what is there, so a buffer that grows a little
             // every frame is not made again every frame, and never for more
-            // than the device will give: at a hundred and twenty bytes an
-            // instance the usual limit of 256 MB is about two million of
-            // them, and doubling at one and a half million asked for more
-            // than that and took the frame down. Spec 0059.
+            // than the device will give: doubling at one and a half million
+            // instances asked for more than the usual 256 MB and took the
+            // frame down. Spec 0060.
             let most = self.device.limits().max_buffer_size;
 
             if wanted > most {
@@ -2079,34 +2063,10 @@ impl Renderer {
             );
         }
 
-        let write = |first: u32, instances: &[Instance]| {
-            if instances.is_empty() {
-                return;
-            }
-
-            self.queue.write_buffer(
-                &self.instance_buffer,
-                first as u64 * Instance::SIZE,
-                bytemuck::cast_slice(instances),
-            );
-        };
-
-        // everything kept, if the buffer is new or the region was laid out
-        // again, and otherwise only what changed
-        let again = made_again || swept;
-        let writing: Vec<kept::Writing> = if again {
-            self.kept.all_of_it()
-        } else {
-            writing
-        };
-
-        for one in writing {
-            if let Some(keeping) = holding.iter().find(|keeping| keeping.id == one.id) {
-                write(one.first, &keeping.instances);
-            }
+        if !instances.is_empty() {
+            self.queue
+                .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
         }
-
-        write(after, &instances);
 
         drawn
     }
@@ -2185,12 +2145,15 @@ impl Renderer {
             .iter()
             .take(asked.len())
             .map(|keeping| {
+                // the eye comes off here as it does for everything else that
+                // reaches the buffer, per spec 0051
                 Instance::new(
                     &crate::mesh::Transform::at(keeping.round.at)
                         .with_scale(glam::Vec3::splat(keeping.round.reach * 2.0)),
                     glam::Vec4::ONE,
                     Instance::DEFAULT_SHININESS,
                 )
+                .from_the_eye(eye)
             })
             .collect();
 
@@ -2479,12 +2442,6 @@ struct SceneUniform {
     /// nothing can be compared in world units until that is undone. See spec
     /// 0029.
     contact: [f32; 4],
-    /// Where the eye is, in the world's own coordinates, so the vertex
-    /// stage can take it off a model matrix. Spec 0059: an instance reaches
-    /// the GPU where it stands, and the subtraction spec 0051 used to do on
-    /// the CPU happens here instead, which is what lets a kept run be
-    /// written once and left alone.
-    eye: [f32; 4],
 }
 
 unsafe impl bytemuck::Pod for SceneUniform {}
@@ -2550,7 +2507,6 @@ impl SceneUniform {
                 camera.far,
                 crate::contact::CONTACT_REACH,
             ],
-            eye: eye.extend(0.0).to_array(),
         }
     }
 }
@@ -3681,17 +3637,7 @@ mod uniform_tests {
         // a uniform block wants each field on a 16 byte boundary
         assert_eq!(
             std::mem::size_of::<SceneUniform>(),
-            64 + 16 * 4
-                + 64
-                + 16
-                + 32 * MAX_POINT_LIGHTS
-                + 16
-                + 128 * MAX_SPOT_LIGHTS
-                + 16
-                + 16
-                // and the eye, per spec 0059, which the vertex stage takes
-                // off a model matrix now that one arrives in world space
-                + 16
+            64 + 16 * 4 + 64 + 16 + 32 * MAX_POINT_LIGHTS + 16 + 128 * MAX_SPOT_LIGHTS + 16 + 16
         );
         assert_eq!(
             std::mem::offset_of!(SceneUniform, light_view_projection),

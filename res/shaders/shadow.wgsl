@@ -26,23 +26,17 @@ struct Uniforms {
     point_lights: array<PointLight, 8>,
     spot_light_count: vec4<u32>,
     spot_lights: array<SpotLight, MAX_SPOT_LIGHTS>,
-    // these two are read by mesh.wgsl and not here, and they are declared
-    // anyway because the field after them is read here and a uniform struct
-    // is read by where its fields lie
-    point_shadow: vec4<u32>,
-    contact: vec4<f32>,
-    // where the eye is, in the world's own coordinates. Spec 0059: a model
-    // matrix arrives in world space and the eye comes off it here.
-    eye: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
-// A model matrix with the eye taken off its translation, per spec 0059.
-//
-// Built from four columns of three, because the row that would make them
-// four is nought, nought, nought, one for every transform this engine
+// A model matrix, built from four columns of three: the row that would make
+// them four is nought, nought, nought, one for every transform this engine
 // makes and is not carried. Spec 0060.
+//
+// **The eye is already off it.** It is taken off on the CPU, per spec 0051,
+// where it has always been: spec 0059 moved it here and the sun's shadows
+// went with it, so 0059 was reverted and this function kept its name.
 fn taken_off(
     model_0: vec3<f32>,
     model_1: vec3<f32>,
@@ -53,7 +47,7 @@ fn taken_off(
         vec4<f32>(model_0, 0.0),
         vec4<f32>(model_1, 0.0),
         vec4<f32>(model_2, 0.0),
-        vec4<f32>(model_3 - uniforms.eye.xyz, 1.0),
+        vec4<f32>(model_3, 1.0),
     );
 }
 

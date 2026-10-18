@@ -65,7 +65,7 @@ not a priority, and it never changes once a spec exists.
 | [0056](0056-what-a-frame-costs.md) | What a frame costs and how to measure it, since nothing here has ever been timed: vsync, the delta cap, and a scene with dials on it (draft) |
 | [0057](0057-not-drawing-what-you-cannot-see.md) | Leaving out of each pass what that pass cannot see: a quarter of the draws in the arcade, a loss in a benchmark that fills the frame, and a dial to tell them apart |
 | [0058](0058-a-scene-you-can-keep.md) | Handing the engine a part of the world once instead of every frame: a million cubes goes from 53 milliseconds to 9, and the patches that make it work are the game's to draw |
-| [0059](0059-kept-where-it-lies.md) | Writing a kept run into the buffer once and drawing it where it lies, with the eye coming off on the GPU: a million cubes holds a frame |
+| [0059](0059-kept-where-it-lies.md) | Writing a kept run into the buffer once with the eye coming off on the GPU, which took the sun's shadows with it and was reverted the same day (what survived is in the spec) |
 | [0060](0060-room-for-four-million.md) | Asking for the buffer the adapter will give and taking an instance from 120 bytes to 68: four million cubes draw in two thirds of what Bevy takes, eight million draw at all, and the second buffer was argued out of it |
 | [0061](0061-what-a-wall-hides.md) | Leaving out what is in front of you and behind a wall, by asking the GPU about a box during the prepass: knowing nothing means drawing everything, and a query nobody wrote answers nought |
 

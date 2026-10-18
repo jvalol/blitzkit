@@ -1,8 +1,53 @@
 # 0059 Kept where it lies
 
-**Status:** implemented
+**Status:** reverted the same day, because it took the sun's shadows with
+it. What survived is below.
 **Built:** 2026-10-18
+**Reverted:** 2026-10-18
 **Date:** 2026-10-18
+
+## Why it was reverted
+
+Jake, looking at the clips a few hours after this went in: rolling looks
+wrong. It was. The ball had lost its highlight and sat in the floor like a
+brown dome, the boxes cast no shadows, and the room was lit by the ambient
+alone.
+
+Bisected: correct at the culling commit, broken at this one, and correct
+again with this one's two ideas taken out in a scratch worktree. Two
+suspects were ruled out by measurement rather than by reading: the culling
+of spec 0057, by switching it off, and the contact march of spec 0029, by
+switching it off through `set_contact_shadows`. What is left is the sun's
+shadow map, and the cause was not found before this was reverted.
+
+**The lesson is in the shape of the fault rather than its cause.** Moving
+the eye's subtraction into the vertex stage changes what every pass in the
+engine is handed, and the engine's tests check arithmetic that can be
+checked without a GPU. Not one of five hundred of them noticed that a
+building had stopped casting shadows. The thing that noticed was a person
+looking at a picture.
+
+**What survived.** The scene a game can keep, per spec 0058, and the part of
+this spec that asks a kept run which of the four kinds lies where, so a
+frame of a world standing still touches no instance to find out. That was
+half of this spec's saving and it needed no shader change at all.
+
+Measured again with this reverted, the shell kept in patches:
+
+| cubes | pushed | kept |
+| --- | --- | --- |
+| 1024000 | 52.7 ms | 3.2 ms |
+| 2048000 | 105.5 ms | 6.4 ms |
+| 4096000 | not asked | 11.4 ms |
+
+A million and two million both hold a frame. That is better than this spec
+ever measured, because spec 0060 made an instance 68 bytes afterwards, and
+it is what the engine does today without drawing anything where it lies.
+
+**If it is tried again**, the thing to build first is the test that would
+have caught this: a frame drawn twice, once with the subtraction on the CPU
+and once in the shader, with the two pictures compared. That is a GPU test
+and this engine has none, which is the real gap this found.
 
 ## Goal
 
