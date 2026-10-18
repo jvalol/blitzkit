@@ -39,19 +39,24 @@ struct Uniforms {
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
 // A model matrix with the eye taken off its translation, per spec 0059.
+//
+// Built from four columns of three, because the row that would make them
+// four is nought, nought, nought, one for every transform this engine
+// makes and is not carried. Spec 0060.
 fn taken_off(
-    model_0: vec4<f32>,
-    model_1: vec4<f32>,
-    model_2: vec4<f32>,
-    model_3: vec4<f32>,
+    model_0: vec3<f32>,
+    model_1: vec3<f32>,
+    model_2: vec3<f32>,
+    model_3: vec3<f32>,
 ) -> mat4x4<f32> {
     return mat4x4<f32>(
-        model_0,
-        model_1,
-        model_2,
-        vec4<f32>(model_3.xyz - uniforms.eye.xyz, model_3.w),
+        vec4<f32>(model_0, 0.0),
+        vec4<f32>(model_1, 0.0),
+        vec4<f32>(model_2, 0.0),
+        vec4<f32>(model_3 - uniforms.eye.xyz, 1.0),
     );
 }
+
 
 // Which light this pass is filling the map for. Anything below MAX_SPOT_LIGHTS
 // is that spot; anything at or above it is the sun. One pipeline fills every
@@ -68,10 +73,10 @@ struct Which {
 @vertex
 fn vs_main(
     @location(0) position: vec3<f32>,
-    @location(3) model_0: vec4<f32>,
-    @location(4) model_1: vec4<f32>,
-    @location(5) model_2: vec4<f32>,
-    @location(6) model_3: vec4<f32>,
+    @location(3) model_0: vec3<f32>,
+    @location(4) model_1: vec3<f32>,
+    @location(5) model_2: vec3<f32>,
+    @location(6) model_3: vec3<f32>,
 ) -> @builtin(position) vec4<f32> {
     let model = taken_off(model_0, model_1, model_2, model_3);
     let world = model * vec4<f32>(position, 1.0);
@@ -113,10 +118,10 @@ struct PointOut {
 @vertex
 fn vs_point(
     @location(0) position: vec3<f32>,
-    @location(3) model_0: vec4<f32>,
-    @location(4) model_1: vec4<f32>,
-    @location(5) model_2: vec4<f32>,
-    @location(6) model_3: vec4<f32>,
+    @location(3) model_0: vec3<f32>,
+    @location(4) model_1: vec3<f32>,
+    @location(5) model_2: vec3<f32>,
+    @location(6) model_3: vec3<f32>,
 ) -> PointOut {
     let model = taken_off(model_0, model_1, model_2, model_3);
     let world = model * vec4<f32>(position, 1.0);

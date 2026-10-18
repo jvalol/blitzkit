@@ -60,7 +60,9 @@ several glTF wants.
 - The normal matrix is the inverse transpose of the model matrix. — `mesh::tests::normal_matrix_survives_non_uniform_scale`
 - Pushing the same mesh twice makes one draw call with two instances. — `renderer::scene::tests::repeated_meshes_are_instanced`
 - An instance carries its transform and color. — `renderer::scene::tests::an_instance_carries_its_transform_and_color`
-- The instance layout's offsets match the struct's real ones. — `renderer::scene::tests::the_instance_layout_matches_the_struct`
+- The instance layout's offsets match the struct's real ones, and an
+  instance is small: spec 0060 took it from 120 bytes to
+  68. — `renderer::scene::tests::an_instance_is_small`
 - The vertex layout's offsets match too. — `mesh::tests::vertex_has_position_normal_and_uv`
 - A mesh loaded without normals gets them computed. — `mesh::tests::computes_missing_normals`
 - The built-in plane faces up. — `mesh::tests::the_plane_faces_up`

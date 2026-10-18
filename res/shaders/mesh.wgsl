@@ -28,17 +28,40 @@ struct SpotLight {
 
 // The camera, the sun, the lamps and the spots, written once per frame.
 // A model matrix with the eye taken off its translation, per spec 0059.
+//
+// Built from four columns of three, because the row that would make them
+// four is nought, nought, nought, one for every transform this engine
+// makes and is not carried. Spec 0060.
 fn taken_off(
-    model_0: vec4<f32>,
-    model_1: vec4<f32>,
-    model_2: vec4<f32>,
-    model_3: vec4<f32>,
+    model_0: vec3<f32>,
+    model_1: vec3<f32>,
+    model_2: vec3<f32>,
+    model_3: vec3<f32>,
 ) -> mat4x4<f32> {
     return mat4x4<f32>(
-        model_0,
-        model_1,
-        model_2,
-        vec4<f32>(model_3.xyz - uniforms.eye.xyz, model_3.w),
+        vec4<f32>(model_0, 0.0),
+        vec4<f32>(model_1, 0.0),
+        vec4<f32>(model_2, 0.0),
+        vec4<f32>(model_3 - uniforms.eye.xyz, 1.0),
+    );
+}
+
+// The matrix a normal is turned by: the adjugate of the model's upper three
+// by three, transposed.
+//
+// **The inverse transpose without the division**, which is the same thing
+// for a normal because a normal is normalised afterwards and a scale on all
+// of it changes nothing. The instance carried this as nine more floats
+// until spec 0060, which is thirty six bytes a thing to save an adjugate a
+// vertex: on this hardware a frame of a million things runs out of
+// bandwidth long before it runs out of arithmetic.
+//
+// `a_rebuilt_normal_is_the_normal` in scene.rs is the other copy of this.
+fn normals(model_0: vec3<f32>, model_1: vec3<f32>, model_2: vec3<f32>) -> mat3x3<f32> {
+    return mat3x3<f32>(
+        cross(model_1, model_2),
+        cross(model_2, model_0),
+        cross(model_0, model_1),
     );
 }
 
@@ -286,15 +309,12 @@ fn vs_main(
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) uv: vec2<f32>,
-    @location(3) model_0: vec4<f32>,
-    @location(4) model_1: vec4<f32>,
-    @location(5) model_2: vec4<f32>,
-    @location(6) model_3: vec4<f32>,
-    @location(7) normal_0: vec3<f32>,
-    @location(8) normal_1: vec3<f32>,
-    @location(9) normal_2: vec3<f32>,
-    @location(10) color: vec4<f32>,
-    @location(11) shininess: f32,
+    @location(3) model_0: vec3<f32>,
+    @location(4) model_1: vec3<f32>,
+    @location(5) model_2: vec3<f32>,
+    @location(6) model_3: vec3<f32>,
+    @location(7) color: vec4<f32>,
+    @location(8) shininess: f32,
 ) -> VertexOutput {
     // **The eye comes off here and not on the CPU.** An instance is written
     // where it stands, so a kept run can be written once and drawn for as
@@ -302,7 +322,7 @@ fn vs_main(
     // has always done: it is what keeps the product below small, which is
     // where the precision would otherwise go at thirty kilometres.
     let model = taken_off(model_0, model_1, model_2, model_3);
-    let normal_matrix = mat3x3<f32>(normal_0, normal_1, normal_2);
+    let normal_matrix = normals(model_0, model_1, model_2);
     let world = model * vec4<f32>(position, 1.0);
 
     var out: VertexOutput;

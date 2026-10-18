@@ -286,22 +286,56 @@ impl Renderer {
             log::warn!("this device will not time a frame, so only the wall clock is measured");
         }
 
-        let (device, queue) = adapter
+        let wanted = if beyond_the_spec {
+            wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+        } else {
+            wgpu::Features::empty()
+        } | if clocked {
+            wgpu::Features::TIMESTAMP_QUERY
+        } else {
+            wgpu::Features::empty()
+        };
+
+        // **The room the adapter has rather than the room the default asks
+        // for.** `Limits::default()` holds a buffer to 256 MB, which at a
+        // hundred and twenty bytes an instance is two million of them, and
+        // this engine never asked for anything else: on the machine this was
+        // written on the adapter gives four gigabytes, which is thirty five
+        // million. Asked for and not assumed, with the default as the way
+        // back, because a browser may well say no and that is the one place
+        // this cannot be worked around. Spec 0060.
+        let (device, queue) = match adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("Device"),
-                required_features: if beyond_the_spec {
-                    wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
-                } else {
-                    wgpu::Features::empty()
-                } | if clocked {
-                    wgpu::Features::TIMESTAMP_QUERY
-                } else {
-                    wgpu::Features::empty()
-                },
+                required_features: wanted,
+                required_limits: adapter.limits(),
                 ..Default::default()
             })
             .await
-            .unwrap();
+        {
+            Ok(both) => both,
+            Err(why) => {
+                log::warn!(
+                    "this device would not give the adapter's own limits ({}), so the frame has \
+                     the default room in it",
+                    why
+                );
+
+                adapter
+                    .request_device(&wgpu::DeviceDescriptor {
+                        label: Some("Device"),
+                        required_features: wanted,
+                        ..Default::default()
+                    })
+                    .await
+                    .unwrap()
+            }
+        };
+
+        log::info!(
+            "a buffer may hold {} instances",
+            device.limits().max_buffer_size / Instance::SIZE
+        );
         let timing = clocked.then(|| Timing::new(&device, &queue));
 
         let capabilities = surface.get_capabilities(&adapter);
@@ -948,7 +982,7 @@ impl Renderer {
             }
 
             for instance in instances {
-                let model = glam::Mat4::from_cols_array_2d(&instance.model);
+                let model = instance.matrix();
 
                 match coplanar::world_box(model, gpu.bounds) {
                     Some(world) => boxes.push(world),

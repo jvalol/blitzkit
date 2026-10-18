@@ -32,10 +32,10 @@ impl TextureId {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct Instance {
-    pub model: [[f32; 4]; 4],
-    /// Three columns of the normal matrix. Vertex attributes pack tightly, so
-    /// these are three floats each and not padded out to four.
-    pub normal: [[f32; 3]; 3],
+    /// An affine transform's four columns, three floats each: the row that
+    /// would make them four is nought, nought, nought, one for every
+    /// transform this engine makes, so it is not carried. Spec 0060.
+    pub model: [[f32; 3]; 4],
     pub color: [f32; 4],
     /// How tight the specular highlight is, per spec 0012.
     pub shininess: f32,
@@ -50,15 +50,12 @@ impl Instance {
         array_stride: Self::SIZE,
         step_mode: wgpu::VertexStepMode::Instance,
         attributes: &wgpu::vertex_attr_array![
-            3 => Float32x4,
-            4 => Float32x4,
-            5 => Float32x4,
-            6 => Float32x4,
-            7 => Float32x3,
-            8 => Float32x3,
-            9 => Float32x3,
-            10 => Float32x4,
-            11 => Float32
+            3 => Float32x3,
+            4 => Float32x3,
+            5 => Float32x3,
+            6 => Float32x3,
+            7 => Float32x4,
+            8 => Float32
         ],
     };
 
@@ -105,19 +102,40 @@ impl Instance {
         moved
     }
 
+    /// **The normal matrix is not here.** It is the inverse transpose of the
+    /// upper three by three of the model matrix, which is, and the vertex
+    /// stage builds it: thirty six bytes an instance against an adjugate a
+    /// vertex, which on this hardware is bandwidth against arithmetic and
+    /// bandwidth is what a frame of a million instances runs out of first.
+    /// Spec 0060, and `a_rebuilt_normal_is_the_normal` for the two agreeing.
     pub fn new(transform: &Transform, color: Vec4, shininess: f32) -> Self {
-        let normal = transform.normal_matrix();
+        let model = transform.matrix();
 
         Self {
-            model: transform.matrix().to_cols_array_2d(),
-            normal: [
-                normal.x_axis.to_array(),
-                normal.y_axis.to_array(),
-                normal.z_axis.to_array(),
+            model: [
+                model.x_axis.truncate().to_array(),
+                model.y_axis.truncate().to_array(),
+                model.z_axis.truncate().to_array(),
+                model.w_axis.truncate().to_array(),
             ],
             color: color.to_array(),
             shininess,
         }
+    }
+
+    /// The upper three by three of this instance's transform.
+    pub fn basis(&self) -> glam::Mat3 {
+        glam::Mat3::from_cols_array_2d(&[self.model[0], self.model[1], self.model[2]])
+    }
+
+    /// The whole of it, as the shader builds it.
+    pub fn matrix(&self) -> glam::Mat4 {
+        glam::Mat4::from_cols(
+            Vec3::from(self.model[0]).extend(0.0),
+            Vec3::from(self.model[1]).extend(0.0),
+            Vec3::from(self.model[2]).extend(0.0),
+            Vec3::from(self.model[3]).extend(1.0),
+        )
     }
 }
 
@@ -911,19 +929,75 @@ mod tests {
         assert_eq!(instance.shininess, 8.0);
     }
 
+    /// Spec 0060: an instance is small, and its layout is what the pipeline
+    /// is built from.
+    ///
+    /// It was 120 bytes: a whole 4x4 matrix with a row of nought, nought,
+    /// nought, one in it, and a normal matrix the model matrix already
+    /// contained. Both are gone, which is a frame of a million instances
+    /// carrying sixty eight megabytes rather than a hundred and twenty.
     #[test]
-    fn the_instance_layout_matches_the_struct() {
-        // a 4x4 matrix, three tightly packed columns, a color, a shininess
-        assert_eq!(std::mem::size_of::<Instance>(), 64 + 36 + 16 + 4);
-        assert_eq!(std::mem::offset_of!(Instance, normal), 64);
-        assert_eq!(std::mem::offset_of!(Instance, color), 100);
+    fn an_instance_is_small() {
+        // four tightly packed columns, a color, a shininess
+        assert_eq!(std::mem::size_of::<Instance>(), 48 + 16 + 4);
+        assert!(std::mem::size_of::<Instance>() <= 68);
+        assert_eq!(std::mem::offset_of!(Instance, color), 48);
+        assert_eq!(std::mem::offset_of!(Instance, shininess), 64);
 
         let attributes = Instance::DESC.attributes;
-        assert_eq!(attributes[4].offset, 64);
-        assert_eq!(attributes[7].offset, 100);
-        assert_eq!(std::mem::offset_of!(Instance, shininess), 116);
-        assert_eq!(attributes[8].offset, 116);
+        assert_eq!(attributes[3].offset, 36);
+        assert_eq!(attributes[4].offset, 48);
+        assert_eq!(attributes[5].offset, 64);
         assert_eq!(Instance::DESC.array_stride, Instance::SIZE);
+    }
+
+    /// Spec 0060: the normal matrix the vertex stage builds is the one the
+    /// instance used to carry.
+    ///
+    /// The adjugate of the upper three by three, transposed, which is the
+    /// inverse transpose without the division: a normal is normalised
+    /// afterwards, so a scale on all of it changes nothing. Written here in
+    /// the shader's own order so the two can be compared, and `normals` in
+    /// `mesh.wgsl` is the other copy.
+    #[test]
+    fn a_rebuilt_normal_is_the_normal() {
+        let rebuilt = |model: glam::Mat3| {
+            glam::Mat3::from_cols(
+                model.y_axis.cross(model.z_axis),
+                model.z_axis.cross(model.x_axis),
+                model.x_axis.cross(model.y_axis),
+            )
+        };
+
+        for transform in [
+            Transform::at(glam::vec3(3.0, -2.0, 7.0)),
+            Transform::at(glam::Vec3::ZERO).with_rotation(glam::Quat::from_rotation_y(0.9)),
+            Transform::at(glam::Vec3::ZERO).with_scale(glam::vec3(4.0, 1.0, 1.0)),
+            Transform::at(glam::vec3(1.0, 2.0, 3.0))
+                .with_rotation(glam::Quat::from_euler(glam::EulerRot::YXZ, 0.6, 1.2, 0.3))
+                .with_scale(glam::vec3(0.25, 3.0, 1.5)),
+        ] {
+            let instance = Instance::new(&transform, Vec4::ONE, 8.0);
+            let theirs = transform.normal_matrix();
+            let mine = rebuilt(instance.basis());
+
+            for normal in [
+                glam::Vec3::X,
+                glam::Vec3::Y,
+                glam::Vec3::Z,
+                glam::vec3(1.0, 2.0, -3.0).normalize(),
+            ] {
+                let was = (theirs * normal).normalize();
+                let now = (mine * normal).normalize();
+
+                assert!(
+                    was.distance(now) < 1e-5,
+                    "a normal came out at {:?} rather than {:?}",
+                    now,
+                    was
+                );
+            }
+        }
     }
 
     /// Spec 0020: a cap says what it refused once a frame, not once a lamp.
@@ -1125,7 +1199,7 @@ mod tests {
         let eye = glam::vec3(1.0, 2.0, 3.0);
         let moved = instance.from_the_eye(eye);
 
-        assert_eq!(moved.model[3], [9.0, 18.0, 27.0, 1.0]);
+        assert_eq!(moved.model[3], [9.0, 18.0, 27.0]);
         // and the three columns that carry the turn and the size are the ones
         // the normal matrix is built from, so they may not drift
         for column in 0..3 {
@@ -1135,7 +1209,6 @@ mod tests {
                 column
             );
         }
-        assert_eq!(moved.normal, instance.normal);
         assert_eq!(moved.color, instance.color);
         assert_eq!(moved.shininess, instance.shininess);
     }
@@ -1152,14 +1225,15 @@ mod tests {
     #[test]
     fn taking_the_eye_off_lands_where_it_did() {
         // what the shader does, written the way the shader writes it
-        let taken_off = |model: &[[f32; 4]; 4], eye: Vec3| {
-            let mut off = *model;
+        let taken_off = |instance: &Instance, eye: Vec3| {
+            let model = instance.matrix();
 
-            off[3][0] -= eye.x;
-            off[3][1] -= eye.y;
-            off[3][2] -= eye.z;
-
-            glam::Mat4::from_cols_array_2d(&off)
+            glam::Mat4::from_cols(
+                model.x_axis,
+                model.y_axis,
+                model.z_axis,
+                (model.w_axis.truncate() - eye).extend(1.0),
+            )
         };
 
         for (at, eye) in [
@@ -1177,8 +1251,8 @@ mod tests {
                 .with_rotation(glam::Quat::from_rotation_y(0.7))
                 .with_scale(glam::vec3(2.0, 3.0, 4.0));
             let instance = Instance::new(&turned, Vec4::ONE, 8.0);
-            let theirs = glam::Mat4::from_cols_array_2d(&instance.from_the_eye(eye).model);
-            let mine = taken_off(&instance.model, eye);
+            let theirs = instance.from_the_eye(eye).matrix();
+            let mine = taken_off(&instance, eye);
 
             for corner in [
                 glam::vec3(0.0, 0.0, 0.0),
@@ -1208,7 +1282,7 @@ mod tests {
         // vertices across the marble's two centimetres, measured on the axis
         // that carries the distance: that is the one that runs out of digits
         let places = |one: &Instance| {
-            let model = glam::Mat4::from_cols_array_2d(&one.model);
+            let model = one.matrix();
             let mut seen = std::collections::HashSet::new();
             for step in 0..=200 {
                 let along = -0.01 + 0.0001 * step as f32;

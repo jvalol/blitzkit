@@ -316,8 +316,7 @@ pub(crate) fn pick(
 
                 keeps.clear();
                 keeps.extend(quarter.iter().map(|instance| {
-                    let (at, radius) =
-                        sphere(&one.bounds, &Mat4::from_cols_array_2d(&instance.model));
+                    let (at, radius) = sphere(&one.bounds, &instance.matrix());
 
                     view.keeps(at, radius)
                 }));
@@ -678,7 +677,7 @@ mod tests {
                 );
 
                 for n in *first..(*first + *count) {
-                    let model = Mat4::from_cols_array_2d(&written[n as usize].model);
+                    let model = written[n as usize].matrix();
 
                     drew.push(model.transform_point3(Vec3::ZERO));
                 }
