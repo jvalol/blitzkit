@@ -203,6 +203,29 @@ stretches further, because the solver passes the weight up one link a pass.
 {{< play name="chain" src="/media/chain.mp4" poster="/media/chain.png"
     alt="A heavy grey ball on a chain of sixteen beads hanging over a grey floor, with a tan brick wall to its right half knocked down, loose blocks lying out across the floor and the standing part leaning" >}}
 
+## knot
+
+In which a curve that comes back to where it started is swept as a tube, and
+closes without a seam.
+
+```
+cargo run --release --example knot
+```
+
+Drag or the arrows turn it, Q and E roll it, up and down change how finely the
+curve is sampled, M swaps the wire mesh for the solid surface, scroll moves
+closer, space locks the cursor so a drag never stops at the screen edge, and R
+puts it back.
+
+[COPY - Jake] A tube swept along a closed curve has to arrive facing the way
+it set off, or the seam is a visible twist. The frame it is swept in is worked
+out from the curve at each point rather than carried along from the last one,
+which is what closes it. Wind the sampling down and the three crossings go
+faceted first, because that is where the curve turns hardest.
+
+{{< play name="knot" src="/media/knot.mp4" poster="/media/knot.png"
+    alt="A brass trefoil knot turning over a grey floor, its three crossings clear of each other and its shadow falling as three overlapping loops" >}}
+
 ## load
 
 In which the engine is asked what a frame costs, and answers while you turn
