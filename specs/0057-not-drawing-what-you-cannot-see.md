@@ -116,6 +116,46 @@ game. What would take the loss away is not more arithmetic per instance: it
 is doing the test where the instances already are, which is on the GPU, and
 that is named below as out of scope and still is.
 
+### Against Bevy, on the scene culling is for
+
+`load` grew a second layout for this, under B: the same cubes on a shell of
+radius 500 with the camera at the middle of it, turning, which is the scene
+Bevy's own stress test uses for exactly this measurement. Roughly the same
+number of meshes is in view whichever way you look, so it measures culling
+rather than where you happened to point.
+
+Bevy 0.20, its `many_cubes` sphere layout, 1920 by 1080, against blitzkit at
+1600 by 1200 with eight samples a pixel. Bevy's number is its own frame time
+and this machine holds it at the display's pace until a frame overruns, so
+8.33 means inside a frame rather than a measurement. blitzkit's is the time
+between frames, the same quantity.
+
+| cubes | blitzkit, culled | Bevy, culled | blitzkit, not | Bevy, not |
+| --- | --- | --- | --- | --- |
+| 64000 | 8.33 | 8.33 | 8.34 | 8.33 |
+| 256000 | 13.6 | 8.33 | 14.7 | 8.34 |
+| 1024000 | 54.5 | 8.34 | 58.4 | 19.3 |
+
+Both engines cull about the same share: at sixty four thousand blitzkit
+keeps 6.6% of the triangles and Bevy reports 7.3% of the meshes visible. The
+difference is everything else. Bevy holds a frame at a million cubes and
+this engine takes fifty four milliseconds for the same scene, which is six
+and a half times slower, and the gap opens somewhere between sixty four and
+two hundred and fifty six thousand.
+
+**And culling is barely what separates them.** With it off, blitzkit goes
+from 54.5 to 58.4: the test it just did on a million instances saved four
+milliseconds of a fifty four millisecond frame. The cost is not the test. It
+is that a scene here is built again every frame, so a million instances are
+pushed, hashed into their batch, measured and copied, every frame, and Bevy
+keeps its visibility and its batches between frames and hands the GPU a list
+it already has.
+
+So the honest reading of this spec against the engines it would be compared
+with: the geometry is right and the architecture is the naive one. What
+would close it is not a faster sphere test. It is a scene that is kept
+rather than rebuilt, which is a spec nobody has written.
+
 ## Acceptance criteria
 
 - A thing behind the camera, past the far plane, or off to the side is

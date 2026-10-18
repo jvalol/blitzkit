@@ -162,6 +162,15 @@ why neither column should be quoted on its own.
 That settles the question this spec left open about a threshold in the gate.
 Not until a run can be made on a quiet machine and shown to repeat.
 
+### What changed under this table
+
+Spec 0057 gave the engine the culling this comparison had to turn off in
+Bevy to be fair, and measured the two again on the scene culling is for: a
+shell of cubes round the camera. Bevy holds a frame at a million of them and
+this engine takes fifty four milliseconds. The table above still stands for
+what it measured, which is the cost of a draw call, and 0057 holds what
+happens when a scene is large enough for the rest of an engine to matter.
+
 ### Why Bevy and what it does not say
 
 Bevy because it is Rust and it is wgpu, so the operating system, the driver,

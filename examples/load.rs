@@ -73,6 +73,60 @@ const READOUT_IN: f32 = 12.0;
 /// How far the cubes spread, as a cube of them around the origin.
 const SPREAD: f32 = 60.0;
 
+/// The other way to stand the same cubes up: on a shell around the camera,
+/// which is where culling has something to do. Spec 0057.
+///
+/// **The same scene Bevy's own stress test uses for this**, so the two can
+/// be read against each other: a Fibonacci spiral on a sphere of radius 500
+/// with the camera at the middle of it, turning. Theirs puts roughly the
+/// same number of meshes in view whichever way you look, which is what
+/// makes it a measurement of culling rather than of where you happened to
+/// be pointing.
+const SHELL: f32 = 500.0;
+const SHELL_CUBE: f32 = 1.0;
+
+/// How the cubes stand: in a block in front of you, or on a shell round you.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Spread {
+    Block,
+    Shell,
+}
+
+impl Spread {
+    fn flip(self) -> Self {
+        match self {
+            Spread::Block => Spread::Shell,
+            Spread::Shell => Spread::Block,
+        }
+    }
+
+    fn says(self) -> &'static str {
+        match self {
+            Spread::Block => "in a block",
+            Spread::Shell => "on a shell",
+        }
+    }
+}
+
+/// Where one of a shell's cubes stands.
+///
+/// A Fibonacci spiral, which is the way to scatter points evenly over a
+/// sphere without a lattice's poles and seams, and the way the test this is
+/// being compared against does it.
+fn on_the_shell(count: u32, n: u32) -> Vec3 {
+    let golden = 0.5 * (1.0 + 5.0f64.sqrt());
+    let count = count.max(1) as f64;
+    let i = n as f64;
+    let theta = std::f64::consts::TAU * i / golden;
+    let phi = (1.0 - 2.0 * (i + 0.5) / count).acos();
+
+    vec3(
+        (phi.sin() * theta.cos()) as f32,
+        (phi.cos()) as f32,
+        (phi.sin() * theta.sin()) as f32,
+    ) * SHELL
+}
+
 /// How long one configuration is held in a sweep.
 ///
 /// A windowful of frames, after a moment to settle, or six seconds, whichever
@@ -119,6 +173,9 @@ struct Dials {
     lamps: u32,
     casting: bool,
     meshes: Meshes,
+    /// Where the cubes stand, per spec 0057: in a block in front of you, or
+    /// on a shell round you.
+    spread: Spread,
     /// Whether each pass leaves out what it cannot see, per spec 0057.
     ///
     /// A dial rather than a measurement taken twice, because what this
@@ -140,21 +197,25 @@ impl Dials {
     fn sweep() -> Vec<Dials> {
         let mut out = Vec::new();
 
-        for cubes in CUBES {
-            // the same block twice, culled and not, one after the other.
-            // **Next to each other and not in two blocks**, because this
-            // machine drifts: the same configuration came out at 0.71 ms at
-            // the top of a sweep and 1.89 at the bottom of the same sweep,
-            // which is more than the thing being measured. Spec 0056 on how
-            // steady any of this is; spec 0057 for what the pair is for.
-            for culling in [true, false] {
-                out.push(Dials {
-                    cubes,
-                    lamps: 0,
-                    casting: false,
-                    meshes: Meshes::One,
-                    culling,
-                });
+        for spread in [Spread::Block, Spread::Shell] {
+            for cubes in CUBES {
+                // the same cubes twice, culled and not, one after the other.
+                // **Next to each other and not in two blocks**, because this
+                // machine drifts: the same configuration came out at 0.71 ms
+                // at the top of a sweep and 1.89 at the bottom of the same
+                // sweep, which is more than the thing being measured. Spec
+                // 0056 on how steady any of this is; spec 0057 for what the
+                // pair is for.
+                for culling in [true, false] {
+                    out.push(Dials {
+                        cubes,
+                        lamps: 0,
+                        casting: false,
+                        meshes: Meshes::One,
+                        culling,
+                        spread,
+                    });
+                }
             }
         }
 
@@ -165,6 +226,7 @@ impl Dials {
                 casting: false,
                 meshes: Meshes::Many,
                 culling: true,
+                spread: Spread::Block,
             });
         }
 
@@ -175,6 +237,7 @@ impl Dials {
                 casting: false,
                 meshes: Meshes::One,
                 culling: true,
+                spread: Spread::Block,
             });
             out.push(Dials {
                 cubes: 1728,
@@ -182,6 +245,7 @@ impl Dials {
                 casting: true,
                 meshes: Meshes::One,
                 culling: true,
+                spread: Spread::Block,
             });
         }
 
@@ -250,6 +314,7 @@ impl Load {
                 casting: false,
                 meshes: Meshes::One,
                 culling: true,
+                spread: Spread::Block,
             }),
             cube: None,
             many: Vec::new(),
@@ -291,11 +356,13 @@ impl Load {
         vec![
             String::from("Up and down for cubes, left and right for lamps, C to cast."),
             String::from(
-                "M to switch between one mesh and a mesh each, K for culling, escape to quit.",
+                "M for one mesh or a mesh each, K for culling, B for a block or a shell, \
+                 escape to quit.",
             ),
             format!(
-                "{} cubes, {}, {} lamps, {} casting, culling {}, {}",
+                "{} cubes {}, {}, {} lamps, {} casting, culling {}, {}",
                 self.dials.cubes,
+                self.dials.spread.says(),
                 self.dials.meshes.says(),
                 self.dials.lamps,
                 self.dials.casters(),
@@ -333,7 +400,10 @@ impl Load {
     /// the same dials draw the same scene and the numbers can be compared at
     /// all.
     fn at(&self, n: u32) -> Vec3 {
-        blitzkit::grid::at(self.dials.cubes, n, SPREAD)
+        match self.dials.spread {
+            Spread::Block => blitzkit::grid::at(self.dials.cubes, n, SPREAD),
+            Spread::Shell => on_the_shell(self.dials.cubes, n),
+        }
     }
 
     /// The header a sweep's lines are read under.
@@ -343,8 +413,8 @@ impl Load {
     /// hundred by twelve hundred is most of a frame on its own, and a row
     /// without them is a number nobody can reproduce.
     fn header() -> &'static str {
-        "cubes,meshes,lamps,casting,culling,present,samples,surface,draws,triangles,frames,\
-         work_ms,work_95_ms,work_worst_ms,between_ms,gpu_ms"
+        "cubes,spread,meshes,lamps,casting,culling,present,samples,surface,draws,triangles,\
+         frames,work_ms,work_95_ms,work_worst_ms,between_ms,gpu_ms"
     }
 
     /// The configuration, as the line of a sweep.
@@ -361,8 +431,9 @@ impl Load {
         };
 
         format!(
-            "{},{},{},{},{},{},{},{}x{},{},{},{},{:.3},{:.3},{:.3},{:.3},{}",
+            "{},{},{},{},{},{},{},{},{}x{},{},{},{},{:.3},{:.3},{:.3},{:.3},{}",
             self.dials.cubes,
+            self.dials.spread.says().replace(' ', "-"),
             self.dials.meshes.says().replace(' ', "-"),
             self.dials.lamps,
             self.dials.casters(),
@@ -481,11 +552,24 @@ impl Game for Load {
         // a fixed path rather than a hand on the mouse, so two runs of the
         // same dials are the same run
         let turn = self.since * 0.25;
-        let out = SPREAD * 1.35;
 
-        camera.position = vec3(turn.sin() * out, SPREAD * 0.35, turn.cos() * out);
-        camera.target = Vec3::ZERO;
-        camera.far = SPREAD * 6.0;
+        match self.dials.spread {
+            Spread::Block => {
+                let out = SPREAD * 1.35;
+
+                camera.position = vec3(turn.sin() * out, SPREAD * 0.35, turn.cos() * out);
+                camera.target = Vec3::ZERO;
+                camera.far = SPREAD * 6.0;
+            }
+            // in the middle of the shell, looking out and turning, which
+            // keeps about the same number of cubes in view whichever way it
+            // points
+            Spread::Shell => {
+                camera.position = Vec3::ZERO;
+                camera.target = vec3(turn.sin(), turn.cos() * 0.3, turn.cos());
+                camera.far = SHELL * 2.0;
+            }
+        }
 
         let Some(cube) = self.cube else {
             return;
@@ -504,7 +588,10 @@ impl Game for Load {
                 mesh,
                 &Transform::at(self.at(n))
                     .with_rotation(Quat::from_rotation_y(n as f32 * 0.37))
-                    .with_scale(Vec3::splat(SPREAD / 40.0)),
+                    .with_scale(Vec3::splat(match self.dials.spread {
+                        Spread::Block => SPREAD / 40.0,
+                        Spread::Shell => SHELL_CUBE,
+                    })),
                 vec4(0.72, 0.74, 0.80, 1.0),
                 64.0,
             );
@@ -540,6 +627,7 @@ impl Game for Load {
             self.dials.casting,
             self.dials.meshes,
             self.dials.culling,
+            self.dials.spread,
         );
 
         match input.key {
@@ -556,6 +644,7 @@ impl Game for Load {
             KeyboardKey::C => self.dials.casting = !self.dials.casting,
             KeyboardKey::M => self.dials.meshes = self.dials.meshes.flip(),
             KeyboardKey::K => self.dials.culling = !self.dials.culling,
+            KeyboardKey::B => self.dials.spread = self.dials.spread.flip(),
             _ => (),
         }
 
@@ -566,6 +655,7 @@ impl Game for Load {
                 self.dials.casting,
                 self.dials.meshes,
                 self.dials.culling,
+                self.dials.spread,
             )
         {
             self.costs.clear();
