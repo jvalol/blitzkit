@@ -202,3 +202,35 @@ stretches further, because the solver passes the weight up one link a pass.
 
 {{< play name="chain" src="/media/chain.mp4" poster="/media/chain.png"
     alt="A heavy grey ball on a chain of sixteen beads hanging over a grey floor, with a tan brick wall to its right half knocked down, loose blocks lying out across the floor and the standing part leaning" >}}
+
+## load
+
+In which the engine is asked what a frame costs, and answers while you turn
+the dials.
+
+```
+cargo run --release --example load
+```
+
+Up and down change how many cubes there are, left and right how many lamps, C
+switches shadow casting on and off, and M switches between drawing one cube
+mesh many times and drawing a mesh each. Escape quits.
+
+[COPY - Jake] The numbers are the point. **Work** is the engine's own: the
+whole frame from the top to the end of the submit, with the wait for the
+display taken out. **Between frames** is what the display gave you, and on a
+120 Hz screen it reads 8.33 whatever the scene costs, until the work overruns
+a frame and it jumps to 16.67. **GPU** is the device's own clock, where the
+device will give one. Underneath, how many
+draw calls and how many triangles went in, because a number that moves is
+worth little without the thing it moved against.
+
+[COPY - Jake] The dial worth playing with is M. Sixteen thousand cubes as one
+mesh is four draw calls and a millisecond and a half; the same sixteen
+thousand as their own meshes is forty nine thousand draw calls and twenty
+milliseconds. The engine does nothing to batch them, because nothing in it
+knows they are the same shape. Spec 0056 has the rest, including what Bevy
+came to on the same machine.
+
+{{< play name="load" src="/media/load.mp4" poster="/media/load.png"
+    alt="A thousand white cubes standing in a grid against black, their rows running away from the middle of the picture, with a readout over them giving the work in milliseconds, the time between frames, and the draw and triangle counts" >}}

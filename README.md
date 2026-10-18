@@ -164,6 +164,14 @@ cargo run --release --example chain
 
 ![A heavy grey ball on a chain of sixteen beads hanging over a grey floor, with a tan brick wall to its right half knocked down, loose blocks lying out across the floor and the standing part leaning](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/chain.png)
 
+**load**, [COPY - Jake] Turn the dials and watch what a frame costs. Sixteen thousand cubes as one mesh is four draw calls; the same sixteen thousand as their own meshes is forty nine thousand.
+
+```
+cargo run --release --example load
+```
+
+![A thousand white cubes standing in a grid against black, their rows running away from the middle of the picture, with a readout over them giving the work in milliseconds, the time between frames, and the draw and triangle counts](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/load.png)
+
 **hilbert**, I didn't know what this was until I got into this space of weird 3d geometries. I just think it's neat.
 
 ```
