@@ -3,6 +3,7 @@ pub mod collision;
 pub mod contact;
 pub mod cost;
 pub mod geometry;
+pub mod grid;
 pub mod keyboard;
 pub mod lighting;
 pub mod link;

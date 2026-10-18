@@ -248,12 +248,12 @@ device will give one. Underneath, how many
 draw calls and how many triangles went in, because a number that moves is
 worth little without the thing it moved against.
 
-[COPY - Jake] The dial worth playing with is M. Sixteen thousand cubes as one
-mesh is four draw calls and a millisecond and a half; the same sixteen
-thousand as their own meshes is forty nine thousand draw calls and twenty
-milliseconds. The engine does nothing to batch them, because nothing in it
+[COPY - Jake] The dial worth playing with is M. Sixty four thousand cubes as
+one mesh is four draw calls and four milliseconds; the same sixty four
+thousand as their own meshes is a hundred and ninety two thousand draw calls
+and a hundred milliseconds. The engine does nothing to batch them, because nothing in it
 knows they are the same shape. Spec 0056 has the rest, including what Bevy
 came to on the same machine.
 
 {{< play name="load" src="/media/load.mp4" poster="/media/load.png"
-    alt="A thousand white cubes standing in a grid against black, their rows running away from the middle of the picture, with a readout over them giving the work in milliseconds, the time between frames, and the draw and triangle counts" >}}
+    alt="Seventeen hundred white cubes standing in a grid against black, their rows running away from the middle of the picture, with a readout over them giving the work in milliseconds, the time between frames, and the draw and triangle counts" >}}

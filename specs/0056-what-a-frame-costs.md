@@ -118,13 +118,14 @@ reports, so 8.33 means comfortably inside a frame rather than a measurement.
 
 | cubes | blitzkit, a mesh each | Bevy, per entity | blitzkit, instanced | Bevy, batched |
 | --- | --- | --- | --- | --- |
-| 1024 | 8.33 | 8.33 | 8.33 | 8.33 |
-| 4096 | 8.37 | 9.10 | 8.33 | 8.33 |
-| 16384 | 27.4 | 31.1 | 8.33 | 8.33 |
-| 65536 | 116.6 | 119.6 | 8.33 | 8.33 |
+| 1728 | 8.31 | 8.34 | 8.33 | 8.34 |
+| 4096 | 8.30 | 8.33 | 8.33 | 8.33 |
+| 13824 | 18.8 | 22.2 | 8.34 | 8.34 |
+| 64000 | 103.7 | 103.6 | 8.32 | 8.33 |
 
 **Drawing things one at a time, the two engines cost about the same.** Within
-ten per cent at the top end and with blitzkit slightly ahead in the middle,
+a tenth of a millisecond at the top end and with blitzkit ahead in the
+middle,
 which is close enough to call a draw given what the next section says about
 how steady these numbers are. That is a better result than the prediction
 expected, and the reason is that there is not much to a draw call: a bind, a
@@ -132,11 +133,11 @@ buffer, an indexed draw. An engine with more machinery between the scene and
 the queue has more to do per entity, not less.
 
 **The difference is that Bevy does not have to.** Its batching is automatic,
-so a scene of sixty five thousand separate cubes costs it nothing at all and
+so a scene of sixty four thousand separate cubes costs it nothing at all and
 the per-entity column only exists because its stress test has a switch to
 turn batching off. blitzkit has no such thing: a game that hands it one mesh
-and sixty five thousand transforms gets 6.8 milliseconds of work, and a game
-that hands it sixty five thousand meshes gets 116, and nothing in the engine
+and sixty four thousand transforms gets 4.0 milliseconds of work, and a game
+that hands it sixty four thousand meshes gets 103, and nothing in the engine
 will close that gap on the author's behalf.
 
 **So the honest answer to how this compares** is that the per-draw cost is
@@ -147,11 +148,12 @@ accident.
 ### How steady any of this is
 
 Not very. The same sweep run twice twenty minutes apart gave 0.87 and 1.92
-milliseconds for the same thousand instanced cubes, and 19.6 and 27.2 for the
-same sixteen thousand separate ones: a factor of between one and a half and
-two and a bit, across the board, because the second run shared the machine
-with two browsers and Spotlight. The shape of the curve held exactly; the
-height of it did not.
+milliseconds for the same instanced block, and 19.6 and 27.2 for the same
+block drawn a mesh at a time: a factor of between one and a half and two and
+a bit, across the board, because the second run shared the machine with two
+browsers and Spotlight. The shape of the curve held exactly; the height of it
+did not. The table above is from a third run, on a quieter machine, with the
+dial's steps changed to cube numbers.
 
 Both halves of the comparison above were run in the same twenty minutes, on
 the same busy machine, which is why they can be read against each other and
@@ -221,21 +223,23 @@ Apple M5 Max, 1600 by 1200, eight samples a pixel, `--sweep` on
 
 | scene | draws | work | gpu |
 | --- | --- | --- | --- |
-| 64 cubes, one mesh instanced | 4 | 0.82 ms | 2.9 ms |
-| 1024 cubes, one mesh instanced | 4 | 0.87 ms | 2.2 ms |
-| 16384 cubes, one mesh instanced | 4 | 1.46 ms | 2.5 ms |
-| 1024 cubes, a mesh each | 3073 | 1.76 ms | 1.6 ms |
-| 4096 cubes, a mesh each | 12289 | 5.06 ms | 5.1 ms |
-| 16384 cubes, a mesh each | 49153 | 19.61 ms | 10.4 ms |
-| 1024 cubes, 64 lamps | 4 | 0.96 ms | 2.8 ms |
-| 1024 cubes, 64 lamps, 2 casting | 16 | 1.00 ms | 2.9 ms |
+| 64 cubes, one mesh instanced | 4 | 0.63 ms | 2.6 ms |
+| 1728 cubes, one mesh instanced | 4 | 0.73 ms | 2.4 ms |
+| 13824 cubes, one mesh instanced | 4 | 1.29 ms | 3.0 ms |
+| 64000 cubes, one mesh instanced | 4 | 4.04 ms | 5.7 ms |
+| 1728 cubes, a mesh each | 5185 | 2.56 ms | 2.6 ms |
+| 4096 cubes, a mesh each | 12289 | 5.58 ms | 4.5 ms |
+| 13824 cubes, a mesh each | 41473 | 18.32 ms | 10.1 ms |
+| 64000 cubes, a mesh each | 192001 | 103.03 ms | |
+| 1728 cubes, 64 lamps | 4 | 0.74 ms | 2.5 ms |
+| 1728 cubes, 64 lamps, 2 casting | 16 | 0.79 ms | 2.6 ms |
 
-**Instancing is nearly free and distinct meshes are not.** Sixteen thousand
-cubes as one mesh cost 1.46 milliseconds; the same sixteen thousand as their
-own meshes cost 19.6, which is about four tenths of a microsecond per draw
-call and is the whole of the difference. The engine does nothing to batch
-them because nothing in it knows they are the same shape, which is what the
-prediction said and is now a number.
+**Instancing is nearly free and distinct meshes are not.** Sixty four
+thousand cubes as one mesh cost 4.04 milliseconds; the same sixty four
+thousand as their own meshes cost 103, which is about half a microsecond per
+draw call and is the whole of the difference. The engine does nothing to
+batch them because nothing in it knows they are the same shape, which is what
+the prediction said and is now a number.
 
 **And the prediction about shadows was wrong.** Sixty four lamps cost the
 same as one, and turning casting on cost four hundredths of a millisecond,
@@ -244,8 +248,37 @@ a scene that is already one instanced call. A shadow pass is expensive when
 it is a pass over a large scene, and this scene is not large in the way that
 matters.
 
+## A count that is not a cube cannot fill a cube
+
+The dial's steps were round numbers: 256, 1024, 16384. A grid takes the cube
+root and rounds it up, so 256 goes into seven a side, which is five full
+layers and a sixth with a third of it missing, and the missing third is at
+one end because that is the order a grid fills in. What stands there is a
+block with a bite out of it.
+
+Every test passed. The arcade's back room, which lays out the same block of
+cubes on a bench, had been photographed four times with the same bite in it.
+Jake saw it in a picture and asked why the cubes were not organised as a
+cube.
+
+So the arithmetic is `blitzkit::grid` now, used by this example and by that
+room, because both had the fault and fixing one of them would have left the
+other wrong. The dial is cube numbers: 64, 512, 1728, 4096, 8000, 13824,
+32768 and 64000, which is four through forty a side.
+
+A cube root in floating point is the other half of it. `cbrt(1728)` comes out
+as 11.999999, so a `ceil` of it is twelve by luck rather than by arithmetic.
+`grid::side` rounds and then checks.
+
 ## Acceptance criteria
 
+- A cube number fills its cube and the round numbers a person reaches for
+  first do not, a thousand excepted, because a thousand is ten a
+  side. — `grid::tests::a_cube_number_fills_its_cube`
+- Every one of them gets its own place and all of them are inside the
+  block. — `grid::tests::every_one_stands_somewhere_of_its_own`
+- And a count that is not a cube leaves its hole at one end, which is why it
+  reads as a bite rather than as a scatter. — `grid::tests::a_count_that_is_not_a_cube_leaves_a_hole`
 - A window with a tenth of its frames slow moves the 95th percentile and
   leaves the median alone, where a mean would report neither. — `cost::tests::one_slow_frame_moves_the_tail_and_not_the_middle`
 - And the one bad frame a percentile cannot see is in the worst, which is why

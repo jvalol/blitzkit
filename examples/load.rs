@@ -42,18 +42,23 @@ use glam::{vec3, vec4, Quat, Vec3};
 /// looked for is the shape of the curve rather than the value at one point,
 /// and a curve read at 100, 200 and 300 cannot tell a straight line from a
 /// steep one.
+/// **Cube numbers, so the block is a block.** These were round numbers, 256
+/// and 1024 and 16384, and a count that is not a cube cannot fill a cube:
+/// the last layer comes out short and what stands there has a bite out of
+/// it. The arcade's rig had the same fault and `blitzkit::grid` is where the
+/// arithmetic lives now, so fixing one of them fixed both.
 #[cfg(not(target_arch = "wasm32"))]
-const CUBES: [u32; 8] = [64, 256, 1024, 2048, 4096, 8192, 16384, 65536];
+const CUBES: [u32; 8] = [64, 512, 1728, 4096, 8000, 13824, 32768, 64000];
 
 /// And a shorter dial in a browser.
 ///
-/// The top step is the one that hurts: sixty five thousand separate meshes
-/// is sixty five thousand buffers, and a tab asked for that has a fair
+/// The top step is the one that hurts: sixty four thousand separate meshes
+/// is sixty four thousand buffers, and a tab asked for that has a fair
 /// chance of not coming back. The page is there to be played with rather
 /// than to find the edge of the machine, and the shape of the curve is
-/// already plain by sixteen thousand.
+/// already plain by thirteen thousand.
 #[cfg(target_arch = "wasm32")]
-const CUBES: [u32; 7] = [64, 256, 1024, 2048, 4096, 8192, 16384];
+const CUBES: [u32; 6] = [64, 512, 1728, 4096, 8000, 13824];
 
 /// And how many lamps.
 const LAMPS: [u32; 5] = [0, 1, 4, 16, 64];
@@ -140,13 +145,13 @@ impl Dials {
 
         for lamps in LAMPS {
             out.push(Dials {
-                cubes: 1024,
+                cubes: 1728,
                 lamps,
                 casting: false,
                 meshes: Meshes::One,
             });
             out.push(Dials {
-                cubes: 1024,
+                cubes: 1728,
                 lamps,
                 casting: true,
                 meshes: Meshes::One,
@@ -213,7 +218,7 @@ impl Load {
 
         Self {
             dials: sweeping.last().copied().unwrap_or(Dials {
-                cubes: 1024,
+                cubes: 1728,
                 lamps: 4,
                 casting: false,
                 meshes: Meshes::One,
@@ -295,21 +300,13 @@ impl Load {
 
     /// Where one cube stands, worked out from its number rather than stored.
     ///
-    /// A cube root's worth each way, so a thousand of them is ten by ten by
-    /// ten and sixteen thousand is twenty five cubed. Deterministic, so two
-    /// runs of the same dials draw the same scene and the numbers can be
-    /// compared at all.
+    /// `blitzkit::grid` does the arithmetic, because the arcade lays out the
+    /// same block on the bench in its back room and the two of them had the
+    /// same fault in the same week. Deterministic either way, so two runs of
+    /// the same dials draw the same scene and the numbers can be compared at
+    /// all.
     fn at(&self, n: u32) -> Vec3 {
-        let side = (self.dials.cubes as f32).cbrt().ceil().max(1.0);
-        let step = SPREAD / side;
-        let (x, y, z) = (
-            (n % side as u32) as f32,
-            ((n / side as u32) % side as u32) as f32,
-            (n / (side as u32 * side as u32)) as f32,
-        );
-        let middle = (side - 1.0) * 0.5;
-
-        vec3(x - middle, y - middle, z - middle) * step
+        blitzkit::grid::at(self.dials.cubes, n, SPREAD)
     }
 
     /// The header a sweep's lines are read under.
