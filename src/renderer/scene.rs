@@ -123,6 +123,11 @@ pub struct Scene {
     /// Batched by mesh and texture together, since a draw call can only have
     /// one of each.
     instances: HashMap<(MeshId, TextureId), Vec<Instance>>,
+    /// What a game handed over once rather than every frame, per spec 0058.
+    ///
+    /// A slot that was dropped is left as `None` rather than taken out, so
+    /// the handles to everything after it go on meaning what they meant.
+    kept: Vec<Option<Keeping>>,
     /// The sun. A game changes it like anything else, and it persists, because
     /// a sun does.
     pub light: Light,
@@ -368,6 +373,88 @@ impl Scene {
             .push(Instance::new(transform, color, shininess));
     }
 
+    /// Hands the engine a run of instances to hold on to, per spec 0058.
+    ///
+    /// **What is kept is not pushed again.** It survives `reset`, which is
+    /// what clears a frame's pushes, and is drawn every frame until it is
+    /// dropped. A game keeps what does not move and pushes what does: the
+    /// saving is the pushing, the hashing into batches, and the measuring
+    /// and copying of everything no view can see.
+    ///
+    /// The instances are the game's own, in the world's coordinates. What
+    /// reaches the GPU has the eye taken out of it, per spec 0051, which is
+    /// why these are held here rather than written into the instance buffer
+    /// and left: the eye moves and the world does not.
+    pub fn keep(&mut self, mesh: MeshId, texture: TextureId, instances: &[Instance]) -> Kept {
+        let holding = Keeping {
+            mesh,
+            texture,
+            round: Round::of(instances),
+            instances: instances.to_vec(),
+        };
+
+        // the first free slot, so a dropped run's room comes back without
+        // moving anybody else's handle
+        match self.kept.iter().position(|slot| slot.is_none()) {
+            Some(n) => {
+                self.kept[n] = Some(holding);
+
+                Kept(n)
+            }
+            None => {
+                self.kept.push(Some(holding));
+
+                Kept(self.kept.len() - 1)
+            }
+        }
+    }
+
+    /// Moves one instance of a kept run.
+    ///
+    /// The run it belongs to is measured again, because what holds all of it
+    /// is what the culling asks about first. A handle to a run that has been
+    /// dropped, or a number past the end of one, does nothing: losing a
+    /// shape is better than losing the frame, which is how the rest of this
+    /// renderer treats a handle it does not know.
+    pub fn moved(
+        &mut self,
+        kept: Kept,
+        n: usize,
+        transform: &Transform,
+        color: Vec4,
+        shininess: f32,
+    ) {
+        let Some(Some(holding)) = self.kept.get_mut(kept.0) else {
+            return;
+        };
+        let Some(instance) = holding.instances.get_mut(n) else {
+            return;
+        };
+
+        *instance = Instance::new(transform, color, shininess);
+        holding.round = Round::of(&holding.instances);
+    }
+
+    /// Lets go of a kept run. Its handle stops answering.
+    pub fn drop(&mut self, kept: Kept) {
+        if let Some(slot) = self.kept.get_mut(kept.0) {
+            *slot = None;
+        }
+    }
+
+    /// How many instances a kept run holds, and nothing if it was dropped.
+    pub fn kept_len(&self, kept: Kept) -> Option<usize> {
+        self.kept
+            .get(kept.0)
+            .and_then(|slot| slot.as_ref())
+            .map(|holding| holding.instances.len())
+    }
+
+    /// Every kept run, in the order they were kept.
+    pub(crate) fn keepings(&self) -> impl Iterator<Item = &Keeping> {
+        self.kept.iter().filter_map(|slot| slot.as_ref())
+    }
+
     /// Every mesh with something to draw, and its instances. Sorted, so a frame
     /// draws in the same order each time.
     pub(crate) fn batches(&self) -> Vec<(MeshId, TextureId, &[Instance])> {
@@ -385,11 +472,188 @@ impl Scene {
         self.instances
             .values()
             .all(|instances| instances.is_empty())
+            && self.kept.iter().all(|slot| slot.is_none())
+    }
+}
+
+/// A handle to what a game asked the engine to keep. Spec 0058.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Kept(usize);
+
+/// One kept run: what it is, where it is, and what holds all of it.
+#[derive(Debug)]
+pub(crate) struct Keeping {
+    pub(crate) mesh: MeshId,
+    pub(crate) texture: TextureId,
+    pub(crate) instances: Vec<Instance>,
+    pub(crate) round: Round,
+}
+
+/// The sphere that holds a run, which is what a view is asked about before
+/// any of its instances are. Spec 0058.
+///
+/// Worked out when the run is kept and when it changes, and never per frame:
+/// that is the whole of what makes a kept run cheap to leave out.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Round {
+    pub(crate) at: Vec3,
+    pub(crate) reach: f32,
+}
+
+impl Round {
+    /// The sphere round every instance's own place, each one grown by how
+    /// far that instance's matrix can carry a unit box.
+    ///
+    /// The mesh's own bounds are not asked for here, because a run is kept
+    /// before a frame and the renderer is what knows what a mesh is. A unit
+    /// box is the honest stand-in: every mesh in this engine is built round
+    /// its own origin, and a mesh bigger than its unit box makes this reach
+    /// short, which is why the culling measures the mesh as well when it
+    /// comes to the instances themselves.
+    pub(crate) fn of(instances: &[Instance]) -> Self {
+        let mut at = Vec3::ZERO;
+
+        for instance in instances {
+            at += Vec3::new(
+                instance.model[3][0],
+                instance.model[3][1],
+                instance.model[3][2],
+            );
+        }
+
+        if !instances.is_empty() {
+            at /= instances.len() as f32;
+        }
+
+        let mut reach: f32 = 0.0;
+
+        for instance in instances {
+            let middle = Vec3::new(
+                instance.model[3][0],
+                instance.model[3][1],
+                instance.model[3][2],
+            );
+            let stretch = [0usize, 1, 2].iter().fold(0.0f32, |most, axis| {
+                most.max(
+                    Vec3::new(
+                        instance.model[*axis][0],
+                        instance.model[*axis][1],
+                        instance.model[*axis][2],
+                    )
+                    .length(),
+                )
+            });
+
+            reach = reach.max(at.distance(middle) + stretch * 3f32.sqrt() * 0.5);
+        }
+
+        Self { at, reach }
     }
 }
 
 #[cfg(test)]
 mod tests {
+
+    /// Spec 0058: what is kept outlives the frame it was kept in.
+    #[test]
+    fn what_is_kept_outlives_a_frame() {
+        let mut scene = Scene::new();
+        let instances = vec![one_at(glam::Vec3::ZERO), one_at(glam::Vec3::X)];
+        let kept = scene.keep(MeshId(0), TextureId::WHITE, &instances);
+
+        scene.push(MeshId(0), &Transform::at(glam::Vec3::Y));
+        assert_eq!(scene.batches().len(), 1, "the push is not there");
+
+        scene.reset();
+
+        assert!(scene.batches().is_empty(), "a push outlived its frame");
+        assert_eq!(scene.kept_len(kept), Some(2), "the kept run did not");
+        assert_eq!(scene.keepings().count(), 1);
+        assert!(!scene.is_empty(), "a scene with a kept run is not empty");
+    }
+
+    /// Spec 0058: moving one instance leaves the others where they are, and
+    /// measures the run again.
+    #[test]
+    fn moving_one_leaves_the_others_alone() {
+        let mut scene = Scene::new();
+        let instances = vec![one_at(glam::Vec3::ZERO), one_at(glam::Vec3::X * 2.0)];
+        let kept = scene.keep(MeshId(0), TextureId::WHITE, &instances);
+        let was = scene.keepings().next().expect("the run").round;
+
+        scene.moved(
+            kept,
+            1,
+            &Transform::at(glam::Vec3::X * 40.0),
+            Vec4::ONE,
+            Instance::DEFAULT_SHININESS,
+        );
+
+        let now = scene.keepings().next().expect("the run");
+
+        assert_eq!(
+            now.instances[0].model[3][0], 0.0,
+            "the one that did not move, moved"
+        );
+        assert_eq!(
+            now.instances[1].model[3][0], 40.0,
+            "the one that moved, did not"
+        );
+        assert!(
+            now.round.reach > was.reach,
+            "the sphere round the run was not measured again"
+        );
+    }
+
+    /// Spec 0058: a dropped run is gone, and its handle stops answering.
+    #[test]
+    fn a_dropped_run_is_gone() {
+        let mut scene = Scene::new();
+        let first = scene.keep(MeshId(0), TextureId::WHITE, &[one_at(glam::Vec3::ZERO)]);
+        let second = scene.keep(MeshId(1), TextureId::WHITE, &[one_at(glam::Vec3::X)]);
+
+        scene.drop(first);
+
+        assert_eq!(scene.kept_len(first), None, "the handle still answers");
+        assert_eq!(
+            scene.kept_len(second),
+            Some(1),
+            "the other run went with it"
+        );
+        assert_eq!(scene.keepings().count(), 1);
+
+        // and the room comes back: the next run takes the empty slot rather
+        // than growing the list
+        let third = scene.keep(MeshId(2), TextureId::WHITE, &[one_at(glam::Vec3::Y)]);
+
+        assert_eq!(third, first, "the empty slot was not reused");
+        assert_eq!(scene.keepings().count(), 2);
+    }
+
+    /// Spec 0058: a handle to nothing does nothing, rather than taking the
+    /// frame down.
+    #[test]
+    fn a_handle_to_nothing_does_nothing() {
+        let mut scene = Scene::new();
+        let kept = scene.keep(MeshId(0), TextureId::WHITE, &[one_at(glam::Vec3::ZERO)]);
+
+        scene.drop(kept);
+        scene.moved(
+            kept,
+            0,
+            &Transform::at(glam::Vec3::Y),
+            Vec4::ONE,
+            Instance::DEFAULT_SHININESS,
+        );
+        scene.drop(kept);
+
+        assert_eq!(scene.keepings().count(), 0);
+    }
+
+    /// One instance, standing somewhere.
+    fn one_at(at: glam::Vec3) -> Instance {
+        Instance::new(&Transform::at(at), Vec4::ONE, Instance::DEFAULT_SHININESS)
+    }
 
     /// Spec 0046: past the cap the extra are dropped and said so.
     #[test]

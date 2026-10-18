@@ -238,9 +238,12 @@ cargo run --release --example load
 Up and down change how many cubes there are, left and right how many lamps, C
 switches shadow casting on and off, M switches between drawing one cube mesh
 many times and drawing a mesh each, K switches off the culling, which is the
-engine leaving out of each pass what that pass cannot see, and B stands the
-cubes in a block in front of you or on a shell around you. The shell is the
-one to watch the culling in: most of it is behind you. Escape quits.
+engine leaving out of each pass what that pass cannot see, B stands the
+cubes in a block in front of you or on a shell around you, and P hands the
+cubes to the engine once instead of pushing them every frame. The shell is
+the one to watch both of those in: most of it is behind you, and a million
+cubes kept in patches costs a fifth of what the same million costs pushed.
+Escape quits.
 
 The numbers are the point. **Work** is the engine's own: the
 whole frame from the top to the end of the submit, with the wait for the

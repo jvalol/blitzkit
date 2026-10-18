@@ -30,7 +30,7 @@ use blitzkit::keyboard::{KeyboardInput, KeyboardKey, KeyboardKeyState};
 use blitzkit::lighting::{PointLight, MAX_POINT_LIGHTS, MAX_SHADOWING_POINT_LIGHTS};
 use blitzkit::mesh::{MeshData, Transform};
 use blitzkit::renderer::render_text::{RenderText, TextRenderer};
-use blitzkit::renderer::scene::{MeshId, Scene};
+use blitzkit::renderer::scene::{Instance, Kept, MeshId, Scene, TextureId};
 use blitzkit::renderer::{Presenting, Renderer};
 use blitzkit::sound::SoundSystem;
 use blitzkit::{start, Game};
@@ -82,6 +82,14 @@ const SPREAD: f32 = 60.0;
 /// same number of meshes in view whichever way you look, which is what
 /// makes it a measurement of culling rather than of where you happened to
 /// be pointing.
+/// How many patches the shell is kept in: a cube's six faces, each cut into
+/// a grid this many a side.
+const ACROSS: usize = 4;
+const PATCHES: usize = 6 * ACROSS * ACROSS;
+
+const CUBE_COLOUR: glam::Vec4 = vec4(0.72, 0.74, 0.80, 1.0);
+const CUBE_SHINE: f32 = 64.0;
+
 const SHELL: f32 = 500.0;
 const SHELL_CUBE: f32 = 1.0;
 
@@ -176,6 +184,13 @@ struct Dials {
     /// Where the cubes stand, per spec 0057: in a block in front of you, or
     /// on a shell round you.
     spread: Spread,
+    /// Whether the cubes are handed over once or pushed every frame, per
+    /// spec 0058.
+    ///
+    /// Only with one mesh: a run that is kept is one mesh and one texture,
+    /// so sixty four thousand meshes would be sixty four thousand kept runs
+    /// and the dial would be measuring the wrong thing.
+    kept: bool,
     /// Whether each pass leaves out what it cannot see, per spec 0057.
     ///
     /// A dial rather than a measurement taken twice, because what this
@@ -214,8 +229,25 @@ impl Dials {
                         meshes: Meshes::One,
                         culling,
                         spread,
+                        kept: false,
                     });
                 }
+            }
+        }
+
+        // and the shell again, kept rather than pushed, which is the pair
+        // spec 0058 is measured by
+        for cubes in CUBES {
+            for kept in [false, true] {
+                out.push(Dials {
+                    cubes,
+                    lamps: 0,
+                    casting: false,
+                    meshes: Meshes::One,
+                    culling: true,
+                    spread: Spread::Shell,
+                    kept,
+                });
             }
         }
 
@@ -227,6 +259,7 @@ impl Dials {
                 meshes: Meshes::Many,
                 culling: true,
                 spread: Spread::Block,
+                kept: false,
             });
         }
 
@@ -238,6 +271,7 @@ impl Dials {
                 meshes: Meshes::One,
                 culling: true,
                 spread: Spread::Block,
+                kept: false,
             });
             out.push(Dials {
                 cubes: 1728,
@@ -246,6 +280,7 @@ impl Dials {
                 meshes: Meshes::One,
                 culling: true,
                 spread: Spread::Block,
+                kept: false,
             });
         }
 
@@ -265,6 +300,16 @@ impl Dials {
 
 struct Load {
     dials: Dials,
+    /// The cubes, if this run is keeping them rather than pushing them, and
+    /// what they were kept for: a dial that moves has to build them again.
+    ///
+    /// In patches rather than one run, because a kept run is asked about
+    /// whole: one run holding a shell that is all round you straddles every
+    /// view there is, and every instance of it gets measured anyway. Spec
+    /// 0058 says the engine will not divide a world for a game, and this is
+    /// a game dividing one.
+    keeping: Vec<Kept>,
+    kept_for: Option<(u32, Spread)>,
     cube: Option<MeshId>,
     many: Vec<MeshId>,
     costs: Costs,
@@ -315,7 +360,10 @@ impl Load {
                 meshes: Meshes::One,
                 culling: true,
                 spread: Spread::Block,
+                kept: false,
             }),
+            keeping: Vec::new(),
+            kept_for: None,
             cube: None,
             many: Vec::new(),
             costs: Costs::new(),
@@ -357,12 +405,13 @@ impl Load {
             String::from("Up and down for cubes, left and right for lamps, C to cast."),
             String::from(
                 "M for one mesh or a mesh each, K for culling, B for a block or a shell, \
-                 escape to quit.",
+                 P to keep them rather than push them, escape to quit.",
             ),
             format!(
-                "{} cubes {}, {}, {} lamps, {} casting, culling {}, {}",
+                "{} cubes {}, {}, {}, {} lamps, {} casting, culling {}, {}",
                 self.dials.cubes,
                 self.dials.spread.says(),
+                if self.dials.kept { "kept" } else { "pushed" },
                 self.dials.meshes.says(),
                 self.dials.lamps,
                 self.dials.casters(),
@@ -399,6 +448,57 @@ impl Load {
     /// same fault in the same week. Deterministic either way, so two runs of
     /// the same dials draw the same scene and the numbers can be compared at
     /// all.
+    /// Which patch of the shell a cube belongs to.
+    ///
+    /// By the direction it lies in: the face of a cube its direction points
+    /// at, and a grid on that face. A patch is then about fifteen degrees
+    /// across, which is small enough that most of them are wholly out of
+    /// view and large enough that there are not thousands of runs.
+    ///
+    /// A block is one patch, because a block is in front of you or it is
+    /// not.
+    fn patch(&self, n: u32) -> usize {
+        if self.dials.spread == Spread::Block {
+            return 0;
+        }
+
+        let at = self.at(n).normalize_or_zero();
+        let (x, y, z) = (at.x.abs(), at.y.abs(), at.z.abs());
+        let (face, u, v) = if x >= y && x >= z {
+            (
+                if at.x > 0.0 { 0 } else { 1 },
+                at.y / x.max(1e-4),
+                at.z / x.max(1e-4),
+            )
+        } else if y >= z {
+            (
+                if at.y > 0.0 { 2 } else { 3 },
+                at.x / y.max(1e-4),
+                at.z / y.max(1e-4),
+            )
+        } else {
+            (
+                if at.z > 0.0 { 4 } else { 5 },
+                at.x / z.max(1e-4),
+                at.y / z.max(1e-4),
+            )
+        };
+        let cell = |along: f32| (((along + 1.0) * 0.5 * ACROSS as f32) as usize).min(ACROSS - 1);
+
+        face * ACROSS * ACROSS + cell(u) * ACROSS + cell(v)
+    }
+
+    /// Where one cube stands and how it is turned, which is the one account
+    /// of it: the push and the keep both ask here.
+    fn standing(&self, n: u32) -> Transform {
+        Transform::at(self.at(n))
+            .with_rotation(Quat::from_rotation_y(n as f32 * 0.37))
+            .with_scale(Vec3::splat(match self.dials.spread {
+                Spread::Block => SPREAD / 40.0,
+                Spread::Shell => SHELL_CUBE,
+            }))
+    }
+
     fn at(&self, n: u32) -> Vec3 {
         match self.dials.spread {
             Spread::Block => blitzkit::grid::at(self.dials.cubes, n, SPREAD),
@@ -413,8 +513,8 @@ impl Load {
     /// hundred by twelve hundred is most of a frame on its own, and a row
     /// without them is a number nobody can reproduce.
     fn header() -> &'static str {
-        "cubes,spread,meshes,lamps,casting,culling,present,samples,surface,draws,triangles,\
-         frames,work_ms,work_95_ms,work_worst_ms,between_ms,gpu_ms"
+        "cubes,spread,held,meshes,lamps,casting,culling,present,samples,surface,draws,\
+         triangles,frames,work_ms,work_95_ms,work_worst_ms,between_ms,gpu_ms"
     }
 
     /// The configuration, as the line of a sweep.
@@ -431,9 +531,10 @@ impl Load {
         };
 
         format!(
-            "{},{},{},{},{},{},{},{},{}x{},{},{},{},{:.3},{:.3},{:.3},{:.3},{}",
+            "{},{},{},{},{},{},{},{},{},{}x{},{},{},{},{:.3},{:.3},{:.3},{:.3},{}",
             self.dials.cubes,
             self.dials.spread.says().replace(' ', "-"),
+            if self.dials.kept { "kept" } else { "pushed" },
             self.dials.meshes.says().replace(' ', "-"),
             self.dials.lamps,
             self.dials.casters(),
@@ -575,26 +676,52 @@ impl Game for Load {
             return;
         };
 
-        for n in 0..self.dials.cubes {
-            let mesh = match self.dials.meshes {
-                Meshes::One => cube,
-                Meshes::Many => match self.many.get(n as usize) {
-                    Some(mesh) => *mesh,
-                    None => cube,
-                },
-            };
+        // handed over once rather than every frame, per spec 0058. One mesh
+        // only: a kept run is one mesh and one texture, so a mesh each would
+        // be one run per cube and the dial would measure that instead.
+        let wanted = (self.dials.cubes, self.dials.spread);
 
-            scene.push_material(
-                mesh,
-                &Transform::at(self.at(n))
-                    .with_rotation(Quat::from_rotation_y(n as f32 * 0.37))
-                    .with_scale(Vec3::splat(match self.dials.spread {
-                        Spread::Block => SPREAD / 40.0,
-                        Spread::Shell => SHELL_CUBE,
-                    })),
-                vec4(0.72, 0.74, 0.80, 1.0),
-                64.0,
-            );
+        if self.dials.kept && self.dials.meshes == Meshes::One {
+            // built again when a dial moves, and not otherwise: the point of
+            // the thing is that standing still costs nothing
+            if self.kept_for != Some(wanted) {
+                for kept in self.keeping.drain(..) {
+                    scene.drop(kept);
+                }
+
+                let mut patches: Vec<Vec<Instance>> = vec![Vec::new(); PATCHES];
+
+                for n in 0..self.dials.cubes {
+                    let standing = self.standing(n);
+
+                    patches[self.patch(n)].push(Instance::new(&standing, CUBE_COLOUR, CUBE_SHINE));
+                }
+
+                self.keeping = patches
+                    .iter()
+                    .filter(|patch| !patch.is_empty())
+                    .map(|patch| scene.keep(cube, TextureId::WHITE, patch))
+                    .collect();
+                self.kept_for = Some(wanted);
+            }
+        } else {
+            for kept in self.keeping.drain(..) {
+                scene.drop(kept);
+            }
+
+            self.kept_for = None;
+
+            for n in 0..self.dials.cubes {
+                let mesh = match self.dials.meshes {
+                    Meshes::One => cube,
+                    Meshes::Many => match self.many.get(n as usize) {
+                        Some(mesh) => *mesh,
+                        None => cube,
+                    },
+                };
+
+                scene.push_material(mesh, &self.standing(n), CUBE_COLOUR, CUBE_SHINE);
+            }
         }
 
         for n in 0..self.dials.lamps.min(MAX_POINT_LIGHTS as u32) {
@@ -628,6 +755,7 @@ impl Game for Load {
             self.dials.meshes,
             self.dials.culling,
             self.dials.spread,
+            self.dials.kept,
         );
 
         match input.key {
@@ -645,6 +773,7 @@ impl Game for Load {
             KeyboardKey::M => self.dials.meshes = self.dials.meshes.flip(),
             KeyboardKey::K => self.dials.culling = !self.dials.culling,
             KeyboardKey::B => self.dials.spread = self.dials.spread.flip(),
+            KeyboardKey::P => self.dials.kept = !self.dials.kept,
             _ => (),
         }
 
@@ -656,6 +785,7 @@ impl Game for Load {
                 self.dials.meshes,
                 self.dials.culling,
                 self.dials.spread,
+                self.dials.kept,
             )
         {
             self.costs.clear();

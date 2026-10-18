@@ -1782,10 +1782,38 @@ impl Renderer {
                 texture,
                 bounds: self.meshes[mesh.0].bounds,
                 instances,
+                round: None,
             });
         }
 
-        let (instances, drawn) = culling::pick(&views, &pushed, eye);
+        // and what the game handed over once rather than this frame, per
+        // spec 0058. Same picking, with a sphere round each run that the
+        // view is asked about before any of its instances are.
+        let mut kept: Vec<culling::Pushed> = Vec::new();
+
+        for keeping in scene.keepings() {
+            if keeping.mesh.0 >= self.meshes.len() {
+                log::warn!(
+                    "a scene kept mesh {:?}, which was never added",
+                    keeping.mesh
+                );
+                continue;
+            }
+            if keeping.texture.0 >= self.textures.len() {
+                log::warn!(
+                    "a scene kept texture {:?}, which was never added",
+                    keeping.texture
+                );
+                continue;
+            }
+
+            kept.push(culling::of_a_keeping(
+                keeping,
+                self.meshes[keeping.mesh.0].bounds,
+            ));
+        }
+
+        let (instances, drawn) = culling::pick(&views, &pushed, &kept, eye);
 
         if drawn.anything {
             let bytes: &[u8] = bytemuck::cast_slice(&instances);

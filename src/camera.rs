@@ -70,6 +70,21 @@ impl Frustum {
             .all(|side| Vec3::new(side.x, side.y, side.z).dot(at) + side.w >= -radius)
     }
 
+    /// Whether the whole of a sphere is inside, with none of it hanging
+    /// over an edge.
+    ///
+    /// The other question, and the one spec 0058 asks first: a thing that is
+    /// wholly inside needs none of its parts measured, and a thing that only
+    /// touches does. Says no to some spheres that are wholly inside, in the
+    /// corners, which costs a run being measured one at a time rather than
+    /// taken whole. The error is the right way round for the same reason
+    /// `holds_sphere`'s is.
+    pub fn holds_all_of(&self, at: Vec3, radius: f32) -> bool {
+        self.sides
+            .iter()
+            .all(|side| Vec3::new(side.x, side.y, side.z).dot(at) + side.w >= radius)
+    }
+
     /// Whether a point is inside.
     pub fn holds(&self, at: Vec3) -> bool {
         self.holds_sphere(at, 0.0)
