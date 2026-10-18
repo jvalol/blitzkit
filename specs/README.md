@@ -63,6 +63,7 @@ not a priority, and it never changes once a spec exists.
 | [0054](0054-the-order-of-the-examples.md) | What the examples page shows and in what order: worth looking at rather than chronological, groups kept whole, and tower gone altogether because cairn is the better example of the same thing |
 | [0055](0055-everything-playable-in-the-page.md) | Every game playable in the page the way the examples are: what already holds, what fourteen repos will cost, and what is not decided |
 | [0056](0056-what-a-frame-costs.md) | What a frame costs and how to measure it, since nothing here has ever been timed: vsync, the delta cap, and a scene with dials on it (draft) |
+| [0057](0057-not-drawing-what-you-cannot-see.md) | Leaving out of each pass what that pass cannot see: a quarter of the draws in the arcade, a loss in a benchmark that fills the frame, and a dial to tell them apart |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.

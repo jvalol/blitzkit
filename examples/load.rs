@@ -119,6 +119,14 @@ struct Dials {
     lamps: u32,
     casting: bool,
     meshes: Meshes,
+    /// Whether each pass leaves out what it cannot see, per spec 0057.
+    ///
+    /// A dial rather than a measurement taken twice, because what this
+    /// example found out about measurements is that the same sweep twenty
+    /// minutes apart differs by a factor of two. On and off have to be a
+    /// keypress apart in one run of one binary or the two numbers cannot be
+    /// read against each other. Spec 0056 on how steady any of this is.
+    culling: bool,
 }
 
 impl Dials {
@@ -132,15 +140,32 @@ impl Dials {
     fn sweep() -> Vec<Dials> {
         let mut out = Vec::new();
 
-        for meshes in [Meshes::One, Meshes::Many] {
-            for cubes in CUBES {
+        for cubes in CUBES {
+            // the same block twice, culled and not, one after the other.
+            // **Next to each other and not in two blocks**, because this
+            // machine drifts: the same configuration came out at 0.71 ms at
+            // the top of a sweep and 1.89 at the bottom of the same sweep,
+            // which is more than the thing being measured. Spec 0056 on how
+            // steady any of this is; spec 0057 for what the pair is for.
+            for culling in [true, false] {
                 out.push(Dials {
                     cubes,
                     lamps: 0,
                     casting: false,
-                    meshes,
+                    meshes: Meshes::One,
+                    culling,
                 });
             }
+        }
+
+        for cubes in CUBES {
+            out.push(Dials {
+                cubes,
+                lamps: 0,
+                casting: false,
+                meshes: Meshes::Many,
+                culling: true,
+            });
         }
 
         for lamps in LAMPS {
@@ -149,12 +174,14 @@ impl Dials {
                 lamps,
                 casting: false,
                 meshes: Meshes::One,
+                culling: true,
             });
             out.push(Dials {
                 cubes: 1728,
                 lamps,
                 casting: true,
                 meshes: Meshes::One,
+                culling: true,
             });
         }
 
@@ -222,6 +249,7 @@ impl Load {
                 lamps: 4,
                 casting: false,
                 meshes: Meshes::One,
+                culling: true,
             }),
             cube: None,
             many: Vec::new(),
@@ -262,13 +290,16 @@ impl Load {
 
         vec![
             String::from("Up and down for cubes, left and right for lamps, C to cast."),
-            String::from("M to switch between one mesh and a mesh each, escape to quit."),
+            String::from(
+                "M to switch between one mesh and a mesh each, K for culling, escape to quit.",
+            ),
             format!(
-                "{} cubes, {}, {} lamps, {} casting, {}",
+                "{} cubes, {}, {} lamps, {} casting, culling {}, {}",
                 self.dials.cubes,
                 self.dials.meshes.says(),
                 self.dials.lamps,
                 self.dials.casters(),
+                if self.dials.culling { "on" } else { "off" },
                 if self.waiting {
                     "waiting for the display, so these numbers are the display's"
                 } else {
@@ -312,7 +343,7 @@ impl Load {
     /// hundred by twelve hundred is most of a frame on its own, and a row
     /// without them is a number nobody can reproduce.
     fn header() -> &'static str {
-        "cubes,meshes,lamps,casting,present,samples,surface,draws,triangles,frames,\
+        "cubes,meshes,lamps,casting,culling,present,samples,surface,draws,triangles,frames,\
          work_ms,work_95_ms,work_worst_ms,between_ms,gpu_ms"
     }
 
@@ -330,11 +361,12 @@ impl Load {
         };
 
         format!(
-            "{},{},{},{},{},{},{}x{},{},{},{},{:.3},{:.3},{:.3},{:.3},{}",
+            "{},{},{},{},{},{},{},{}x{},{},{},{},{:.3},{:.3},{:.3},{:.3},{}",
             self.dials.cubes,
             self.dials.meshes.says().replace(' ', "-"),
             self.dials.lamps,
             self.dials.casters(),
+            if self.dials.culling { "on" } else { "off" },
             if self.waiting { "vsync" } else { "free" },
             self.samples,
             self.surface.0,
@@ -507,6 +539,7 @@ impl Game for Load {
             self.dials.lamps,
             self.dials.casting,
             self.dials.meshes,
+            self.dials.culling,
         );
 
         match input.key {
@@ -522,6 +555,7 @@ impl Game for Load {
             KeyboardKey::Left => self.dials.lamps = step(&LAMPS, self.dials.lamps, -1),
             KeyboardKey::C => self.dials.casting = !self.dials.casting,
             KeyboardKey::M => self.dials.meshes = self.dials.meshes.flip(),
+            KeyboardKey::K => self.dials.culling = !self.dials.culling,
             _ => (),
         }
 
@@ -531,6 +565,7 @@ impl Game for Load {
                 self.dials.lamps,
                 self.dials.casting,
                 self.dials.meshes,
+                self.dials.culling,
             )
         {
             self.costs.clear();
@@ -545,6 +580,9 @@ impl Game for Load {
         let counted = renderer.counted();
 
         self.counted = (counted.draws, counted.triangles);
+        // the dial, told to the renderer here rather than when the key is
+        // pressed: a sweep moves the dials without touching a key. Spec 0057.
+        renderer.set_culling(self.dials.culling);
         self.gpu = renderer.gpu_seconds();
         self.waiting = renderer.waiting_for_the_display();
         self.samples = renderer.samples();

@@ -8,7 +8,7 @@
 //! can be checked without one; the two are kept in step by hand, which is the
 //! gap the spec's hand checks cover.
 
-use glam::Vec3;
+use glam::{Mat4, Vec3};
 
 /// A light with no position, only a direction, like the sun.
 #[derive(Debug, Copy, Clone)]
@@ -216,6 +216,31 @@ pub struct SpotLight {
 }
 
 impl SpotLight {
+    /// The matrix that puts a world position on this spot's shadow map.
+    ///
+    /// Here rather than at each of the two places that wanted it: the
+    /// uniform the shader reads, and the frustum spec 0057 culls that map
+    /// against. Two accounts of one matrix would come apart the first time
+    /// one of them learned about a straight down cone.
+    pub fn view_projection(&self) -> Mat4 {
+        let direction = self.direction.normalize_or_zero();
+        // a cone pointing nowhere points down, because a view matrix built
+        // on a zero direction is all NaN and a map full of NaN is a room
+        // full of shadow
+        let direction = if direction.length_squared() < 0.5 {
+            Vec3::NEG_Y
+        } else {
+            direction
+        };
+
+        crate::shadow::spot_view_projection(
+            self.position,
+            direction,
+            self.outer.max(self.inner),
+            self.range.max(0.0),
+        )
+    }
+
     pub fn new(
         position: Vec3,
         direction: Vec3,

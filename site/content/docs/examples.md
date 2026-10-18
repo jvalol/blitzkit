@@ -236,8 +236,9 @@ cargo run --release --example load
 ```
 
 Up and down change how many cubes there are, left and right how many lamps, C
-switches shadow casting on and off, and M switches between drawing one cube
-mesh many times and drawing a mesh each. Escape quits.
+switches shadow casting on and off, M switches between drawing one cube mesh
+many times and drawing a mesh each, and K switches off the culling, which is
+the engine leaving out of each pass what that pass cannot see. Escape quits.
 
 The numbers are the point. **Work** is the engine's own: the
 whole frame from the top to the end of the submit, with the wait for the

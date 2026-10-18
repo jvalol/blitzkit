@@ -8,6 +8,7 @@
 //! A game never sees a wgpu type. Anything uploaded comes back as a handle.
 
 pub mod coplanar;
+mod culling;
 pub mod depth;
 pub mod outline;
 pub mod render_text;
@@ -38,8 +39,9 @@ const WHICH_INDEXES: usize = if POINT_SHADOW_LAYERS > crate::lighting::MAX_SPOT_
     crate::lighting::MAX_SPOT_LIGHTS + 1
 };
 use crate::texture::TextureData;
+use culling::{Drawn, Seen, FIRST_LAMP, FIRST_SPOT, PICTURE, SUN, VIEWS};
 use render_text::*;
-use scene::{Batch, Instance, MeshId, Scene, TextureId};
+use scene::{Instance, MeshId, Scene, TextureId};
 
 use std::sync::Arc;
 
@@ -119,6 +121,13 @@ pub struct Renderer {
     /// Whether the march happens at all. A cost, and a game with nothing
     /// resting on anything does not need it.
     contact_shadows: bool,
+    /// Whether each pass leaves out what it cannot see. Spec 0057.
+    ///
+    /// On, because a game should not have to ask not to draw the room behind
+    /// it. Off is for measuring what it saves, which is what `load` does
+    /// with it: a comparison made in one binary on one machine in one minute
+    /// is the only kind this project has found it can trust.
+    culling: bool,
     meshes: Vec<GpuMesh>,
     /// Whether a coplanar check is owed, and what the last one found. A game
     /// asks for one on a key press and reads the answer back the frame after.
@@ -742,6 +751,7 @@ impl Renderer {
             scene_depth_layout,
             scene_depth_bind_group,
             contact_shadows: true,
+            culling: true,
             translucent_pipelines,
             meshes: Vec::new(),
             asked_fights: false,
@@ -1080,6 +1090,15 @@ impl Renderer {
         self.contact_shadows = on;
     }
 
+    /// Whether each pass leaves out what it cannot see. Spec 0057.
+    pub fn set_culling(&mut self, on: bool) {
+        self.culling = on;
+    }
+
+    pub fn culling(&self) -> bool {
+        self.culling
+    }
+
     pub fn contact_shadows(&self) -> bool {
         self.contact_shadows
     }
@@ -1264,13 +1283,13 @@ impl Renderer {
         // the light sees translucent things as solid, because a shadow map
         // holds a depth and has nowhere to put an alpha. It does not see a
         // glowing thing at all, per spec 0039.
-        let (opaque, translucent, batches) = self.upload_instances(scene);
+        let drawn = self.upload_instances(scene);
         let outlines = self.upload_outlines(scene);
 
         // what the light can see, first of all. Skipped when nothing is drawn in
         // 3D: the instance buffer is empty then, and slicing an empty buffer is
         // a panic in wgpu.
-        if !batches.is_empty() {
+        if drawn.anything {
             // the sun first, then one pass for each spot, per spec 0021. Every
             // spot's map is cleared whether or not it is in use, so a spot that
             // was switched off this frame cannot leave last frame's shadow
@@ -1281,12 +1300,17 @@ impl Renderer {
                 .min(crate::lighting::MAX_SPOT_LIGHTS);
             let sun = crate::lighting::MAX_SPOT_LIGHTS as u32;
 
-            let mut maps: Vec<(u32, &wgpu::TextureView)> = vec![(sun, &self.shadow_view)];
+            // each map with the slot of the run it draws, per spec 0057: a
+            // map is filled with what that light can see and not with what
+            // the camera can, because a thing behind you throws its shadow
+            // into the picture.
+            let mut maps: Vec<(u32, &wgpu::TextureView, usize)> =
+                vec![(sun, &self.shadow_view, SUN)];
             for (index, layer) in self.spot_shadow_layers.iter().enumerate() {
-                maps.push((index as u32, layer));
+                maps.push((index as u32, layer, FIRST_SPOT + index));
             }
 
-            for (which, view) in maps {
+            for (which, view, slot) in maps {
                 let mut shadow_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("Shadow Pass"),
                     color_attachments: &[],
@@ -1314,7 +1338,7 @@ impl Renderer {
                 shadow_pass.set_bind_group(1, &self.which_bind_groups[which as usize], &[]);
                 shadow_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
-                for (mesh_id, texture_id, first, count) in batches.iter() {
+                for (mesh_id, texture_id, first, count) in drawn.at(slot).casting.iter() {
                     // a texture with holes casts no shadow here, for the
                     // reason the prepass skips it: this pass has no texture
                     // bound, so a line of lettering would throw the shadow
@@ -1338,6 +1362,9 @@ impl Renderer {
             // same reason the spots' are.
             let faces = point_faces(scene.point_lights(), self.camera.position);
             for (layer, view) in self.point_shadow_layers.iter().enumerate() {
+                // six layers to a lamp, and a lamp's six faces all see what
+                // the lamp reaches. Spec 0057.
+                let slot = FIRST_LAMP + layer / 6;
                 let mut shadow_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("Point Shadow Pass"),
                     color_attachments: &[],
@@ -1366,7 +1393,7 @@ impl Renderer {
                 shadow_pass.set_bind_group(2, &self.point_faces_bind_group, &[]);
                 shadow_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
-                for (mesh_id, texture_id, first, count) in batches.iter() {
+                for (mesh_id, texture_id, first, count) in drawn.at(slot).casting.iter() {
                     // a texture with holes casts no shadow here, for the
                     // reason the prepass skips it: this pass has no texture
                     // bound, so a line of lettering would throw the shadow
@@ -1408,12 +1435,12 @@ impl Renderer {
 
             // only the solid geometry: see-through things do not write depth in
             // the mesh pass either, per spec 0018
-            if !opaque.is_empty() {
+            if !drawn.picture().opaque.is_empty() {
                 prepass.set_pipeline(&self.prepass_pipeline);
                 prepass.set_bind_group(0, &self.camera_bind_group, &[]);
                 prepass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
-                for (mesh_id, texture_id, first, count) in opaque.iter() {
+                for (mesh_id, texture_id, first, count) in drawn.picture().opaque.iter() {
                     let mesh = &self.meshes[mesh_id.0];
                     // a texture with holes in it cannot write depth with this
                     // pipeline: it has no texture bound and would fill in the
@@ -1436,7 +1463,7 @@ impl Renderer {
                 // per batch where the run above binds nothing at all.
                 prepass.set_pipeline(&self.cutout_prepass_pipeline);
 
-                for (mesh_id, texture_id, first, count) in opaque.iter() {
+                for (mesh_id, texture_id, first, count) in drawn.picture().opaque.iter() {
                     let mesh = &self.meshes[mesh_id.0];
                     if mesh.index_count == 0
                         || !self.holed.get(texture_id.0).copied().unwrap_or(false)
@@ -1492,7 +1519,7 @@ impl Renderer {
 
             // This pass clears the frame, so it runs even with nothing 3D in
             // it. Only the drawing waits on an instance buffer that exists.
-            if !batches.is_empty() {
+            if drawn.anything {
                 mesh_pass.set_bind_group(0, &self.camera_bind_group, &[]);
                 mesh_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
@@ -1500,9 +1527,9 @@ impl Renderer {
                 // blended over it. Then the far side of everything see-through,
                 // then the near side, per spec 0018.
                 let runs = [
-                    (&self.mesh_pipeline, &opaque),
-                    (&self.translucent_pipelines[0], &translucent),
-                    (&self.translucent_pipelines[1], &translucent),
+                    (&self.mesh_pipeline, &drawn.picture().opaque),
+                    (&self.translucent_pipelines[0], &drawn.picture().translucent),
+                    (&self.translucent_pipelines[1], &drawn.picture().translucent),
                 ];
 
                 for (pipeline, batches) in runs {
@@ -1729,16 +1756,15 @@ impl Renderer {
     ///
     /// A run is one of four kinds, so the instances of a kind lie together and
     /// a kind is a span rather than a list of indices.
-    fn upload_instances(&mut self, scene: &Scene) -> (Vec<Batch>, Vec<Batch>, Vec<Batch>) {
+    fn upload_instances(&mut self, scene: &Scene) -> Drawn {
         // the world is handed over moved so that the eye is at the origin,
         // per spec 0051
         let eye = self.camera.position;
-        let mut instances: Vec<Instance> = Vec::new();
-        let mut opaque = Vec::new();
-        let mut translucent = Vec::new();
-        let mut casting = Vec::new();
+        let views = self.views(scene);
+        let batches = scene.batches();
+        let mut pushed: Vec<culling::Pushed> = Vec::with_capacity(batches.len());
 
-        for (mesh, texture, mesh_instances) in scene.batches() {
+        for (mesh, texture, instances) in batches {
             if mesh.0 >= self.meshes.len() {
                 log::warn!("a scene asked for mesh {:?}, which was never added", mesh);
                 continue;
@@ -1751,52 +1777,80 @@ impl Renderer {
                 continue;
             }
 
-            // one mesh can be drawn solid here and see-through there and
-            // glowing somewhere else, so the split is per instance and each
-            // quarter gets its own run
-            for (see_through, glowing) in
-                [(false, false), (false, true), (true, false), (true, true)]
-            {
-                let first = instances.len() as u32;
-                instances.extend(
-                    mesh_instances
-                        .iter()
-                        .filter(|instance| {
-                            instance.is_translucent() == see_through && instance.glows() == glowing
-                        })
-                        .map(|instance| instance.from_the_eye(eye)),
-                );
+            pushed.push(culling::Pushed {
+                mesh,
+                texture,
+                bounds: self.meshes[mesh.0].bounds,
+                instances,
+            });
+        }
 
-                let count = instances.len() as u32 - first;
-                if count == 0 {
-                    continue;
-                }
+        let (instances, drawn) = culling::pick(&views, &pushed, eye);
 
-                let run = (mesh, texture, first, count);
-                if see_through {
-                    translucent.push(run);
-                } else {
-                    opaque.push(run);
-                }
-                if !glowing {
-                    casting.push(run);
-                }
+        if drawn.anything {
+            let bytes: &[u8] = bytemuck::cast_slice(&instances);
+            if bytes.len() as u64 > self.instance_buffer.size() {
+                self.instance_buffer =
+                    create_buffer_init(&self.device, bytes, wgpu::BufferUsages::VERTEX);
+            } else {
+                self.queue.write_buffer(&self.instance_buffer, 0, bytes);
             }
         }
 
-        if instances.is_empty() {
-            return (opaque, translucent, casting);
+        drawn
+    }
+
+    /// What each pass of this frame can see. Spec 0057.
+    ///
+    /// One for every slot, every frame, in the same order: the picture, the
+    /// sun, the four spots, then the lamps that cast. A map no light claimed
+    /// gets a view that keeps nothing, so the slots never shift and its pass
+    /// is skipped anyway.
+    ///
+    /// With culling off there is one view holding everything and every pass
+    /// reads it, which is one copy of the frame in the buffer and what the
+    /// engine did before this.
+    fn views(&self, scene: &Scene) -> Vec<Seen> {
+        if !self.culling {
+            return vec![Seen::All];
         }
 
-        let bytes: &[u8] = bytemuck::cast_slice(&instances);
-        if bytes.len() as u64 > self.instance_buffer.size() {
-            self.instance_buffer =
-                create_buffer_init(&self.device, bytes, wgpu::BufferUsages::VERTEX);
-        } else {
-            self.queue.write_buffer(&self.instance_buffer, 0, bytes);
+        let mut views = vec![Seen::Nothing; VIEWS];
+
+        views[PICTURE] = Seen::Through(self.camera.frustum());
+        // the sun's map covers the bounds the game gave the renderer, so its
+        // frustum is the one the shader is already using
+        views[SUN] = Seen::Through(crate::camera::Frustum::of(shadow::light_view_projection(
+            scene.light.direction,
+            &self.scene_bounds,
+        )));
+
+        for (n, spot) in scene
+            .spot_lights()
+            .iter()
+            .take(crate::lighting::MAX_SPOT_LIGHTS)
+            .enumerate()
+        {
+            views[FIRST_SPOT + n] =
+                Seen::Through(crate::camera::Frustum::of(spot.view_projection()));
         }
 
-        (opaque, translucent, casting)
+        // and a lamp sees as far as it reaches, which is all six faces of
+        // its map at once
+        let lamps = scene.point_lights();
+
+        for (n, index) in crate::lighting::casting_lamps(lamps)
+            .into_iter()
+            .take(crate::lighting::MAX_SHADOWING_POINT_LIGHTS)
+            .enumerate()
+        {
+            views[FIRST_LAMP + n] = Seen::Round {
+                at: lamps[index].position,
+                reach: lamps[index].range,
+            };
+        }
+
+        views
     }
 
     /// Writes this frame's outlines into their buffer, per spec 0046, and
@@ -1936,14 +1990,11 @@ impl GpuSpotLight {
             cos_inner: [cos_inner, 0.0, 0.0, 0.0],
             // worked out in the world and then told where the world went, per
             // spec 0051: a matrix that took a world position takes an
-            // eye-relative one by letting the eye back in first.
-            view_projection: (shadow::spot_view_projection(
-                light.position,
-                direction,
-                light.outer.max(light.inner),
-                range,
-            ) * glam::Mat4::from_translation(eye))
-            .to_cols_array(),
+            // eye-relative one by letting the eye back in first. The world
+            // one is the light's own, so the map this fills and the frustum
+            // spec 0057 culls it against are the same shape.
+            view_projection: (light.view_projection() * glam::Mat4::from_translation(eye))
+                .to_cols_array(),
         }
     }
 }

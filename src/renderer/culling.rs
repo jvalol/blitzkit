@@ -1,0 +1,665 @@
+//! What a pass can see, and what it can therefore leave out. Spec 0057.
+//!
+//! **The engine drew the room behind you until this.** Spec 0050 built the
+//! six planes and gave them to games, which is how the arcade keeps its lamp
+//! list under the cap, and the engine never used them on its own geometry.
+//! Spec 0056 then had to run Bevy's stress test with `--no-frustum-culling`
+//! to compare like with like, because the thing that flag turns off is the
+//! thing this engine had none of.
+//!
+//! Every test in here is one sphere against one view. Round rather than
+//! boxed, because a turned box needs eight corners put through a matrix and a
+//! sphere needs one point and a radius, and the error a sphere makes is to
+//! keep something it did not have to. The other error leaves a hole in the
+//! picture.
+
+use glam::{Mat4, Vec3};
+
+use crate::camera::Frustum;
+use crate::collision::Aabb;
+use crate::renderer::scene::{Batch, Instance, MeshId, TextureId};
+
+/// What one pass can see.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Seen {
+    /// A camera or a shadow map: six planes.
+    Through(Frustum),
+    /// A lamp's own reach, which is what its six faces share.
+    ///
+    /// Light leaves a lamp and travels out, so anything that can block it is
+    /// inside the sphere the lamp lights. A caster outside that sphere casts
+    /// nothing into the lamp's map, whichever face of it you ask about, and
+    /// `PointLight::falloff` is exactly nought at the range, per spec 0020,
+    /// so the sphere is the lamp and not an estimate of it.
+    Round { at: Vec3, reach: f32 },
+    /// Everything there is, which is what the engine did before spec 0057
+    /// and what it does with culling switched off.
+    All,
+    /// A shadow map no light claimed this frame.
+    ///
+    /// Its pass is skipped, so what this holds is never drawn. It is here so
+    /// that a map is always at the same place in the list whether or not it
+    /// is in use: a frame where the slots shift is a frame where one map is
+    /// filled with another's set.
+    Nothing,
+}
+
+impl Seen {
+    pub(crate) fn keeps(&self, at: Vec3, radius: f32) -> bool {
+        match self {
+            Seen::Through(frustum) => frustum.holds_sphere(at, radius),
+            Seen::Round { at: lamp, reach } => lamp.distance(at) <= reach + radius,
+            Seen::All => true,
+            Seen::Nothing => false,
+        }
+    }
+}
+
+/// The sphere an instance of a mesh fills, in the world.
+///
+/// The mesh's own box put through the instance's matrix: its middle moved,
+/// and its half diagonal grown by the longest of the matrix's three axes.
+/// Taking the longest rather than measuring the turned box is what makes
+/// this a sphere and not a box, and it is why a mesh scaled 1 by 1 by 40
+/// gets a sphere far bigger than it needs. That is a thing kept that did not
+/// need keeping, which is the error this is allowed to make.
+pub(crate) fn sphere(bounds: &Aabb, model: &Mat4) -> (Vec3, f32) {
+    let middle = model.transform_point3(bounds.center());
+    let stretch = [model.x_axis, model.y_axis, model.z_axis]
+        .iter()
+        .map(|axis| axis.truncate().length())
+        .fold(0.0f32, f32::max);
+
+    (middle, bounds.size().length() * 0.5 * stretch)
+}
+
+/// Which run of the instance buffer a pass reads, when a frame is culled.
+///
+/// Fixed slots rather than a list of whatever is in use, because a frame
+/// where the slots shift is a frame where one map is filled with another
+/// map's set, and that is a bug you see as a shadow from the wrong light.
+/// Spec 0057.
+pub(crate) const PICTURE: usize = 0;
+pub(crate) const SUN: usize = 1;
+pub(crate) const FIRST_SPOT: usize = 2;
+pub(crate) const FIRST_LAMP: usize = FIRST_SPOT + crate::lighting::MAX_SPOT_LIGHTS;
+pub(crate) const VIEWS: usize = FIRST_LAMP + crate::lighting::MAX_SHADOWING_POINT_LIGHTS;
+
+/// The runs one view's pass draws.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Runs {
+    pub(crate) opaque: Vec<Batch>,
+    pub(crate) translucent: Vec<Batch>,
+    pub(crate) casting: Vec<Batch>,
+}
+
+/// What this frame put in the instance buffer, and which pass reads what.
+///
+/// With culling off there is one run and every pass reads it, which is what
+/// the engine did before spec 0057.
+pub(crate) struct Drawn {
+    runs: Vec<Runs>,
+    culled: bool,
+    pub(crate) anything: bool,
+}
+
+impl Drawn {
+    pub(crate) fn of(runs: Vec<Runs>, anything: bool) -> Self {
+        let culled = runs.len() > 1;
+
+        Self {
+            runs,
+            culled,
+            anything,
+        }
+    }
+
+    /// What a given slot's pass draws, which is the one run when nothing was
+    /// culled.
+    pub(crate) fn at(&self, slot: usize) -> &Runs {
+        let slot = if self.culled { slot } else { 0 };
+
+        self.runs.get(slot).unwrap_or(&EMPTY_RUNS)
+    }
+
+    pub(crate) fn picture(&self) -> &Runs {
+        self.at(PICTURE)
+    }
+}
+
+/// What a slot out of range reads, which cannot happen and is not worth a
+/// panic in a renderer if it does.
+static EMPTY_RUNS: Runs = Runs {
+    opaque: Vec::new(),
+    translucent: Vec::new(),
+    casting: Vec::new(),
+};
+
+/// One mesh's worth of what a scene pushed, with the box that mesh fills.
+pub(crate) struct Pushed<'a> {
+    pub(crate) mesh: MeshId,
+    pub(crate) texture: TextureId,
+    pub(crate) bounds: Aabb,
+    pub(crate) instances: &'a [Instance],
+}
+
+/// Lays this frame's instances out in the buffer, a run for each pass, and
+/// says where each run is. Spec 0057.
+///
+/// Pure, and apart from the renderer on purpose: what this decides is which
+/// instances a pass draws, and a decision that can only be checked by
+/// looking at a window is a decision nothing checks.
+pub(crate) fn pick(views: &[Seen], pushed: &[Pushed], eye: Vec3) -> (Vec<Instance>, Drawn) {
+    let mut instances: Vec<Instance> = Vec::new();
+    let mut runs: Vec<Runs> = vec![Runs::default(); views.len()];
+    let mut quarter: Vec<&Instance> = Vec::new();
+    let mut keeps: Vec<bool> = Vec::new();
+
+    for one in pushed {
+        // one mesh can be drawn solid here and see-through there and glowing
+        // somewhere else, so the split is per instance and each quarter gets
+        // its own run
+        for (see_through, glowing) in [(false, false), (false, true), (true, false), (true, true)] {
+            quarter.clear();
+            quarter.extend(one.instances.iter().filter(|instance| {
+                instance.is_translucent() == see_through && instance.glows() == glowing
+            }));
+
+            if quarter.is_empty() {
+                continue;
+            }
+
+            // written once and shared by every pass that can see all of it,
+            // which is the usual case for a shadow map that covers the
+            // world: without this a frame carries one copy of itself per
+            // pass, and at sixty four thousand cubes that cost more than the
+            // culling saved.
+            let mut whole: Option<(u32, u32)> = None;
+
+            // each pass gets its own run, because each pass sees something
+            // different: the picture cannot be shown the room behind you,
+            // and a shadow map must be, since a thing behind you throws its
+            // shadow into the picture.
+            for (view, runs) in views.iter().zip(runs.iter_mut()) {
+                // a map no light claimed is cleared and never drawn, so
+                // nothing is measured for it at all
+                if matches!(view, Seen::Nothing) {
+                    continue;
+                }
+
+                keeps.clear();
+                keeps.extend(quarter.iter().map(|instance| {
+                    let (at, radius) =
+                        sphere(&one.bounds, &Mat4::from_cols_array_2d(&instance.model));
+
+                    view.keeps(at, radius)
+                }));
+
+                let count = keeps.iter().filter(|kept| **kept).count() as u32;
+
+                if count == 0 {
+                    continue;
+                }
+
+                let (first, count) = if count as usize == quarter.len() {
+                    *whole.get_or_insert_with(|| {
+                        let first = instances.len() as u32;
+                        instances.extend(quarter.iter().map(|one| one.from_the_eye(eye)));
+
+                        (first, count)
+                    })
+                } else {
+                    let first = instances.len() as u32;
+                    instances.extend(
+                        quarter
+                            .iter()
+                            .zip(keeps.iter())
+                            .filter(|(_, kept)| **kept)
+                            .map(|(one, _)| one.from_the_eye(eye)),
+                    );
+
+                    (first, count)
+                };
+
+                let run = (one.mesh, one.texture, first, count);
+                if see_through {
+                    runs.translucent.push(run);
+                } else {
+                    runs.opaque.push(run);
+                }
+                if !glowing {
+                    runs.casting.push(run);
+                }
+            }
+        }
+    }
+
+    let anything = !instances.is_empty();
+
+    (instances, Drawn::of(runs, anything))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::camera::Camera;
+
+    fn looking() -> Camera {
+        let mut camera = Camera::new();
+        camera.position = Vec3::ZERO;
+        camera.target = -Vec3::Z;
+        camera.near = 0.1;
+        camera.far = 100.0;
+
+        camera
+    }
+
+    fn cube() -> Aabb {
+        Aabb::from_center_size(Vec3::ZERO, Vec3::ONE)
+    }
+
+    /// The eight corners of a box, which only a test needs: the engine's own
+    /// answer is a sphere and never asks where a corner went.
+    fn corners(bounds: &Aabb) -> [Vec3; 8] {
+        let (low, high) = (bounds.min, bounds.max);
+
+        [
+            Vec3::new(low.x, low.y, low.z),
+            Vec3::new(high.x, low.y, low.z),
+            Vec3::new(low.x, high.y, low.z),
+            Vec3::new(high.x, high.y, low.z),
+            Vec3::new(low.x, low.y, high.z),
+            Vec3::new(high.x, low.y, high.z),
+            Vec3::new(low.x, high.y, high.z),
+            Vec3::new(high.x, high.y, high.z),
+        ]
+    }
+
+    fn kept(seen: &Seen, bounds: &Aabb, model: Mat4) -> bool {
+        let (at, radius) = sphere(bounds, &model);
+
+        seen.keeps(at, radius)
+    }
+
+    /// Spec 0057: what is in front is kept and what is not is dropped.
+    #[test]
+    fn what_is_out_of_the_picture_is_dropped() {
+        let seen = Seen::Through(looking().frustum());
+
+        assert!(kept(
+            &seen,
+            &cube(),
+            Mat4::from_translation(Vec3::new(0.0, 0.0, -5.0))
+        ));
+
+        for away in [
+            Vec3::new(0.0, 0.0, 5.0),    // behind
+            Vec3::new(0.0, 0.0, -400.0), // past the far plane
+            Vec3::new(90.0, 0.0, -5.0),  // off to the side
+            Vec3::new(0.0, 90.0, -5.0),  // over the top
+        ] {
+            assert!(
+                !kept(&seen, &cube(), Mat4::from_translation(away)),
+                "a cube at {:?} was kept",
+                away
+            );
+        }
+    }
+
+    /// Spec 0057: a box round the camera is kept.
+    ///
+    /// The classic false drop, and the reason this is a test rather than a
+    /// line of arithmetic trusted on sight: every corner of the room you are
+    /// standing in is outside every plane of the frustum, so a test that
+    /// asks whether the corners are inside throws the room away and leaves
+    /// you in a void. A sphere round the middle of that room reaches every
+    /// plane, which is why the sphere is the test.
+    #[test]
+    fn a_box_round_the_camera_is_kept() {
+        let seen = Seen::Through(looking().frustum());
+        let room = Aabb::from_center_size(Vec3::ZERO, Vec3::splat(20.0));
+
+        assert!(kept(&seen, &room, Mat4::IDENTITY), "the room was dropped");
+
+        // and the same room as a unit cube scaled up, which is how a game
+        // actually pushes one
+        assert!(
+            kept(&seen, &cube(), Mat4::from_scale(Vec3::splat(20.0))),
+            "the scaled room was dropped"
+        );
+    }
+
+    /// Spec 0057: a thing across the near plane is kept, which is a thing
+    /// half behind you.
+    #[test]
+    fn a_box_across_the_near_plane_is_kept() {
+        let seen = Seen::Through(looking().frustum());
+
+        for z in [-0.3f32, -0.1, 0.0, 0.2] {
+            assert!(
+                kept(
+                    &seen,
+                    &cube(),
+                    Mat4::from_translation(Vec3::new(0.0, 0.0, z))
+                ),
+                "a cube at {} was dropped",
+                z
+            );
+        }
+    }
+
+    /// Spec 0057: the sphere covers the box, at any scale and any turn.
+    ///
+    /// The whole safety of this rests here. If the radius is short for some
+    /// rotation, the thing it belongs to is dropped while a corner of it is
+    /// still in the picture.
+    #[test]
+    fn the_sphere_covers_its_box() {
+        let bounds = Aabb::from_center_size(Vec3::new(0.3, -1.2, 0.8), Vec3::new(2.0, 0.5, 3.0));
+
+        for turn in [0.0f32, 0.3, 1.1, 2.4, 3.9, 5.6] {
+            for scale in [Vec3::ONE, Vec3::splat(3.0), Vec3::new(0.2, 4.0, 1.0)] {
+                let model = Mat4::from_scale_rotation_translation(
+                    scale,
+                    glam::Quat::from_euler(glam::EulerRot::YXZ, turn, turn * 0.5, turn * 0.25),
+                    Vec3::new(-4.0, 2.0, 7.0),
+                );
+                let (at, radius) = sphere(&bounds, &model);
+
+                for corner in corners(&bounds) {
+                    let moved = model.transform_point3(corner);
+
+                    assert!(
+                        at.distance(moved) <= radius + 1e-3,
+                        "a corner at {:?} is {:.3} out of a sphere of {:.3}",
+                        moved,
+                        at.distance(moved) - radius,
+                        radius
+                    );
+                }
+            }
+        }
+    }
+
+    /// Spec 0057: nothing with a corner in the picture is dropped, from
+    /// anywhere, pointing anywhere.
+    ///
+    /// The sweep the two tests above are the named cases of. A cheap test is
+    /// allowed to keep what it need not; it is never allowed to drop what
+    /// can be seen.
+    #[test]
+    fn nothing_with_a_corner_in_view_is_dropped() {
+        let mut camera = looking();
+        let bounds = Aabb::from_center_size(Vec3::ZERO, Vec3::new(1.0, 2.0, 0.5));
+        let mut looked = 0;
+
+        for (x, z) in [(0.0f32, 0.0), (6.0, -3.0), (-11.0, 8.0)] {
+            for turn in [0.0f32, 1.0, 2.0, 3.0, 4.0, 5.0] {
+                camera.position = Vec3::new(x, 1.6, z);
+                camera.target = camera.position + Vec3::new(turn.cos(), -0.2, turn.sin());
+
+                let seen = Seen::Through(camera.frustum());
+
+                for at in [
+                    Vec3::new(0.0, 0.0, -4.0),
+                    Vec3::new(3.0, 1.0, 2.0),
+                    Vec3::new(-7.0, 0.5, -6.0),
+                    Vec3::new(12.0, 2.0, 9.0),
+                    Vec3::new(0.0, 14.0, 0.0),
+                ] {
+                    for scale in [Vec3::ONE, Vec3::splat(5.0)] {
+                        let model = Mat4::from_scale_rotation_translation(
+                            scale,
+                            glam::Quat::from_rotation_y(turn),
+                            at,
+                        );
+                        let any_corner_in_view = corners(&bounds)
+                            .iter()
+                            .any(|corner| seen_holds(&seen, model.transform_point3(*corner)));
+
+                        if any_corner_in_view {
+                            looked += 1;
+
+                            assert!(
+                                kept(&seen, &bounds, model),
+                                "from {:?} a visible box at {:?} was dropped",
+                                camera.position,
+                                at
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        assert!(
+            looked > 20,
+            "only {} of the sweep had anything in view",
+            looked
+        );
+    }
+
+    /// A frame's worth of one cube pushed at each of these places.
+    fn pushed_at(places: &[Vec3]) -> Vec<Instance> {
+        places
+            .iter()
+            .map(|at| Instance::new(&crate::mesh::Transform::at(*at), glam::Vec4::ONE, 32.0))
+            .collect()
+    }
+
+    fn views_for(camera: &Camera, lamp: Option<(Vec3, f32)>) -> Vec<Seen> {
+        let mut views = vec![Seen::Nothing; VIEWS];
+
+        views[PICTURE] = Seen::Through(camera.frustum());
+
+        if let Some((at, reach)) = lamp {
+            views[FIRST_LAMP] = Seen::Round { at, reach };
+        }
+
+        views
+    }
+
+    /// Spec 0057: a shadow map keeps what the picture drops.
+    ///
+    /// The fault this guards is the tempting one: cull once, against the
+    /// camera, and hand the same run to every pass. A thing behind you casts
+    /// into the picture, so a shadow map filled with what the camera can see
+    /// loses the shadow of everything out of frame, which is a room whose
+    /// shadows switch off as you turn your head.
+    #[test]
+    fn a_shadow_keeps_what_the_picture_drops() {
+        let bounds = cube();
+        let behind = Vec3::new(0.0, 0.0, 6.0);
+        let instances = pushed_at(&[Vec3::new(0.0, 0.0, -4.0), behind]);
+        let pushed = vec![Pushed {
+            mesh: MeshId(0),
+            texture: TextureId::WHITE,
+            bounds,
+            instances: &instances,
+        }];
+        let views = views_for(&looking(), Some((behind, 3.0)));
+        let (_, drawn) = pick(&views, &pushed, Vec3::ZERO);
+
+        let kept = |runs: &Runs| runs.opaque.iter().map(|(_, _, _, n)| n).sum::<u32>();
+
+        assert_eq!(kept(drawn.picture()), 1, "the picture drew the one behind");
+        assert_eq!(
+            kept(drawn.at(FIRST_LAMP)),
+            1,
+            "the lamp lost the only thing it lights"
+        );
+        assert_eq!(
+            kept(drawn.at(SUN)),
+            0,
+            "the sun's slot was given a view it never got"
+        );
+    }
+
+    /// Spec 0057: every pass draws exactly what its own view keeps.
+    ///
+    /// The slots are fixed and the runs are spans into one buffer, and a
+    /// pass that sees the whole of a batch shares the span with every other
+    /// pass that does, so the ways this goes wrong are quiet: a map drawn
+    /// with another map's instances, or a shared span handed to a pass that
+    /// should have had fewer. Both look almost right.
+    ///
+    /// So this reads the buffer back and compares each slot's instances
+    /// against what that slot's view says it can see, rather than counting
+    /// them.
+    #[test]
+    fn each_pass_draws_exactly_what_it_can_see() {
+        let bounds = cube();
+        let places = [
+            Vec3::new(0.0, 0.0, -4.0),
+            Vec3::new(0.0, 0.0, -6.0),
+            Vec3::new(40.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 30.0),
+        ];
+        let instances = pushed_at(&places);
+        let pushed = vec![Pushed {
+            mesh: MeshId(0),
+            texture: TextureId::WHITE,
+            bounds,
+            instances: &instances,
+        }];
+        let views = views_for(&looking(), Some((Vec3::new(40.0, 0.0, 0.0), 2.0)));
+        let (written, drawn) = pick(&views, &pushed, Vec3::ZERO);
+
+        for (slot, view) in views.iter().enumerate() {
+            let mut drew: Vec<Vec3> = Vec::new();
+
+            for (_, _, first, count) in drawn.at(slot).opaque.iter() {
+                assert!(
+                    (*first + *count) as usize <= written.len(),
+                    "slot {} reads past the end of the buffer",
+                    slot
+                );
+
+                for n in *first..(*first + *count) {
+                    let model = Mat4::from_cols_array_2d(&written[n as usize].model);
+
+                    drew.push(model.transform_point3(Vec3::ZERO));
+                }
+            }
+
+            let mut should: Vec<Vec3> = places
+                .iter()
+                .copied()
+                .filter(|at| {
+                    let (middle, radius) = sphere(&bounds, &Mat4::from_translation(*at));
+
+                    view.keeps(middle, radius)
+                })
+                .collect();
+
+            drew.sort_by(|a, b| a.z.total_cmp(&b.z));
+            should.sort_by(|a, b| a.z.total_cmp(&b.z));
+
+            assert_eq!(
+                drew, should,
+                "slot {} drew something other than what it sees",
+                slot
+            );
+        }
+    }
+
+    /// Spec 0057: a batch with everything culled makes no run at all, rather
+    /// than a draw call for nothing.
+    #[test]
+    fn an_empty_batch_is_not_drawn() {
+        let bounds = cube();
+        let instances = pushed_at(&[Vec3::new(0.0, 0.0, 30.0)]);
+        let pushed = vec![Pushed {
+            mesh: MeshId(0),
+            texture: TextureId::WHITE,
+            bounds,
+            instances: &instances,
+        }];
+        let (written, drawn) = pick(&views_for(&looking(), None), &pushed, Vec3::ZERO);
+
+        assert!(drawn.picture().opaque.is_empty(), "a run was made for it");
+        assert!(drawn.picture().casting.is_empty());
+        assert!(written.is_empty(), "the instance was written anyway");
+        assert!(!drawn.anything, "the frame says it drew something");
+    }
+
+    /// And with culling off every pass reads one run, which is the engine as
+    /// it was before spec 0057 and the other half of the measurement.
+    #[test]
+    fn with_culling_off_every_pass_reads_one_run() {
+        let bounds = cube();
+        let instances = pushed_at(&[Vec3::new(0.0, 0.0, -4.0), Vec3::new(0.0, 0.0, 400.0)]);
+        let pushed = vec![Pushed {
+            mesh: MeshId(0),
+            texture: TextureId::WHITE,
+            bounds,
+            instances: &instances,
+        }];
+        let (written, drawn) = pick(&[Seen::All], &pushed, Vec3::ZERO);
+
+        assert_eq!(written.len(), 2, "something was left out anyway");
+
+        for slot in [PICTURE, SUN, FIRST_SPOT, FIRST_LAMP] {
+            assert_eq!(
+                drawn.at(slot).opaque,
+                drawn.picture().opaque,
+                "slot {} read something else",
+                slot
+            );
+        }
+    }
+
+    fn seen_holds(seen: &Seen, at: Vec3) -> bool {
+        seen.keeps(at, 0.0)
+    }
+
+    /// Spec 0057: a lamp's view is its reach, and it keeps what could block
+    /// it.
+    #[test]
+    fn a_lamp_sees_what_it_reaches() {
+        let seen = Seen::Round {
+            at: Vec3::new(2.0, 3.0, -1.0),
+            reach: 4.0,
+        };
+
+        assert!(kept(
+            &seen,
+            &cube(),
+            Mat4::from_translation(Vec3::new(2.0, 1.0, -1.0))
+        ));
+        // just outside the reach, but wide enough to still be inside it
+        assert!(kept(
+            &seen,
+            &cube(),
+            Mat4::from_scale_rotation_translation(
+                Vec3::splat(4.0),
+                glam::Quat::IDENTITY,
+                Vec3::new(2.0, 9.0, -1.0)
+            )
+        ));
+        assert!(!kept(
+            &seen,
+            &cube(),
+            Mat4::from_translation(Vec3::new(2.0, 9.0, -1.0))
+        ));
+    }
+
+    /// A map nobody claimed keeps nothing, so an unused slot cannot quietly
+    /// carry a frame's worth of instances.
+    #[test]
+    fn an_unclaimed_map_keeps_nothing() {
+        for away in [Vec3::ZERO, Vec3::splat(2.0)] {
+            assert!(!kept(&Seen::Nothing, &cube(), Mat4::from_translation(away)));
+        }
+    }
+
+    /// And everything is kept when a pass is told it sees everything, which
+    /// is culling switched off.
+    #[test]
+    fn seeing_everything_keeps_everything() {
+        for away in [Vec3::ZERO, Vec3::splat(900.0), Vec3::new(0.0, 0.0, 40.0)] {
+            assert!(kept(&Seen::All, &cube(), Mat4::from_translation(away)));
+        }
+    }
+}
