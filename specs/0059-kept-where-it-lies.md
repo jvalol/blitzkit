@@ -113,6 +113,33 @@ That also made each kind drawable in its own right. A run of solid things
 followed by glass is drawn out of two parts of its range, and only a run
 whose kinds are mixed up through it is written again this frame.
 
+### Where it stops
+
+The kept region and the frame's own instances share one buffer, and a
+device will only give a buffer so large: 256 MB here, which at a hundred and
+twenty bytes an instance is about two million two hundred thousand of them.
+Past that the engine cannot draw the scene at all.
+
+It found that at one and a half million rather than at two, because a
+buffer that is made again is made twice the size so that a scene which grows
+a little every frame does not make it every frame, and twice two hundred and
+forty megabytes is over the limit. It asks for no more than the device will
+give now, and says so when a scene wants more than that.
+
+Against Bevy on the same shell, a few minutes apart on this machine, their
+own frame time against the time between frames here:
+
+| cubes | blitzkit | Bevy |
+| --- | --- | --- |
+| 1024000 | 8.34 | 8.34 |
+| 2048000 | 9.22 | 12.37 |
+| 4096000 | will not draw | 23.48 |
+
+So this engine is level at a million, ahead at two, and stops at about two
+and a quarter where Bevy goes on. What stops it is one buffer, which is a
+smaller thing to fix than anything spec 0057 or 0058 was about, and it is
+not fixed here.
+
 ### Verified by hand
 
 - The million cube shell in `load` under P: 4.2 milliseconds, against

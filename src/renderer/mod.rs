@@ -1843,9 +1843,27 @@ impl Renderer {
         let made_again = wanted > self.instance_buffer.size();
 
         if made_again {
+            // asked for twice what is there, so a buffer that grows a little
+            // every frame is not made again every frame, and never for more
+            // than the device will give: at a hundred and twenty bytes an
+            // instance the usual limit of 256 MB is about two million of
+            // them, and doubling at one and a half million asked for more
+            // than that and took the frame down. Spec 0059.
+            let most = self.device.limits().max_buffer_size;
+
+            if wanted > most {
+                log::warn!(
+                    "a scene wants {} bytes of instances and this device will give {}",
+                    wanted,
+                    most
+                );
+            }
+
             self.instance_buffer = create_buffer(
                 &self.device,
-                wanted.max(self.instance_buffer.size() * 2),
+                wanted
+                    .max(self.instance_buffer.size() * 2)
+                    .min(most.max(wanted)),
                 wgpu::BufferUsages::VERTEX,
             );
         }
