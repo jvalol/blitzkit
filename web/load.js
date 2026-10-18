@@ -79,6 +79,9 @@ function __wbg_get_imports() {
             const ret = arg0.appendChild(arg1);
             return ret;
         }, arguments); },
+        __wbg_beginOcclusionQuery_f86da62bc2698f21: function(arg0, arg1) {
+            arg0.beginOcclusionQuery(arg1 >>> 0);
+        },
         __wbg_beginRenderPass_3c53642423af50dc: function() { return handleError(function (arg0, arg1) {
             const ret = arg0.beginRenderPass(arg1);
             return ret;
@@ -262,6 +265,9 @@ function __wbg_get_imports() {
         },
         __wbg_draw_086a9578fc9898c2: function(arg0, arg1, arg2, arg3, arg4) {
             arg0.draw(arg1 >>> 0, arg2 >>> 0, arg3 >>> 0, arg4 >>> 0);
+        },
+        __wbg_endOcclusionQuery_357622c54ce0b5bb: function(arg0) {
+            arg0.endOcclusionQuery();
         },
         __wbg_end_b57473834b877409: function(arg0) {
             arg0.end();
