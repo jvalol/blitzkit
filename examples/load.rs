@@ -261,12 +261,8 @@ impl Load {
         };
 
         vec![
-            String::from(
-                "[COPY - Jake] Up and down for cubes, left and right for lamps, C to cast.",
-            ),
-            String::from(
-                "[COPY - Jake] M to switch between one mesh and a mesh each, escape to quit.",
-            ),
+            String::from("Up and down for cubes, left and right for lamps, C to cast."),
+            String::from("M to switch between one mesh and a mesh each, escape to quit."),
             format!(
                 "{} cubes, {}, {} lamps, {} casting, {}",
                 self.dials.cubes,

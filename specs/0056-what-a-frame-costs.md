@@ -348,5 +348,5 @@ thousand.
 **A published claim.** The number is for deciding what to build next, not for
 telling anybody anything.
 
-Anything the readout says on screen is proposed copy and carries
-`[COPY - Jake]` until he strikes it.
+What the readout says on screen was proposed copy and carried
+`[COPY - Jake]` until Jake read it on 2026-10-17 and struck it as it was.

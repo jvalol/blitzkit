@@ -164,7 +164,7 @@ cargo run --release --example chain
 
 ![A heavy grey ball on a chain of sixteen beads hanging over a grey floor, with a tan brick wall to its right half knocked down, loose blocks lying out across the floor and the standing part leaning](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/chain.png)
 
-**knot**, [COPY - Jake] A trefoil knot, swept as a tube along its own curve. Turn it, and wind the sampling down until the crossings go faceted.
+**knot**, A trefoil knot, swept as a tube along its own curve. Turn it, and wind the sampling down until the crossings go faceted.
 
 ```
 cargo run --release --example knot
@@ -172,7 +172,7 @@ cargo run --release --example knot
 
 ![A brass trefoil knot turning over a grey floor, its three crossings clear of each other and its shadow falling as three overlapping loops](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/knot.png)
 
-**load**, [COPY - Jake] Turn the dials and watch what a frame costs. Sixty four thousand cubes as one mesh is four draw calls; the same sixty four thousand as their own meshes is a hundred and ninety two thousand.
+**load**, Turn the dials and watch what a frame costs. Sixty four thousand cubes as one mesh is four draw calls; the same sixty four thousand as their own meshes is a hundred and ninety two thousand.
 
 ```
 cargo run --release --example load

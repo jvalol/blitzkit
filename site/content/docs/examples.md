@@ -217,7 +217,7 @@ curve is sampled, M swaps the wire mesh for the solid surface, scroll moves
 closer, space locks the cursor so a drag never stops at the screen edge, and R
 puts it back.
 
-[COPY - Jake] A tube swept along a closed curve has to arrive facing the way
+A tube swept along a closed curve has to arrive facing the way
 it set off, or the seam is a visible twist. The frame it is swept in is worked
 out from the curve at each point rather than carried along from the last one,
 which is what closes it. Wind the sampling down and the three crossings go
@@ -239,7 +239,7 @@ Up and down change how many cubes there are, left and right how many lamps, C
 switches shadow casting on and off, and M switches between drawing one cube
 mesh many times and drawing a mesh each. Escape quits.
 
-[COPY - Jake] The numbers are the point. **Work** is the engine's own: the
+The numbers are the point. **Work** is the engine's own: the
 whole frame from the top to the end of the submit, with the wait for the
 display taken out. **Between frames** is what the display gave you, and on a
 120 Hz screen it reads 8.33 whatever the scene costs, until the work overruns
@@ -248,7 +248,7 @@ device will give one. Underneath, how many
 draw calls and how many triangles went in, because a number that moves is
 worth little without the thing it moved against.
 
-[COPY - Jake] The dial worth playing with is M. Sixty four thousand cubes as
+The dial worth playing with is M. Sixty four thousand cubes as
 one mesh is four draw calls and four milliseconds; the same sixty four
 thousand as their own meshes is a hundred and ninety two thousand draw calls
 and a hundred milliseconds. The engine does nothing to batch them, because nothing in it

@@ -11,8 +11,8 @@
 # and replaced the first time anything is remade.
 #
 # file	engine	made
-arcade.js	89fa6ac	arcade@f99786b	2026-10-17T13:20
-arcade_bg.wasm	89fa6ac	arcade@f99786b	2026-10-17T13:20
+arcade.js	5dcf6ff+	arcade@e86dda1+	2026-10-17T22:38
+arcade_bg.wasm	5dcf6ff+	arcade@e86dda1+	2026-10-17T22:38
 chain.js	89fa6ac	-	2026-10-17T13:20
 chain_bg.wasm	89fa6ac	-	2026-10-17T13:20
 cubes.js	89fa6ac	-	2026-10-17T13:20
@@ -23,8 +23,8 @@ klein.js	89fa6ac	-	2026-10-17T13:20
 klein_bg.wasm	89fa6ac	-	2026-10-17T13:20
 knot.js	1a12aa5	-	2026-10-17T18:57
 knot_bg.wasm	1a12aa5	-	2026-10-17T18:57
-load.js	3337f89+	-	2026-10-17T22:04
-load_bg.wasm	3337f89+	-	2026-10-17T22:04
+load.js	5dcf6ff+	-	2026-10-17T22:38
+load_bg.wasm	5dcf6ff+	-	2026-10-17T22:38
 menger.js	89fa6ac	-	2026-10-17T13:20
 menger_bg.wasm	89fa6ac	-	2026-10-17T13:20
 ripple.js	89fa6ac	-	2026-10-17T13:20
