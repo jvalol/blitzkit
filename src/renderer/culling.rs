@@ -159,6 +159,11 @@ pub(crate) struct Pushed<'a> {
     /// Where each kind of instance lies inside this run, when each kind lies
     /// together. Spec 0059.
     pub(crate) quarters: Option<crate::renderer::scene::Quarters>,
+    /// Whether a wall is known to be in front of the whole of this run.
+    /// Spec 0061: it is left out of the picture and drawn into every shadow
+    /// map, because a wall between you and a thing says nothing about what
+    /// a light can see.
+    pub(crate) hidden: bool,
     /// What holds the whole run, for a run that was kept rather than
     /// pushed. Spec 0058: a kept run is asked about whole first, and a
     /// pushed one has no such sphere because it was built this frame and
@@ -191,6 +196,7 @@ pub(crate) fn of_a_keeping<'a>(
         instances: &keeping.instances,
         lies_at,
         quarters: keeping.quarters,
+        hidden: false,
         round: Some(keeping.round),
     }
 }
@@ -261,10 +267,17 @@ pub(crate) fn pick(
             // different: the picture cannot be shown the room behind you,
             // and a shadow map must be, since a thing behind you throws its
             // shadow into the picture.
-            for (view, runs) in views.iter().zip(runs.iter_mut()) {
+            for (slot, (view, runs)) in views.iter().zip(runs.iter_mut()).enumerate() {
                 // a map no light claimed is cleared and never drawn, so
                 // nothing is measured for it at all
                 if matches!(view, Seen::Nothing) {
+                    continue;
+                }
+
+                // and what a wall hides is left out of the picture and of
+                // nothing else: a shadow that blinks out when you walk round
+                // a corner is worse than the frame it saved. Spec 0061.
+                if one.hidden && slot == PICTURE {
                     continue;
                 }
 
@@ -613,6 +626,7 @@ mod tests {
             instances: &instances,
             lies_at: None,
             quarters: None,
+            hidden: false,
             round: None,
         }];
         let views = views_for(&looking(), Some((behind, 3.0)));
@@ -661,6 +675,7 @@ mod tests {
             instances: &instances,
             lies_at: None,
             quarters: None,
+            hidden: false,
             round: None,
         }];
         let views = views_for(&looking(), Some((Vec3::new(40.0, 0.0, 0.0), 2.0)));
@@ -717,6 +732,7 @@ mod tests {
             instances: &instances,
             lies_at: None,
             quarters: None,
+            hidden: false,
             round: None,
         }];
         let (written, drawn) = pick(&views_for(&looking(), None), &pushed, &[], 0);
@@ -740,6 +756,7 @@ mod tests {
             instances: &instances,
             lies_at: None,
             quarters: None,
+            hidden: false,
             round: None,
         }];
         let (written, drawn) = pick(&[Seen::All], &pushed, &[], 0);
@@ -788,6 +805,7 @@ mod tests {
             instances: &instances,
             lies_at: None,
             quarters: None,
+            hidden: false,
             round: None,
         }];
         let as_kept = vec![Pushed {
@@ -797,6 +815,7 @@ mod tests {
             instances: &instances,
             lies_at: None,
             quarters: None,
+            hidden: false,
             round: Some(keeping_at(&bounds, &instances)),
         }];
 
@@ -849,6 +868,7 @@ mod tests {
             instances: &instances,
             lies_at: None,
             quarters: None,
+            hidden: false,
             round: Some(keeping_at(&bounds, &instances)),
         }];
         let (written, drawn) = pick(&views_for(&looking(), None), &[], &kept, 0);
@@ -880,6 +900,7 @@ mod tests {
             instances: &instances,
             lies_at: Some((400, 3)),
             quarters: Some([(0, 3), (0, 0), (0, 0), (0, 0)]),
+            hidden: false,
             round: Some(keeping_at(&bounds, &instances)),
         }];
         let (written, drawn) = pick(&views_for(&looking(), None), &[], &kept, 900);
@@ -890,6 +911,46 @@ mod tests {
             vec![(MeshId(0), TextureId::WHITE, 400, 3)]
         );
         assert!(drawn.anything, "a frame that draws it says it drew nothing");
+    }
+
+    /// Spec 0061: what a wall hides is left out of the picture and drawn
+    /// into every shadow map.
+    ///
+    /// A wall between you and a thing says nothing about what a light can
+    /// see, and a shadow that blinks out when you walk round a corner is
+    /// worse than the frame it saved.
+    #[test]
+    fn what_is_hidden_still_casts() {
+        let bounds = cube();
+        let ahead = [Vec3::new(0.0, 0.0, -10.0), Vec3::new(1.0, 0.0, -10.0)];
+        let instances = pushed_at(&ahead);
+        let kept = vec![Pushed {
+            mesh: MeshId(0),
+            texture: TextureId::WHITE,
+            bounds,
+            instances: &instances,
+            lies_at: Some((400, 2)),
+            quarters: crate::renderer::scene::quarters_of(&instances),
+            hidden: true,
+            round: Some(keeping_at(&bounds, &instances)),
+        }];
+        let mut views = views_for(&looking(), None);
+
+        // a sun that sees the whole world, which is what a shadow map
+        // usually is
+        views[SUN] = Seen::All;
+
+        let (_, drawn) = pick(&views, &[], &kept, 900);
+
+        assert!(
+            drawn.picture().opaque.is_empty(),
+            "a hidden run was drawn in the picture"
+        );
+        assert_eq!(
+            drawn.at(SUN).casting,
+            vec![(MeshId(0), TextureId::WHITE, 400, 2)],
+            "a hidden run stopped casting"
+        );
     }
 
     /// Spec 0059: each kind of a kept run is drawn from its own part of
@@ -913,6 +974,7 @@ mod tests {
             instances: &instances,
             lies_at: Some((400, 2)),
             quarters: crate::renderer::scene::quarters_of(&instances),
+            hidden: false,
             round: Some(keeping_at(&bounds, &instances)),
         }];
         let (written, drawn) = pick(&views_for(&looking(), None), &[], &kept, 900);
@@ -959,6 +1021,7 @@ mod tests {
             instances: &instances,
             lies_at: Some((400, 3)),
             quarters: None,
+            hidden: false,
             round: Some(keeping_at(&bounds, &instances)),
         }];
         let (written, drawn) = pick(&views_for(&looking(), None), &[], &kept, 900);
@@ -998,6 +1061,7 @@ mod tests {
             instances: &instances,
             lies_at: Some((400, 2)),
             quarters: Some([(0, 2), (0, 0), (0, 0), (0, 0)]),
+            hidden: false,
             round: Some(keeping_at(&bounds, &instances)),
         }];
         let (written, drawn) = pick(&views_for(&looking(), None), &[], &kept, 900);
@@ -1026,6 +1090,7 @@ mod tests {
             instances: &instances,
             lies_at: None,
             quarters: None,
+            hidden: false,
             round: Some(keeping_at(&bounds, &instances)),
         }];
         let (written, drawn) = pick(&views_for(&looking(), None), &[], &kept, 0);
@@ -1053,6 +1118,7 @@ mod tests {
             instances: &instances,
             lies_at: None,
             quarters: None,
+            hidden: false,
             round: Some(keeping_at(&bounds, &instances)),
         }];
         let views = views_for(&looking(), None);

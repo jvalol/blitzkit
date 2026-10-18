@@ -10,6 +10,7 @@
 pub mod coplanar;
 mod culling;
 pub mod depth;
+mod hidden;
 mod kept;
 pub mod outline;
 pub mod render_text;
@@ -124,6 +125,22 @@ pub struct Renderer {
     contact_shadows: bool,
     /// Where every kept run lies in the instance buffer. Spec 0059.
     kept: kept::Kept,
+    /// What a wall hides, per spec 0061: what is known, what is being
+    /// asked, and the pipeline that asks it.
+    hidden: hidden::Hidden,
+    asking: Option<hidden::Asking>,
+    hidden_pipeline: wgpu::RenderPipeline,
+    /// A unit cube, for drawing a run's box with. Added once, with the
+    /// renderer's own meshes.
+    box_mesh: Option<MeshId>,
+    /// How many boxes this frame asked about.
+    asked_count: u32,
+    /// Which frame this is, so an answer can be known to be stale.
+    frame: u64,
+    /// Whether a frame asks what is hidden at all. Off, because it costs a
+    /// pass and a read and saves nothing in a scene with nothing in front of
+    /// anything. Spec 0061.
+    occluding: bool,
     /// Whether each pass leaves out what it cannot see. Spec 0057.
     ///
     /// On, because a game should not have to ask not to draw the room behind
@@ -711,6 +728,7 @@ impl Renderer {
             });
         let scene_depth_bind_group = scene_depth_group(&device, &scene_depth_layout, &depth);
         let prepass_pipeline = create_prepass_pipeline(&device, &camera_bind_group_layout, samples);
+        let hidden_pipeline = create_hidden_pipeline(&device, &camera_bind_group_layout, samples);
 
         let mesh_pipeline = create_mesh_pipeline(
             &device,
@@ -789,6 +807,13 @@ impl Renderer {
             scene_depth_bind_group,
             contact_shadows: true,
             kept: kept::Kept::default(),
+            hidden: hidden::Hidden::default(),
+            asking: None,
+            hidden_pipeline,
+            box_mesh: None,
+            asked_count: 0,
+            frame: 0,
+            occluding: false,
             culling: true,
             translucent_pipelines,
             meshes: Vec::new(),
@@ -1131,6 +1156,28 @@ impl Renderer {
     /// Whether each pass leaves out what it cannot see. Spec 0057.
     pub fn set_culling(&mut self, on: bool) {
         self.culling = on;
+    }
+
+    /// Whether the picture leaves out kept runs that a wall hides. Spec
+    /// 0061.
+    ///
+    /// Off by default: it costs a pass over the boxes and a buffer read, and
+    /// saves nothing at all in a scene where nothing stands in front of
+    /// anything. The game knows which it has and the engine cannot.
+    pub fn set_occluding(&mut self, on: bool) {
+        self.occluding = on;
+
+        if on && self.asking.is_none() {
+            self.asking = Some(hidden::Asking::new(&self.device));
+        }
+
+        if on && self.box_mesh.is_none() {
+            self.box_mesh = Some(self.add_mesh(&crate::mesh::MeshData::cube()));
+        }
+    }
+
+    pub fn occluding(&self) -> bool {
+        self.occluding
     }
 
     pub fn culling(&self) -> bool {
@@ -1517,6 +1564,44 @@ impl Renderer {
             }
         }
 
+        // and then, with the solid world's depth laid down, the boxes of
+        // the kept runs: drawn tested and not written, each inside a query,
+        // so the GPU can say which of them has nothing of itself in front
+        // of what is already there. Spec 0061.
+        if self.asked_count > 0 {
+            let mut hiding = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("What Is Hidden"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: self.asking.as_ref().map(|asking| &asking.set),
+                multiview_mask: None,
+            });
+
+            if let (Some(asking), Some(cube)) = (self.asking.as_ref(), self.box_mesh) {
+                let mesh = &self.meshes[cube.0];
+
+                hiding.set_pipeline(&self.hidden_pipeline);
+                hiding.set_bind_group(0, &self.camera_bind_group, &[]);
+                hiding.set_vertex_buffer(0, mesh.vertices.slice(..));
+                hiding.set_vertex_buffer(1, asking.boxes.slice(..));
+                hiding.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+
+                for n in 0..self.asked_count {
+                    hiding.begin_occlusion_query(n);
+                    hiding.draw_indexed(0..mesh.index_count, 0, n..(n + 1));
+                    hiding.end_occlusion_query();
+                }
+            }
+        }
+
         // the world next, depth tested, then the interface painted on top
         {
             // into the multisampled texture and resolved onto the surface at
@@ -1647,11 +1732,90 @@ impl Renderer {
             }
         }
 
+        // the queries into a buffer, and that buffer into one that can be
+        // mapped. Both in this encoder, before it is submitted: a resolve
+        // after the submit is a resolve of the next frame's answers. Spec
+        // 0061.
+        if self.asked_count > 0 {
+            if let Some(asking) = self.asking.as_mut() {
+                encoder.resolve_query_set(&asking.set, 0..self.asked_count, &asking.resolved, 0);
+                encoder.copy_buffer_to_buffer(
+                    &asking.resolved,
+                    0,
+                    &asking.read,
+                    0,
+                    self.asked_count as u64 * 8,
+                );
+                asking.about = (self.hidden.asked().to_vec(), self.frame);
+            }
+        }
+
         self.queue.submit(std::iter::once(encoder.finish()));
         self.queue.present(frame);
 
         self.counted = counted;
         self.read_the_clock();
+        self.read_what_is_hidden();
+        self.frame += 1;
+    }
+
+    /// Takes whatever the depth buffer has said about the boxes, and asks
+    /// for the next lot. Spec 0061.
+    ///
+    /// One read in flight at a time, the way spec 0056 reads the clock: a
+    /// second would be written over the one being read. A frame whose answer
+    /// has not landed knows nothing new, and knowing nothing means drawing
+    /// everything.
+    fn read_what_is_hidden(&mut self) {
+        let Some(asking) = self.asking.as_mut() else {
+            return;
+        };
+
+        if !asking.reading {
+            if asking.about.0.is_empty() {
+                return;
+            }
+
+            let landed = asking.landed.clone();
+
+            asking
+                .read
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |got| {
+                    landed.store(got.is_ok(), Ordering::Release);
+                });
+            asking.reading = true;
+
+            return;
+        }
+
+        // the callback only runs while the device is polled
+        let _ = self.device.poll(wgpu::PollType::Poll);
+
+        let Some(asking) = self.asking.as_mut() else {
+            return;
+        };
+
+        if asking.reading && asking.landed.swap(false, Ordering::AcqRel) {
+            let answers: Option<(Vec<u64>, Vec<u64>, u64)> =
+                asking.read.slice(..).get_mapped_range().ok().map(|got| {
+                    (
+                        asking.about.0.clone(),
+                        bytemuck::cast_slice::<u8, u64>(&got).to_vec(),
+                        asking.about.1,
+                    )
+                });
+
+            if let Some((about, samples, frame)) = answers {
+                self.hidden.told(&about, &samples, frame);
+            }
+
+            if let Some(asking) = self.asking.as_mut() {
+                asking.read.unmap();
+                asking.reading = false;
+                asking.about = (Vec::new(), 0);
+            }
+        }
     }
 
     /// What the last frame's drawing came to. Spec 0056.
@@ -1819,6 +1983,7 @@ impl Renderer {
                 instances,
                 lies_at: None,
                 quarters: None,
+                hidden: false,
                 round: None,
             });
         }
@@ -1856,14 +2021,26 @@ impl Renderer {
         let (writing, swept) = self.kept.lay_out(&laid);
         let after = self.kept.len();
 
+        // what to ask the depth buffer about this frame, and the boxes to
+        // ask with. Everything kept is asked, including what is already
+        // known to be hidden, or a run that goes behind a wall once never
+        // comes back. Spec 0061.
+        self.asked_count = self.ask_what_is_hidden(&holding);
+
+        let frame = self.frame;
+
         let kept: Vec<culling::Pushed> = holding
             .iter()
             .map(|keeping| {
-                culling::of_a_keeping(
+                let mut kept = culling::of_a_keeping(
                     keeping,
                     self.meshes[keeping.mesh.0].bounds,
                     self.kept.lies_at(keeping.id),
-                )
+                );
+
+                kept.hidden = self.occluding && self.hidden.is_hidden(keeping.id, frame);
+
+                kept
             })
             .collect();
 
@@ -1932,6 +2109,99 @@ impl Renderer {
         write(after, &instances);
 
         drawn
+    }
+
+    /// Lines up this frame's boxes for the depth buffer to answer about,
+    /// and says how many there are. Spec 0061.
+    ///
+    /// A run's box is the sphere that holds it, drawn as the cube that holds
+    /// that: bigger than the run, which is the right way round, since a box
+    /// that is too big can only be found less hidden than the thing inside
+    /// it.
+    fn ask_what_is_hidden(&mut self, holding: &[&crate::renderer::scene::Keeping]) -> u32 {
+        if !self.occluding {
+            return 0;
+        }
+
+        // **A query that is never written answers nought, and nought means
+        // hidden.** If the pass below cannot draw the boxes, because the
+        // cube to draw them with or the query set itself is not there yet,
+        // then nothing is asked at all: a resolve of queries nobody wrote
+        // reads as a whole world behind a wall, which is what it did the
+        // first time this ran. Spec 0061.
+        if self.box_mesh.is_none() {
+            return 0;
+        }
+
+        let Some(asking) = self.asking.as_mut() else {
+            return 0;
+        };
+
+        // nothing new is asked while the last answer is still coming back,
+        // for the reason spec 0056 reads the clock one frame at a time: the
+        // answers being read would be written over by the frame reading
+        // them
+        if asking.reading {
+            return 0;
+        }
+
+        let living: std::collections::HashSet<u64> =
+            holding.iter().map(|keeping| keeping.id).collect();
+
+        self.hidden.forget(&living);
+
+        // **A run the eye is standing inside is not asked about.** Its box
+        // has every part of itself either behind the near plane, where it is
+        // clipped away, or behind the thing the box is for: nothing passes,
+        // and nothing passing means hidden, so the wall you are looking at
+        // is not drawn. Spec 0061, and it took a wall out of the picture
+        // before it was written down.
+        let eye = self.camera.position;
+        let near = self.camera.near;
+        let inside: Vec<u64> = holding
+            .iter()
+            .filter(|keeping| eye.distance(keeping.round.at) <= keeping.round.reach + near * 2.0)
+            .map(|keeping| keeping.id)
+            .collect();
+
+        for id in inside.iter() {
+            self.hidden.forget_one(*id);
+        }
+
+        let asking_about: Vec<&crate::renderer::scene::Keeping> = holding
+            .iter()
+            .filter(|keeping| !inside.contains(&keeping.id))
+            .copied()
+            .collect();
+
+        let asked = self
+            .hidden
+            .ask(
+                asking_about.iter().map(|keeping| keeping.id),
+                hidden::Asking::ROOM,
+            )
+            .to_vec();
+        let boxes: Vec<Instance> = asking_about
+            .iter()
+            .take(asked.len())
+            .map(|keeping| {
+                Instance::new(
+                    &crate::mesh::Transform::at(keeping.round.at)
+                        .with_scale(glam::Vec3::splat(keeping.round.reach * 2.0)),
+                    glam::Vec4::ONE,
+                    Instance::DEFAULT_SHININESS,
+                )
+            })
+            .collect();
+
+        if boxes.is_empty() {
+            return 0;
+        }
+
+        self.queue
+            .write_buffer(&asking.boxes, 0, bytemuck::cast_slice(&boxes));
+
+        boxes.len() as u32
     }
 
     /// What each pass of this frame can see. Spec 0057.
@@ -2483,6 +2753,53 @@ fn create_prepass_pipeline(
         fragment: None,
         primitive: depth::mesh_primitive_state(),
         depth_stencil: Some(depth::state()),
+        multisample: wgpu::MultisampleState {
+            count: samples,
+            ..Default::default()
+        },
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// The pipeline that asks whether a box is hidden. Spec 0061.
+///
+/// The mesh shader's own vertex stage, which is what the prepass uses too,
+/// with no fragment stage and no depth writing: what comes out of this is
+/// not a picture but a count of samples that passed the depth test, which
+/// the pass collects in an occlusion query. Writing depth would let a box
+/// hide the box behind it and answer a question nobody asked.
+fn create_hidden_pipeline(
+    device: &wgpu::Device,
+    camera_bind_group_layout: &wgpu::BindGroupLayout,
+    samples: u32,
+) -> wgpu::RenderPipeline {
+    let shader = mesh_shader(device, samples);
+
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("Hidden Pipeline Layout"),
+        bind_group_layouts: &[Some(camera_bind_group_layout)],
+        immediate_size: 0,
+    });
+
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Hidden Pipeline"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[Some(crate::mesh::Vertex::DESC), Some(Instance::DESC)],
+            compilation_options: Default::default(),
+        },
+        fragment: None,
+        primitive: wgpu::PrimitiveState {
+            // both faces, because a box the camera is inside has only its
+            // far faces toward you and a box nobody can see from outside is
+            // not hidden
+            cull_mode: None,
+            ..depth::mesh_primitive_state()
+        },
+        depth_stencil: Some(depth::outline_state()),
         multisample: wgpu::MultisampleState {
             count: samples,
             ..Default::default()

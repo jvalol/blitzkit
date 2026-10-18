@@ -184,6 +184,14 @@ struct Dials {
     /// Where the cubes stand, per spec 0057: in a block in front of you, or
     /// on a shell round you.
     spread: Spread,
+    /// Whether a wall stands between the camera and half the shell, and
+    /// whether the engine is asking what it hides. Spec 0061.
+    ///
+    /// Two dials and not one, because what has to be measured is the same
+    /// scene asked and unasked: a wall nobody asks about costs a draw, and
+    /// a question with nothing in front of anything costs a pass.
+    wall: bool,
+    occluding: bool,
     /// Whether the cubes are handed over once or pushed every frame, per
     /// spec 0058.
     ///
@@ -230,6 +238,8 @@ impl Dials {
                         culling,
                         spread,
                         kept: false,
+                        wall: false,
+                        occluding: false,
                     });
                 }
             }
@@ -247,6 +257,8 @@ impl Dials {
                     culling: true,
                     spread: Spread::Shell,
                     kept,
+                    wall: false,
+                    occluding: false,
                 });
             }
         }
@@ -260,6 +272,8 @@ impl Dials {
                 culling: true,
                 spread: Spread::Block,
                 kept: false,
+                wall: false,
+                occluding: false,
             });
         }
 
@@ -272,6 +286,8 @@ impl Dials {
                 culling: true,
                 spread: Spread::Block,
                 kept: false,
+                wall: false,
+                occluding: false,
             });
             out.push(Dials {
                 cubes: 1728,
@@ -281,6 +297,8 @@ impl Dials {
                 culling: true,
                 spread: Spread::Block,
                 kept: false,
+                wall: false,
+                occluding: false,
             });
         }
 
@@ -310,6 +328,8 @@ struct Load {
     /// a game dividing one.
     keeping: Vec<Kept>,
     kept_for: Option<(u32, Spread)>,
+    /// The wall, when there is one. Spec 0061.
+    walling: Option<Kept>,
     cube: Option<MeshId>,
     many: Vec<MeshId>,
     costs: Costs,
@@ -361,9 +381,12 @@ impl Load {
                 culling: true,
                 spread: Spread::Block,
                 kept: false,
+                wall: false,
+                occluding: false,
             }),
             keeping: Vec::new(),
             kept_for: None,
+            walling: None,
             cube: None,
             many: Vec::new(),
             costs: Costs::new(),
@@ -405,10 +428,10 @@ impl Load {
             String::from("Up and down for cubes, left and right for lamps, C to cast."),
             String::from(
                 "M for one mesh or a mesh each, K for culling, B for a block or a shell, \
-                 P to keep them rather than push them, escape to quit.",
+                 P to keep them, O for a wall, H to ask what it hides, escape to quit.",
             ),
             format!(
-                "{} cubes {}, {}, {}, {} lamps, {} casting, culling {}, {}",
+                "{} cubes {}, {}, {}, {} lamps, {} casting, culling {}, {}{}, {}",
                 self.dials.cubes,
                 self.dials.spread.says(),
                 if self.dials.kept { "kept" } else { "pushed" },
@@ -416,6 +439,16 @@ impl Load {
                 self.dials.lamps,
                 self.dials.casters(),
                 if self.dials.culling { "on" } else { "off" },
+                if self.dials.wall {
+                    ", a wall in the way"
+                } else {
+                    ""
+                },
+                if self.dials.occluding {
+                    ", asking what it hides"
+                } else {
+                    ""
+                },
                 if self.waiting {
                     "waiting for the display, so these numbers are the display's"
                 } else {
@@ -513,8 +546,8 @@ impl Load {
     /// hundred by twelve hundred is most of a frame on its own, and a row
     /// without them is a number nobody can reproduce.
     fn header() -> &'static str {
-        "cubes,spread,held,meshes,lamps,casting,culling,present,samples,surface,draws,\
-         triangles,frames,work_ms,work_95_ms,work_worst_ms,between_ms,gpu_ms"
+        "cubes,spread,held,wall,occluding,meshes,lamps,casting,culling,present,samples,\
+         surface,draws,triangles,frames,work_ms,work_95_ms,work_worst_ms,between_ms,gpu_ms"
     }
 
     /// The configuration, as the line of a sweep.
@@ -531,10 +564,16 @@ impl Load {
         };
 
         format!(
-            "{},{},{},{},{},{},{},{},{},{}x{},{},{},{},{:.3},{:.3},{:.3},{:.3},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{}x{},{},{},{},{:.3},{:.3},{:.3},{:.3},{}",
             self.dials.cubes,
             self.dials.spread.says().replace(' ', "-"),
             if self.dials.kept { "kept" } else { "pushed" },
+            if self.dials.wall { "wall" } else { "clear" },
+            if self.dials.occluding {
+                "asked"
+            } else {
+                "unasked"
+            },
             self.dials.meshes.says().replace(' ', "-"),
             self.dials.lamps,
             self.dials.casters(),
@@ -679,6 +718,32 @@ impl Game for Load {
         // handed over once rather than every frame, per spec 0058. One mesh
         // only: a kept run is one mesh and one texture, so a mesh each would
         // be one run per cube and the dial would measure that instead.
+        // a wall between the camera and half of the shell, kept like
+        // everything else, so there is something for spec 0061 to find
+        // hidden. Nothing in `load` stands in front of anything otherwise.
+        match (self.dials.wall, self.walling) {
+            (true, None) => {
+                self.walling = Some(scene.keep(
+                    cube,
+                    TextureId::WHITE,
+                    &[Instance::new(
+                        &Transform::at(vec3(SHELL * 0.25, 0.0, 0.0)).with_scale(vec3(
+                            SHELL * 0.02,
+                            SHELL * 2.4,
+                            SHELL * 2.4,
+                        )),
+                        vec4(0.35, 0.36, 0.40, 1.0),
+                        CUBE_SHINE,
+                    )],
+                ));
+            }
+            (false, Some(wall)) => {
+                scene.drop(wall);
+                self.walling = None;
+            }
+            _ => (),
+        }
+
         let wanted = (self.dials.cubes, self.dials.spread);
 
         if self.dials.kept && self.dials.meshes == Meshes::One {
@@ -703,6 +768,7 @@ impl Game for Load {
                     .map(|patch| scene.keep(cube, TextureId::WHITE, patch))
                     .collect();
                 self.kept_for = Some(wanted);
+                self.walling = None;
             }
         } else {
             for kept in self.keeping.drain(..) {
@@ -756,6 +822,8 @@ impl Game for Load {
             self.dials.culling,
             self.dials.spread,
             self.dials.kept,
+            self.dials.wall,
+            self.dials.occluding,
         );
 
         match input.key {
@@ -774,6 +842,8 @@ impl Game for Load {
             KeyboardKey::K => self.dials.culling = !self.dials.culling,
             KeyboardKey::B => self.dials.spread = self.dials.spread.flip(),
             KeyboardKey::P => self.dials.kept = !self.dials.kept,
+            KeyboardKey::O => self.dials.wall = !self.dials.wall,
+            KeyboardKey::H => self.dials.occluding = !self.dials.occluding,
             _ => (),
         }
 
@@ -786,6 +856,8 @@ impl Game for Load {
                 self.dials.culling,
                 self.dials.spread,
                 self.dials.kept,
+                self.dials.wall,
+                self.dials.occluding,
             )
         {
             self.costs.clear();
@@ -800,9 +872,11 @@ impl Game for Load {
         let counted = renderer.counted();
 
         self.counted = (counted.draws, counted.triangles);
-        // the dial, told to the renderer here rather than when the key is
-        // pressed: a sweep moves the dials without touching a key. Spec 0057.
+        // the dials, told to the renderer here rather than when a key is
+        // pressed: a sweep moves them without touching a key. Specs 0057
+        // and 0061.
         renderer.set_culling(self.dials.culling);
+        renderer.set_occluding(self.dials.occluding);
         self.gpu = renderer.gpu_seconds();
         self.waiting = renderer.waiting_for_the_display();
         self.samples = renderer.samples();

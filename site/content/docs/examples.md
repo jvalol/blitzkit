@@ -243,7 +243,9 @@ cubes in a block in front of you or on a shell around you, and P hands the
 cubes to the engine once instead of pushing them every frame. The shell is
 the one to watch both of those in: most of it is behind you, and a million
 cubes kept in patches costs a fifth of what the same million costs pushed.
-Escape quits.
+O stands a wall between you and half of the shell, and H asks the depth
+buffer which of the cubes that wall hides, which is the other way to leave
+something out: not behind you, but behind something. Escape quits.
 
 The numbers are the point. **Work** is the engine's own: the
 whole frame from the top to the end of the submit, with the wait for the
