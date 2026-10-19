@@ -192,6 +192,9 @@ pub struct Scene {
     /// A slot that was dropped is left as `None` rather than taken out, so
     /// the handles to everything after it go on meaning what they meant.
     kept: Vec<Option<Keeping>>,
+    /// Whether the game has been told what pushing a large scene costs
+    /// it. Spec 0068: once, and not every frame.
+    said_so: bool,
     /// What a game is standing by name, per spec 0064: the slots each name
     /// holds, the version they were built at, and the frame each was last
     /// mentioned.
@@ -268,6 +271,7 @@ impl Scene {
     }
 
     pub fn reset(&mut self) {
+        self.say_what_a_push_costs();
         self.say_what_was_turned_away();
         self.frames += 1;
         self.forget_what_nobody_mentions();
@@ -452,6 +456,51 @@ impl Scene {
             .entry((mesh, texture))
             .or_default()
             .push(Instance::new(transform, color, shininess));
+    }
+
+    /// Says once what pushing a large scene every frame is costing, and
+    /// that there is another way. Spec 0068.
+    ///
+    /// **Because the engine knew and did not say.** Four million instances
+    /// pushed take about 191 ms a frame where the same scene handed over
+    /// through [`Scene::standing`] takes 8.3, and until this line nothing
+    /// told anybody. That is twenty times, and it is the whole of what
+    /// Bevy has that this does not: its retention is the default and here
+    /// it is a second call.
+    ///
+    /// Once, with the number, in the way [`Self::say_what_was_turned_away`]
+    /// says what the caps refused. A line every frame is a line nobody
+    /// reads.
+    ///
+    /// **This is all that is left of a larger spec.** The engine can be
+    /// made to notice a batch that stopped changing and hand it over on
+    /// its own, and that was built and measured: it took four million
+    /// pushed instances from 191 ms to 170, because folding every
+    /// instance to find out costs 70 ms of the 95 it saves. The arcade,
+    /// which is the only real scene in this project, pushes 7,421
+    /// instances a frame in a few hundred small batches and not one of
+    /// them was ever large enough to hand over. Eleven per cent for a
+    /// game nobody has written, against a stale frame if two batches ever
+    /// fold alike. What survived is the sentence.
+    fn say_what_a_push_costs(&mut self) {
+        if self.said_so {
+            return;
+        }
+
+        let pushed: usize = self.instances.values().map(|batch| batch.len()).sum();
+
+        if pushed < LOUD {
+            return;
+        }
+
+        self.said_so = true;
+
+        log::warn!(
+            "this scene pushes {} instances every frame, so every one of them is measured, \
+             copied and sent again each time. If they are not all moving, Scene::standing hands \
+             a run over once and draws it where it lies; see spec 0064",
+            pushed
+        );
     }
 
     /// Hands the engine a run of instances to hold on to, per spec 0058.
@@ -858,6 +907,17 @@ pub(crate) fn cells(instances: &[Instance]) -> Vec<Vec<Instance>> {
     out.retain(|cell| !cell.is_empty());
     out
 }
+
+/// How many instances a frame has to push before the engine says
+/// something about it. Spec 0068.
+///
+/// A hundred thousand, because pushing one measured about twenty eight
+/// nanoseconds on the machine this was written on, so that is about three
+/// milliseconds a frame spent handing over instances before anything is
+/// drawn, or a third of a frame at 120 Hz. Below it the advice is not
+/// worth the line. The arcade, which is the busiest real scene here,
+/// pushes 7,421.
+const LOUD: usize = 100_000;
 
 /// A handle to what a game asked the engine to keep. Spec 0058.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1275,6 +1335,43 @@ mod tests {
             1,
             "a run mentioned every frame was let go"
         );
+    }
+
+    /// Spec 0068: a scene that pushes a great many instances is told once,
+    /// and not again.
+    #[test]
+    fn the_slow_path_says_so_once() {
+        let mut scene = Scene::new();
+        let push = |scene: &mut Scene, how_many: usize| {
+            for n in 0..how_many {
+                scene.push_textured(
+                    MeshId(0),
+                    TextureId::WHITE,
+                    &Transform::at(glam::Vec3::X * n as f32),
+                    Vec4::ONE,
+                    Instance::DEFAULT_SHININESS,
+                );
+            }
+        };
+
+        push(&mut scene, LOUD - 1);
+        scene.reset();
+
+        assert!(!scene.said_so, "a scene under the line was told anyway");
+
+        push(&mut scene, LOUD);
+        scene.reset();
+
+        assert!(scene.said_so, "a scene over the line was not told");
+
+        // and the flag is what stops it saying so again, which is the
+        // whole of what "once" means here
+        let said = scene.said_so;
+
+        push(&mut scene, LOUD);
+        scene.reset();
+
+        assert!(said && scene.said_so);
     }
 
     /// Spec 0064: a run too small to be worth a draw call of its own is

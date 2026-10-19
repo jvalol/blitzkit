@@ -74,6 +74,8 @@ not a priority, and it never changes once a spec exists.
 | [0065](0065-a-clock-that-answers.md) | Resolving a frame's pair of timestamps in the next frame's encoder rather than the one that wrote them, because the end tick was not there yet and the pair came back backwards: the GPU column was blank on every frame fast enough to matter |
 | [0066](0066-what-the-triangles-cost.md) | Asking for twelve million triangles instead of twenty four takes about a millisecond off the GPU and three tenths back on the CPU: measured three times, once against a broken clock that said the opposite and once at two points that overstated it |
 | [0067](0067-a-clock-for-each-pass.md) | A pair of timestamps for each of the twenty passes in a frame rather than one pair round all of them, because about 11 ms goes somewhere and this project has guessed wrong twice (draft) |
+| [0068](0068-the-slow-path-should-be-the-loud-one.md) | Telling a game once that pushing a hundred thousand instances a frame costs twenty times what handing them over does: the machinery that would have done it for them was built, measured at eleven per cent, found to do nothing at all for the arcade, and thrown away with its numbers written down |
+| [0069](0069-a-scene-too-big-to-draw.md) | This engine draws 62,914,560 instances and dies on the next one, because spec 0060 chose to ask for a buffer the device had already refused: draw what fits and say what did not, the way every other cap here behaves (draft) |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.
