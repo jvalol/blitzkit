@@ -1063,6 +1063,60 @@ mod tests {
         assert_eq!(drawn.picture().opaque[0].count, 2);
     }
 
+    /// Spec 0064: what `standing` draws is what `keep` draws.
+    ///
+    /// The point of `standing` is that a game writes one call a frame and
+    /// lands where spec 0058 and 0063 put it. If the two ever drew
+    /// different things the front door would be a different engine.
+    #[test]
+    fn standing_draws_what_keeping_draws() {
+        use crate::renderer::scene::{Name, Scene};
+
+        // enough of them to be worth a draw of their own, or both scenes
+        // would push them and this would be comparing nothing
+        let places: Vec<Vec3> = (0..crate::renderer::scene::WORTH_A_DRAW)
+            .map(|n| {
+                let n = n as f32;
+
+                Vec3::new((n * 0.7).sin() * 8.0, 0.0, (n * 0.3).cos() * 20.0 - 4.0)
+            })
+            .collect();
+        let instances = pushed_at(&places);
+        let bounds = cube();
+        let views = views_for(&looking(), None);
+
+        let mut kept = Scene::new();
+
+        kept.keep(MeshId(0), TextureId::WHITE, &instances);
+
+        let mut stood = Scene::new();
+
+        stood.standing(Name(1), 0, MeshId(0), TextureId::WHITE, |into| {
+            into.extend_from_slice(&instances)
+        });
+
+        let drawn = |scene: &Scene| {
+            let runs: Vec<Pushed> = scene
+                .keepings()
+                .map(|keeping| of_a_keeping(keeping, bounds, None))
+                .collect();
+            let (written, drawn) = pick(&views, &[], &runs, Vec3::ZERO);
+
+            (
+                written.len(),
+                drawn
+                    .picture()
+                    .opaque
+                    .iter()
+                    .map(|one| one.count)
+                    .sum::<u32>(),
+            )
+        };
+
+        assert_eq!(kept.keepings().count(), stood.keepings().count());
+        assert_eq!(drawn(&kept), drawn(&stood));
+    }
+
     /// Spec 0063: a kept run that straddles the frustum is drawn whole,
     /// where it lies, rather than measured one instance at a time.
     ///

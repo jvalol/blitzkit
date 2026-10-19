@@ -82,11 +82,6 @@ const SPREAD: f32 = 60.0;
 /// same number of meshes in view whichever way you look, which is what
 /// makes it a measurement of culling rather than of where you happened to
 /// be pointing.
-/// How many patches the shell is kept in: a cube's six faces, each cut into
-/// a grid this many a side.
-const ACROSS: usize = 4;
-const PATCHES: usize = 6 * ACROSS * ACROSS;
-
 const CUBE_COLOUR: glam::Vec4 = vec4(0.72, 0.74, 0.80, 1.0);
 const CUBE_SHINE: f32 = 64.0;
 
@@ -142,6 +137,10 @@ fn on_the_shell(count: u32, n: u32) -> Vec3 {
 /// a frame every two hundred milliseconds would hold one line of a sweep for
 /// the better part of a minute.
 const SETTLE: u32 = 45;
+
+/// What this example calls the run of cubes it hands over. Spec 0064: a
+/// name is a number the game already has, and this one has exactly one run.
+const CUBES_STANDING: blitzkit::renderer::scene::Name = blitzkit::renderer::scene::Name(0);
 const HOLD_SECONDS: f32 = 6.0;
 
 /// Whether the cubes are one mesh drawn many times or many meshes drawn once.
@@ -326,8 +325,7 @@ struct Load {
     /// view there is, and every instance of it gets measured anyway. Spec
     /// 0058 says the engine will not divide a world for a game, and this is
     /// a game dividing one.
-    keeping: Vec<Kept>,
-    kept_for: Option<(u32, Spread)>,
+    kept_for: Option<u64>,
     /// The wall, when there is one. Spec 0061.
     walling: Option<Kept>,
     cube: Option<MeshId>,
@@ -384,7 +382,6 @@ impl Load {
                 wall: false,
                 occluding: false,
             }),
-            keeping: Vec::new(),
             kept_for: None,
             walling: None,
             cube: None,
@@ -474,53 +471,6 @@ impl Load {
         ]
     }
 
-    /// Where one cube stands, worked out from its number rather than stored.
-    ///
-    /// `blitzkit::grid` does the arithmetic, because the arcade lays out the
-    /// same block on the bench in its back room and the two of them had the
-    /// same fault in the same week. Deterministic either way, so two runs of
-    /// the same dials draw the same scene and the numbers can be compared at
-    /// all.
-    /// Which patch of the shell a cube belongs to.
-    ///
-    /// By the direction it lies in: the face of a cube its direction points
-    /// at, and a grid on that face. A patch is then about fifteen degrees
-    /// across, which is small enough that most of them are wholly out of
-    /// view and large enough that there are not thousands of runs.
-    ///
-    /// A block is one patch, because a block is in front of you or it is
-    /// not.
-    fn patch(&self, n: u32) -> usize {
-        if self.dials.spread == Spread::Block {
-            return 0;
-        }
-
-        let at = self.at(n).normalize_or_zero();
-        let (x, y, z) = (at.x.abs(), at.y.abs(), at.z.abs());
-        let (face, u, v) = if x >= y && x >= z {
-            (
-                if at.x > 0.0 { 0 } else { 1 },
-                at.y / x.max(1e-4),
-                at.z / x.max(1e-4),
-            )
-        } else if y >= z {
-            (
-                if at.y > 0.0 { 2 } else { 3 },
-                at.x / y.max(1e-4),
-                at.z / y.max(1e-4),
-            )
-        } else {
-            (
-                if at.z > 0.0 { 4 } else { 5 },
-                at.x / z.max(1e-4),
-                at.y / z.max(1e-4),
-            )
-        };
-        let cell = |along: f32| (((along + 1.0) * 0.5 * ACROSS as f32) as usize).min(ACROSS - 1);
-
-        face * ACROSS * ACROSS + cell(u) * ACROSS + cell(v)
-    }
-
     /// Where one cube stands and how it is turned, which is the one account
     /// of it: the push and the keep both ask here.
     fn standing(&self, n: u32) -> Transform {
@@ -532,6 +482,13 @@ impl Load {
             }))
     }
 
+    /// Where one cube stands, worked out from its number rather than stored.
+    ///
+    /// `blitzkit::grid` does the arithmetic, because the arcade lays out the
+    /// same block on the bench in its back room and the two of them had the
+    /// same fault in the same week. Deterministic either way, so two runs of
+    /// the same dials draw the same scene and the numbers can be compared at
+    /// all.
     fn at(&self, n: u32) -> Vec3 {
         match self.dials.spread {
             Spread::Block => blitzkit::grid::at(self.dials.cubes, n, SPREAD),
@@ -744,36 +701,31 @@ impl Game for Load {
             _ => (),
         }
 
-        let wanted = (self.dials.cubes, self.dials.spread);
-
         if self.dials.kept && self.dials.meshes == Meshes::One {
-            // built again when a dial moves, and not otherwise: the point of
-            // the thing is that standing still costs nothing
-            if self.kept_for != Some(wanted) {
-                for kept in self.keeping.drain(..) {
-                    scene.drop(kept);
-                }
+            // **One call, every frame.** Spec 0064: the version is what
+            // says whether anything changed, the closure runs only when it
+            // did, and the engine cuts the result into cells of its own.
+            // This example used to divide the shell into 96 patches by
+            // hand, and `patch()` went with them.
+            let version =
+                self.dials.cubes as u64 * 2 + u64::from(self.dials.spread == Spread::Shell);
 
-                let mut patches: Vec<Vec<Instance>> = vec![Vec::new(); PATCHES];
-
-                for n in 0..self.dials.cubes {
-                    let standing = self.standing(n);
-
-                    patches[self.patch(n)].push(Instance::new(&standing, CUBE_COLOUR, CUBE_SHINE));
-                }
-
-                self.keeping = patches
-                    .iter()
-                    .filter(|patch| !patch.is_empty())
-                    .map(|patch| scene.keep(cube, TextureId::WHITE, patch))
-                    .collect();
-                self.kept_for = Some(wanted);
+            if self.kept_for != Some(version) {
                 self.walling = None;
+                self.kept_for = Some(version);
             }
+
+            scene.standing(CUBES_STANDING, version, cube, TextureId::WHITE, |into| {
+                into.extend(
+                    (0..self.dials.cubes)
+                        .map(|n| Instance::new(&self.standing(n), CUBE_COLOUR, CUBE_SHINE)),
+                );
+            });
         } else {
-            for kept in self.keeping.drain(..) {
-                scene.drop(kept);
-            }
+            // said rather than waited out, because the same cubes are about
+            // to be pushed and a few frames of both would be a few frames
+            // of drawing everything twice
+            scene.gone(CUBES_STANDING);
 
             self.kept_for = None;
 

@@ -192,6 +192,16 @@ pub struct Scene {
     /// A slot that was dropped is left as `None` rather than taken out, so
     /// the handles to everything after it go on meaning what they meant.
     kept: Vec<Option<Keeping>>,
+    /// What a game is standing by name, per spec 0064: the slots each name
+    /// holds, the version they were built at, and the frame each was last
+    /// mentioned.
+    standing: HashMap<Name, Stood>,
+    /// A `Vec` the closures of `standing` fill, held so that a run built
+    /// again does not allocate again.
+    building: Vec<Instance>,
+    /// Which frame this is, counted by `reset`, which is what lets a name
+    /// nobody mentions be forgotten.
+    frames: u64,
     /// What the next kept run will be called, which is a number nobody
     /// reuses: a slot can be dropped and filled again, and the renderer
     /// holds a range of its buffer against the run that was in it. Spec
@@ -259,6 +269,8 @@ impl Scene {
 
     pub fn reset(&mut self) {
         self.say_what_was_turned_away();
+        self.frames += 1;
+        self.forget_what_nobody_mentions();
 
         // keeps the allocations, drops the contents
         for instances in self.instances.values_mut() {
@@ -494,6 +506,151 @@ impl Scene {
         }
     }
 
+    /// Draws a run the engine holds on to, built only when it changes.
+    /// Spec 0064.
+    ///
+    /// **This is the front door.** A game calls it every frame, where it
+    /// would call [`Scene::push_material`], and gets back nothing: there is
+    /// no handle to hold and nothing to drop. A name standing at the
+    /// version it already stands at costs a lookup and a comparison, which
+    /// is what a frame of a world that is not moving should cost.
+    ///
+    /// `build` is called only when the version differs from the one in
+    /// hand, or the name is new. That is why the version is worth stating
+    /// rather than worked out: the engine cannot tell whether a `Vec` a
+    /// game is about to build would come out the same, and hashing one to
+    /// find out walks the same memory that copying it does.
+    ///
+    /// A run too big to be rejected usefully as one piece is cut into
+    /// cells, per [`cells`]. A game does not have to divide its own world
+    /// and neither of the ones in this project should have had to.
+    pub fn standing(
+        &mut self,
+        name: Name,
+        version: u64,
+        mesh: MeshId,
+        texture: TextureId,
+        build: impl FnOnce(&mut Vec<Instance>),
+    ) {
+        let frames = self.frames;
+
+        if let Some(stood) = self.standing.get_mut(&name) {
+            if stood.version == version {
+                stood.mentioned = frames;
+
+                // a small run is drawn by being pushed, so its copy is the
+                // one thing that does happen every frame
+                if let As::Pushed {
+                    mesh,
+                    texture,
+                    instances,
+                } = &stood.as_
+                {
+                    let instances = instances.clone();
+
+                    self.instances
+                        .entry((*mesh, *texture))
+                        .or_default()
+                        .extend_from_slice(&instances);
+                }
+
+                return;
+            }
+
+            let was = std::mem::replace(&mut stood.as_, As::Runs(Vec::new()));
+
+            self.let_go(was);
+        }
+
+        let mut building = std::mem::take(&mut self.building);
+
+        building.clear();
+        build(&mut building);
+
+        let as_ = if building.len() < WORTH_A_DRAW {
+            self.instances
+                .entry((mesh, texture))
+                .or_default()
+                .extend_from_slice(&building);
+
+            As::Pushed {
+                mesh,
+                texture,
+                instances: building.clone(),
+            }
+        } else {
+            As::Runs(
+                cells(&building)
+                    .into_iter()
+                    .map(|cell| self.keep(mesh, texture, &cell))
+                    .collect(),
+            )
+        };
+
+        self.building = building;
+        self.standing.insert(
+            name,
+            Stood {
+                as_,
+                version,
+                mentioned: frames,
+            },
+        );
+    }
+
+    /// Lets go of whatever a name was standing as.
+    fn let_go(&mut self, as_: As) {
+        if let As::Runs(slots) = as_ {
+            for slot in slots {
+                self.drop(slot);
+            }
+        }
+    }
+
+    /// Lets go of every name nobody has mentioned for [`REMEMBERED`]
+    /// frames. Spec 0064.
+    fn forget_what_nobody_mentions(&mut self) {
+        let frames = self.frames;
+        let mut forgotten: Vec<Name> = Vec::new();
+
+        for (name, stood) in self.standing.iter() {
+            if frames.saturating_sub(stood.mentioned) >= REMEMBERED {
+                forgotten.push(*name);
+            }
+        }
+
+        for name in forgotten {
+            if let Some(stood) = self.standing.remove(&name) {
+                self.let_go(stood.as_);
+            }
+        }
+    }
+
+    /// Lets go of a name now rather than waiting out [`REMEMBERED`].
+    /// Spec 0064.
+    ///
+    /// **The one escape hatch, and it is for mode switches.** A game that
+    /// stops drawing something and starts drawing the same thing another
+    /// way would otherwise draw it both ways until the name is forgotten,
+    /// and the engine cannot tell that from a room the game skipped for a
+    /// frame. Nothing else needs this: a name that simply stops being
+    /// mentioned goes on its own.
+    pub fn gone(&mut self, name: Name) {
+        if let Some(stood) = self.standing.remove(&name) {
+            self.let_go(stood.as_);
+        }
+    }
+
+    /// How many runs of its own a name is standing as, and nothing if it
+    /// stands as none. A run too small to be worth a draw is pushed rather
+    /// than kept, so it stands as nought of them.
+    pub fn standing_as(&self, name: Name) -> Option<usize> {
+        self.standing.get(&name).map(|stood| match &stood.as_ {
+            As::Runs(slots) => slots.len(),
+            As::Pushed { .. } => 0,
+        })
+    }
+
     /// Moves one instance of a kept run.
     ///
     /// The run it belongs to is measured again, because what holds all of it
@@ -581,6 +738,125 @@ impl Scene {
             .all(|instances| instances.is_empty())
             && self.kept.iter().all(|slot| slot.is_none())
     }
+}
+
+/// What a game calls one of its runs. Spec 0064.
+///
+/// A number the game already has: a room, an index, a hash of a name it
+/// made up. The engine never looks inside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Name(pub u64);
+
+/// How many frames a name nobody mentions is held before it is let go.
+///
+/// Not one, because a game that skips a room for a frame should not pay to
+/// build it again, and the frame it skipped is exactly the frame that was
+/// already busy. The same reasoning gives spec 0061 its belief window and
+/// the same number serves.
+pub const REMEMBERED: u64 = 10;
+
+/// What one name is standing as. Spec 0064.
+#[derive(Debug)]
+struct Stood {
+    /// What it was built into: runs the engine holds, or instances it
+    /// pushes with the rest of the frame's.
+    as_: As,
+    /// What the game said about it when it was built.
+    version: u64,
+    /// The last frame anybody asked for it.
+    mentioned: u64,
+}
+
+/// The two things a name can be standing as. Spec 0064.
+#[derive(Debug)]
+enum As {
+    /// Runs of its own, cut into cells, drawn where they lie per spec 0063.
+    Runs(Vec<Kept>),
+    /// Instances pushed into this frame's batches, for a run too small to
+    /// be worth a draw call of its own. The game still only builds it when
+    /// the version changes; what happens every frame is the copy, which is
+    /// what pushing has always been.
+    Pushed {
+        mesh: MeshId,
+        texture: TextureId,
+        instances: Vec<Instance>,
+    },
+}
+
+/// How many instances are worth a draw call of their own. Spec 0064.
+///
+/// Under this a run is pushed instead, so that it joins whatever else
+/// wears the same mesh and texture and the three of them are one draw
+/// rather than three. **This is the decision both games here were making
+/// for themselves**, the arcade with a `KEPT_AT` of 32 and a comment about
+/// the lists in its building being one, three, four, six, thirteen and
+/// three hundred and fifty one.
+///
+/// Two hundred and fifty six because the copy it costs is seventeen
+/// kilobytes, which is nothing a frame, and a draw call that draws fewer
+/// cubes than that is a draw call that wanted to be part of another one.
+/// The number is a judgement and it is here so there is one of it.
+pub const WORTH_A_DRAW: usize = 256;
+
+/// How many instances are worth a cell of their own. Spec 0064.
+///
+/// A cell is a draw call, so too small is a frame of draw calls that each
+/// draw nothing much. A cell is also the unit the frustum rejects, and
+/// spec 0063 draws a kept run whole once any of it is seen, so too large is
+/// a world drawn whenever a corner of it is in view. Sixteen thousand puts
+/// four million instances in about two hundred and fifty cells, which is a
+/// few hundred draws in the worst case of looking at all of them and a
+/// useful rejection in the usual case of not.
+pub const CELL: usize = 16_384;
+
+/// The most cells a run is cut along one axis.
+///
+/// A cube of this is 32,768 cells, which is past anything the count above
+/// asks for, and it is here so that a run of instances all in one place
+/// cannot ask for a grid with more cells than it has instances.
+const ACROSS: usize = 32;
+
+/// Cuts a run into cells on a grid of its own spread. Spec 0064.
+///
+/// A run small enough to be worth rejecting as one piece comes back as one
+/// piece. A larger one is divided by where its instances are, because that
+/// is the only thing the engine knows about them, and the empty cells are
+/// dropped rather than kept as runs that draw nothing.
+///
+/// Every instance comes out exactly once. `cutting_a_run_up_loses_nothing`
+/// is what holds that, and it is the property the rest of this depends on:
+/// a cell that quietly lost a cube is a hole in the world that nothing else
+/// here would notice.
+pub(crate) fn cells(instances: &[Instance]) -> Vec<Vec<Instance>> {
+    if instances.len() <= CELL {
+        return vec![instances.to_vec()];
+    }
+
+    let wanted = instances.len().div_ceil(CELL);
+    let across = (wanted as f32).cbrt().ceil() as usize;
+    let across = across.clamp(2, ACROSS);
+    let round = Round::of(instances);
+    // the box the run fills, from its own middle and reach, so a run that
+    // is flat in one axis is still divided in the other two
+    let (least, most) = (round.at - round.reach, round.at + round.reach);
+    let size = (most - least).max(Vec3::splat(f32::MIN_POSITIVE));
+    let mut out: Vec<Vec<Instance>> = vec![Vec::new(); across * across * across];
+
+    for instance in instances {
+        let at = Vec3::new(
+            instance.model[3][0],
+            instance.model[3][1],
+            instance.model[3][2],
+        );
+        let cell = |along: f32| ((along * across as f32) as usize).min(across - 1);
+        let along = (at - least) / size;
+        let n = cell(along.x) * across * across + cell(along.y) * across + cell(along.z);
+
+        out[n].push(*instance);
+    }
+
+    out.retain(|cell| !cell.is_empty());
+    out
 }
 
 /// A handle to what a game asked the engine to keep. Spec 0058.
@@ -876,6 +1152,257 @@ mod tests {
     /// One instance, standing somewhere.
     fn one_at(at: glam::Vec3) -> Instance {
         Instance::new(&Transform::at(at), Vec4::ONE, Instance::DEFAULT_SHININESS)
+    }
+
+    /// A run of `n` instances spread through a box, which is what a game's
+    /// world looks like to the thing that cuts it up.
+    fn spread(n: usize) -> Vec<Instance> {
+        (0..n)
+            .map(|i| {
+                let i = i as f32;
+
+                one_at(glam::Vec3::new(
+                    (i * 0.37).sin() * 100.0,
+                    (i * 0.11).cos() * 40.0,
+                    (i * 0.53).sin() * 100.0,
+                ))
+            })
+            .collect()
+    }
+
+    /// Spec 0064: a name standing at the version it already stands at does
+    /// not build anything.
+    ///
+    /// This is the frame a world that is not moving should cost, and the
+    /// closure counting its own calls is the only way to see it from here.
+    #[test]
+    fn standing_still_builds_nothing() {
+        let mut scene = Scene::new();
+        let mut built = 0;
+
+        for _ in 0..5 {
+            scene.standing(Name(1), 7, MeshId(0), TextureId::WHITE, |into| {
+                built += 1;
+                into.extend(spread(WORTH_A_DRAW));
+            });
+            scene.reset();
+        }
+
+        assert_eq!(built, 1, "a run that did not change was built again");
+        assert_eq!(scene.standing_as(Name(1)), Some(1));
+        assert_eq!(scene.keepings().count(), 1);
+    }
+
+    /// Spec 0064: and one at a new version is built again, with the old
+    /// one let go rather than left beside it.
+    #[test]
+    fn a_new_version_is_built_again() {
+        let mut scene = Scene::new();
+        let mut built = 0;
+
+        for version in [1, 1, 2] {
+            scene.standing(Name(1), version, MeshId(0), TextureId::WHITE, |into| {
+                built += 1;
+                into.extend(
+                    spread(WORTH_A_DRAW)
+                        .iter()
+                        .map(|one| one.shifted(glam::Vec3::X * 1000.0 * version as f32)),
+                );
+            });
+            scene.reset();
+        }
+
+        assert_eq!(built, 2, "a new version was not built");
+        assert_eq!(
+            scene.keepings().count(),
+            1,
+            "the run it replaced is still being drawn"
+        );
+
+        let run = scene.keepings().next().expect("the run");
+
+        assert!(run.round.at.x > 1500.0, "the old version is what is drawn");
+    }
+
+    /// Spec 0064: a name nobody mentions is let go, and one mentioned
+    /// inside the window is not.
+    #[test]
+    fn a_run_nobody_mentions_goes_away() {
+        let mut scene = Scene::new();
+
+        scene.standing(Name(1), 0, MeshId(0), TextureId::WHITE, |into| {
+            into.extend(spread(WORTH_A_DRAW))
+        });
+
+        for _ in 0..REMEMBERED - 1 {
+            scene.reset();
+        }
+
+        assert_eq!(
+            scene.keepings().count(),
+            1,
+            "a run was let go inside the window"
+        );
+
+        scene.reset();
+
+        assert_eq!(
+            scene.keepings().count(),
+            0,
+            "a run nobody mentioned is still held"
+        );
+        assert_eq!(scene.standing_as(Name(1)), None);
+    }
+
+    /// Spec 0064: and mentioning it again inside the window keeps it, with
+    /// nothing built.
+    #[test]
+    fn mentioning_a_run_again_keeps_it() {
+        let mut scene = Scene::new();
+        let mut built = 0;
+
+        for _ in 0..REMEMBERED * 3 {
+            scene.standing(Name(1), 0, MeshId(0), TextureId::WHITE, |into| {
+                built += 1;
+                into.extend(spread(WORTH_A_DRAW));
+            });
+            scene.reset();
+        }
+
+        assert_eq!(built, 1);
+        assert_eq!(
+            scene.keepings().count(),
+            1,
+            "a run mentioned every frame was let go"
+        );
+    }
+
+    /// Spec 0064: a run too small to be worth a draw call of its own is
+    /// pushed with the rest of the frame, so it joins whatever else wears
+    /// the same mesh and texture.
+    ///
+    /// This is the decision the arcade was making for itself with a
+    /// `KEPT_AT` of 32. Three runs of four boxes each should be one draw,
+    /// not three.
+    #[test]
+    fn a_run_too_small_for_a_draw_is_pushed() {
+        let mut scene = Scene::new();
+
+        for name in 0..3 {
+            scene.standing(Name(name), 0, MeshId(0), TextureId::WHITE, |into| {
+                into.extend(spread(4))
+            });
+        }
+
+        assert_eq!(
+            scene.keepings().count(),
+            0,
+            "a run of four was given a draw call of its own"
+        );
+        assert_eq!(scene.standing_as(Name(0)), Some(0));
+
+        let batches = scene.batches();
+
+        assert_eq!(batches.len(), 1, "three small runs were not one batch");
+        assert_eq!(batches[0].2.len(), 12);
+    }
+
+    /// Spec 0064: and it is pushed again every frame, without being built
+    /// again.
+    ///
+    /// The copy is what pushing has always cost. What the version saves
+    /// here is the building, which for the arcade is walking its collision
+    /// boxes and making an instance out of each one.
+    #[test]
+    fn a_small_run_is_pushed_every_frame_and_built_once() {
+        let mut scene = Scene::new();
+        let mut built = 0;
+
+        for _ in 0..4 {
+            scene.reset();
+            scene.standing(Name(1), 0, MeshId(0), TextureId::WHITE, |into| {
+                built += 1;
+                into.extend(spread(4));
+            });
+
+            assert_eq!(
+                scene.batches().first().map(|batch| batch.2.len()),
+                Some(4),
+                "a small run stopped being drawn"
+            );
+        }
+
+        assert_eq!(built, 1, "a run that did not change was built again");
+    }
+
+    /// Spec 0064: a run past the size worth rejecting as one piece is cut
+    /// into cells, and the instances of a cell are near each other.
+    #[test]
+    fn a_big_run_is_cut_into_cells() {
+        let instances = spread(CELL * 3);
+        let cut = cells(&instances);
+
+        assert!(
+            cut.len() > 1,
+            "a run of {} was left as one piece",
+            instances.len()
+        );
+
+        // and each cell holds a part of the world rather than a slice of
+        // the list: a cell's own reach is smaller than the whole run's
+        let whole = Round::of(&instances);
+
+        for cell in &cut {
+            assert!(
+                Round::of(cell).reach < whole.reach,
+                "a cell is as big as the run it came out of"
+            );
+        }
+    }
+
+    /// Spec 0064: and one under it is left alone, because a run that is
+    /// worth rejecting whole costs nothing to reject.
+    #[test]
+    fn a_small_run_is_left_alone() {
+        assert_eq!(cells(&spread(CELL)).len(), 1);
+        assert_eq!(cells(&spread(7)).len(), 1);
+        assert_eq!(cells(&[]).len(), 1);
+    }
+
+    /// Spec 0064: cutting a run up loses nothing and copies nothing twice.
+    ///
+    /// The property everything else here stands on. A cell that quietly
+    /// lost a cube is a hole in the world, and nothing else in this engine
+    /// would notice one.
+    #[test]
+    fn cutting_a_run_up_loses_nothing() {
+        let instances = spread(CELL * 4 + 11);
+        let cut = cells(&instances);
+        let out: usize = cut.iter().map(|cell| cell.len()).sum();
+
+        assert_eq!(out, instances.len(), "a cell lost or gained instances");
+
+        let places = |runs: &[Instance]| {
+            let mut all: Vec<[i64; 3]> = runs
+                .iter()
+                .map(|one| {
+                    [
+                        (one.model[3][0] * 4096.0) as i64,
+                        (one.model[3][1] * 4096.0) as i64,
+                        (one.model[3][2] * 4096.0) as i64,
+                    ]
+                })
+                .collect();
+            all.sort_unstable();
+            all
+        };
+        let mine: Vec<Instance> = cut.into_iter().flatten().collect();
+
+        assert_eq!(
+            places(&mine),
+            places(&instances),
+            "what came out is not what went in"
+        );
     }
 
     /// Spec 0046: past the cap the extra are dropped and said so.

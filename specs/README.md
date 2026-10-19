@@ -70,6 +70,7 @@ not a priority, and it never changes once a spec exists.
 | [0061](0061-what-a-wall-hides.md) | Leaving out what is in front of you and behind a wall, by asking the GPU about a box during the prepass: knowing nothing means drawing everything, and a query nobody wrote answers nought |
 | [0062](0062-a-test-that-looks-at-the-picture.md) | Drawing a frame in a test and comparing it against one that was right, because five hundred tests passed while the sun stopped casting shadows: the first tolerance was loose enough to call a missing shadow a match |
 | [0063](0063-a-kept-run-drawn-where-it-lies.md) | Storing an instance relative to its run so the eye comes off once a run rather than once an instance: four million cubes went from 10.12 ms of CPU work a frame to 0.59, and the compute pass this was written to build was argued out of it |
+| [0064](0064-keeping-without-the-bookkeeping.md) | One call a frame with a name and a version, so a game lands on the kept path without handles, a lifecycle or a decision about how to cut its world up: the example's 96 patches and the arcade's threshold of 32 are both deleted, and the engine decides what is worth a draw |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.
