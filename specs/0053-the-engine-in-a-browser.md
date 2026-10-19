@@ -1,6 +1,8 @@
 # 0053 The engine in a browser
 
-**Status:** implemented, 2026-10-15. The page got its colour back 2026-10-17.
+**Status:** implemented
+**Date:** 2026-10-15
+**Built:** 2026-10-15. The page got its colour back 2026-10-17.
 
 ## Goal
 

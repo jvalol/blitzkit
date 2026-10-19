@@ -31,9 +31,15 @@ struct SpotLight {
 // them four is nought, nought, nought, one for every transform this engine
 // makes and is not carried. Spec 0060.
 //
-// **The eye is already off it.** It is taken off on the CPU, per spec 0051,
-// where it has always been: spec 0059 moved it here and the sun's shadows
-// went with it, so 0059 was reverted and this function kept its name.
+// **What the eye is off, and what it is not.** An instance written this
+// frame has the eye off it already, per spec 0051, and stands with a
+// standing of nought. A kept instance holds its place relative to its run's
+// middle, per spec 0063, and the standing is that middle with the eye off:
+// one subtraction a run instead of one an instance.
+//
+// Spec 0059 took the eye off here instead, from every instance, and the
+// sun's shadows went with it. This adds rather than subtracts and the
+// number it adds is the same for every instance of the draw.
 fn taken_off(
     model_0: vec3<f32>,
     model_1: vec3<f32>,
@@ -44,7 +50,7 @@ fn taken_off(
         vec4<f32>(model_0, 0.0),
         vec4<f32>(model_1, 0.0),
         vec4<f32>(model_2, 0.0),
-        vec4<f32>(model_3, 1.0),
+        vec4<f32>(model_3 + standing.at.xyz, 1.0),
     );
 }
 
@@ -97,6 +103,19 @@ struct Uniforms {
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+
+// Where the run this draw belongs to stands: its middle with the eye taken
+// off, or nought for a run written this frame. Spec 0063.
+//
+// Read at a dynamic offset, which is how one value differs from draw to draw
+// without being in every instance. A kept instance holds its place relative
+// to its run's middle, which is a small number however far out the run
+// stands, and this is what puts it back.
+struct Standing {
+    at: vec4<f32>,
+};
+
+@group(0) @binding(1) var<uniform> standing: Standing;
 
 // White by default, so an untextured mesh multiplies by one, per spec 0011.
 @group(1) @binding(0) var surface_texture: texture_2d<f32>;

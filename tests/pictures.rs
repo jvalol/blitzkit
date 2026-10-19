@@ -18,7 +18,7 @@ use blitzkit::geometry::Geometry;
 use blitzkit::lighting::PointLight;
 use blitzkit::mesh::{MeshData, Transform};
 use blitzkit::renderer::render_text::TextRenderer;
-use blitzkit::renderer::scene::{MeshId, Scene};
+use blitzkit::renderer::scene::{Instance, MeshId, Scene, TextureId};
 use blitzkit::renderer::{Picture, Renderer};
 use glam::{vec3, vec4, Vec3};
 
@@ -148,6 +148,39 @@ fn shots() -> Vec<Shot> {
             camera: |camera| {
                 camera.position = vec3(5.0, 4.0, 7.0);
                 camera.target = vec3(0.0, 1.0, 0.0);
+            },
+        },
+        // spec 0063: a run the game handed over once, far enough out that
+        // an f32 world position would show its steps. What is drawn comes
+        // out of the buffer it was written into, relative to the middle of
+        // the run, with the eye off that middle rather than off each of
+        // them.
+        Shot {
+            name: "a-kept-run-at-the-far-wall",
+            scene: |scene, meshes| {
+                let far = 33_280.0;
+                let instances: Vec<Instance> = (0..4)
+                    .map(|n| {
+                        Instance::new(
+                            &Transform::at(vec3(
+                                (n as f32 - 1.5) * 0.09,
+                                0.0,
+                                far + (n % 2) as f32 * 0.05,
+                            ))
+                            .with_scale(Vec3::splat(0.05)),
+                            vec4(0.85, 0.6, 0.25, 1.0),
+                            64.0,
+                        )
+                    })
+                    .collect();
+
+                scene.keep(meshes.cube, TextureId::WHITE, &instances);
+            },
+            camera: |camera| {
+                camera.position = vec3(0.0, 0.07, 33_280.0 - 0.35);
+                camera.target = vec3(0.0, 0.0, 33_280.0);
+                camera.near = 0.01;
+                camera.far = 10.0;
             },
         },
         // the see-through pass and its ordering, per spec 0018
@@ -354,6 +387,18 @@ mod pictures {
         #[test]
         fn a_lamp_throws_a_shadow() {
             looks_right("a-lamp-throws-a-shadow");
+        }
+
+        /// Spec 0063: a kept run is drawn out of the buffer it was written
+        /// into, and lands where it was put however far out that is.
+        ///
+        /// Every other picture here is pushed, so this is the only one that
+        /// goes down the path spec 0063 built. Far out, because that is
+        /// where storing a run relative to its own middle is the difference
+        /// between a cube and a smear.
+        #[test]
+        fn a_kept_run_is_drawn_where_it_lies() {
+            looks_right("a-kept-run-at-the-far-wall");
         }
 
         #[test]

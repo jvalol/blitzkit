@@ -94,12 +94,26 @@ impl Instance {
     /// tests below are the record of why, and held to the shader's own
     /// formula by `taking_the_eye_off_lands_where_it_did`.
     pub fn from_the_eye(&self, eye: Vec3) -> Self {
+        self.shifted(-eye)
+    }
+
+    /// The same instance stood somewhere else.
+    ///
+    /// A kept run is stored relative to its own middle, per spec 0063, and
+    /// this is both halves of that: subtracting the middle when the run is
+    /// kept, and adding it back when one of its instances has to be measured
+    /// or copied in the world's own terms.
+    pub(crate) fn shifted(&self, by: Vec3) -> Self {
         let mut moved = *self;
-        moved.model[3][0] -= eye.x;
-        moved.model[3][1] -= eye.y;
-        moved.model[3][2] -= eye.z;
+        moved.shift(by);
 
         moved
+    }
+
+    pub(crate) fn shift(&mut self, by: Vec3) {
+        self.model[3][0] += by.x;
+        self.model[3][1] += by.y;
+        self.model[3][2] += by.z;
     }
 
     /// **The normal matrix is not here.** It is the inverse transpose of the
@@ -139,9 +153,33 @@ impl Instance {
     }
 }
 
-/// One instanced draw: a mesh, its texture, and the run of instances in the
-/// instance buffer that belongs to it.
-pub(crate) type Batch = (MeshId, TextureId, u32, u32);
+/// One instanced draw: a mesh, its texture, the run of instances that
+/// belongs to it, and which buffer that run lies in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Batch {
+    pub(crate) mesh: MeshId,
+    pub(crate) texture: TextureId,
+    pub(crate) first: u32,
+    pub(crate) count: u32,
+    /// Which of the two instance buffers this run lies in. Spec 0063: a
+    /// kept run that a view can see the whole of is drawn where it was
+    /// written, and everything else is written again this frame.
+    pub(crate) from: Where,
+    /// Which entry of the standing table the vertex stage adds to each of
+    /// these instances. Nought is the entry that adds nothing, which is
+    /// what a run written this frame uses, since the eye is already off it.
+    pub(crate) standing: u32,
+}
+
+/// Which buffer a batch's instances lie in. Spec 0063.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Where {
+    /// Written this frame, with the eye already taken off.
+    Frame,
+    /// Written when the run was kept, relative to the run's own middle, and
+    /// left there.
+    Kept,
+}
 
 /// The 3D half of a frame, emptied and refilled like `Geometry`.
 #[derive(Debug, Default)]
@@ -417,14 +455,25 @@ impl Scene {
     /// why these are held here rather than written into the instance buffer
     /// and left: the eye moves and the world does not.
     pub fn keep(&mut self, mesh: MeshId, texture: TextureId, instances: &[Instance]) -> Kept {
+        // and stored relative to the middle of what holds it, per spec
+        // 0063, so that what reaches the GPU is a small number however far
+        // out the run stands and the eye comes off the middle rather than
+        // off every instance in it
+        let mut instances = instances.to_vec();
+        let round = Round::of(&instances);
+
+        for instance in &mut instances {
+            instance.shift(-round.at);
+        }
+
         let holding = Keeping {
             id: self.next_kept,
             version: 0,
             mesh,
             texture,
-            round: Round::of(instances),
-            quarters: quarters_of(instances),
-            instances: instances.to_vec(),
+            round,
+            quarters: quarters_of(&instances),
+            instances,
         };
 
         self.next_kept += 1;
@@ -463,13 +512,33 @@ impl Scene {
         let Some(Some(holding)) = self.kept.get_mut(kept.0) else {
             return;
         };
-        let Some(instance) = holding.instances.get_mut(n) else {
-            return;
-        };
 
-        *instance = Instance::new(transform, color, shininess);
+        if n >= holding.instances.len() {
+            return;
+        }
+
+        // out into the world, moved, measured, and back again. Spec 0063
+        // stores a run relative to its middle, and a move is what changes
+        // where that middle is, so the whole run is walked twice more than
+        // it used to be. Both walks are the length of the two this already
+        // did to measure the run again, which is what a move has always
+        // cost.
+        let at = holding.round.at;
+
+        for instance in &mut holding.instances {
+            instance.shift(at);
+        }
+
+        holding.instances[n] = Instance::new(transform, color, shininess);
         holding.round = Round::of(&holding.instances);
         holding.quarters = quarters_of(&holding.instances);
+
+        let at = holding.round.at;
+
+        for instance in &mut holding.instances {
+            instance.shift(-at);
+        }
+
         holding.version += 1;
     }
 
@@ -702,19 +771,61 @@ mod tests {
         );
 
         let now = scene.keepings().next().expect("the run");
+        // read in the world, which is not where a kept instance is stored:
+        // spec 0063 holds a run relative to its own middle, and that middle
+        // moves when one of its instances does
+        let at = |n: usize| now.instances[n].model[3][0] + now.round.at.x;
 
-        assert_eq!(
-            now.instances[0].model[3][0], 0.0,
-            "the one that did not move, moved"
-        );
-        assert_eq!(
-            now.instances[1].model[3][0], 40.0,
-            "the one that moved, did not"
-        );
+        assert_eq!(at(0), 0.0, "the one that did not move, moved");
+        assert_eq!(at(1), 40.0, "the one that moved, did not");
         assert!(
             now.round.reach > was.reach,
             "the sphere round the run was not measured again"
         );
+    }
+
+    /// Spec 0063: a kept instance plus the middle of what holds it is the
+    /// instance that was handed over, out at the far wall as well as near
+    /// the origin.
+    ///
+    /// Thirty three kilometres is where spec 0051 put the marble, and the
+    /// reason it had to: a world position that far out has about four
+    /// millimetres of precision left in an `f32`, so a sphere drawn there
+    /// comes out in steps. A place relative to the middle of its own run has
+    /// all of it back.
+    #[test]
+    fn a_run_relative_instance_lands_where_it_did() {
+        let far = 33_280.0;
+        let places = [
+            glam::Vec3::new(far, 0.0, 0.0),
+            glam::Vec3::new(far + 0.25, 0.0, 0.0),
+            glam::Vec3::new(far, 0.125, -0.5),
+        ];
+        let mut scene = Scene::new();
+        let instances: Vec<Instance> = places.iter().map(|at| one_at(*at)).collect();
+
+        scene.keep(MeshId(0), TextureId::WHITE, &instances);
+
+        let run = scene.keepings().next().expect("the run");
+
+        for (n, at) in places.iter().enumerate() {
+            let back = run.instances[n].shifted(run.round.at);
+
+            assert_eq!(
+                [back.model[3][0], back.model[3][1], back.model[3][2]],
+                [at.x, at.y, at.z],
+                "instance {} did not land where it was put",
+                n
+            );
+        }
+
+        // and the thing that makes it exact: what is stored is small
+        for instance in &run.instances {
+            assert!(
+                instance.model[3][0].abs() < 1.0,
+                "a kept instance is still holding a world position"
+            );
+        }
     }
 
     /// Spec 0058: a dropped run is gone, and its handle stops answering.

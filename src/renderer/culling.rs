@@ -17,7 +17,7 @@ use glam::{Mat4, Vec3};
 
 use crate::camera::Frustum;
 use crate::collision::Aabb;
-use crate::renderer::scene::{Batch, Instance, Keeping, MeshId, Round, TextureId};
+use crate::renderer::scene::{Batch, Instance, Keeping, MeshId, Round, TextureId, Where};
 
 /// What one pass can see.
 #[derive(Debug, Clone, Copy)]
@@ -165,6 +165,19 @@ pub(crate) struct Pushed<'a> {
     /// pushed one has no such sphere because it was built this frame and
     /// measuring it would cost what it saves.
     pub(crate) round: Option<Round>,
+    /// Where this run already lies, for a kept one. Spec 0063.
+    pub(crate) home: Option<Home>,
+}
+
+/// Where a kept run already lies, and which entry of the standing table
+/// puts it back in the world. Spec 0063.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Home {
+    /// The instance this run starts at, in the kept buffer.
+    pub(crate) base: u32,
+    /// Its entry in the standing table, which holds the run's middle with
+    /// the eye taken off.
+    pub(crate) standing: u32,
 }
 
 /// How much of a kept run a view can see, which decides whether any of its
@@ -180,7 +193,11 @@ enum Whole {
 }
 
 /// A kept run, as the picking reads it. Spec 0058.
-pub(crate) fn of_a_keeping<'a>(keeping: &'a Keeping, bounds: Aabb) -> Pushed<'a> {
+pub(crate) fn of_a_keeping<'a>(
+    keeping: &'a Keeping,
+    bounds: Aabb,
+    home: Option<Home>,
+) -> Pushed<'a> {
     Pushed {
         mesh: keeping.mesh,
         texture: keeping.texture,
@@ -189,6 +206,7 @@ pub(crate) fn of_a_keeping<'a>(keeping: &'a Keeping, bounds: Aabb) -> Pushed<'a>
         quarters: keeping.quarters,
         hidden: false,
         round: Some(keeping.round),
+        home,
     }
 }
 
@@ -210,6 +228,16 @@ pub(crate) fn pick(
     let mut keeps: Vec<bool> = Vec::new();
 
     for one in pushed.iter().chain(kept.iter()) {
+        // what puts this run's instances back in the world, and what puts
+        // them where a frame's buffer wants them, which is the world with
+        // the eye off. A pushed run is already in the world, so its middle
+        // is nought. Spec 0063.
+        let middle = match one.home {
+            Some(_) => one.round.map(|round| round.at).unwrap_or(Vec3::ZERO),
+            None => Vec3::ZERO,
+        };
+        let carry = middle - eye;
+
         // one mesh can be drawn solid here and see-through there and glowing
         // somewhere else, so the split is per instance and each quarter gets
         // its own run
@@ -292,19 +320,70 @@ pub(crate) fn pick(
                     continue;
                 }
 
+                // **A kept run is drawn whole or not at all.** Spec 0063:
+                // once a run lies in a buffer of its own, measuring its
+                // instances one at a time costs more than drawing the ones
+                // the frustum would have dropped. Four million cubes on the
+                // shell went from 9.12 ms of CPU work a frame to 0.585 by
+                // making this one substitution, at the price of eighteen
+                // million triangles asked for instead of nine and three
+                // quarters. The rasteriser throws away what is off the
+                // screen for nothing; the CPU cannot.
+                //
+                // What this asks of a game is that it keeps its world in
+                // pieces rather than as one run, which is what spec 0058
+                // already says: the patches are the game's. A game that
+                // keeps everything as a single run draws everything always.
+                //
+                // A pushed run is measured one instance at a time as it
+                // always was, per spec 0057. It has nowhere to lie.
+                let whole_of_it = match (whole_of_it, one.home, one.quarters) {
+                    (Some(Whole::Some), Some(_), Some(_)) => Some(Whole::All),
+                    (other, _, _) => other,
+                };
+
                 if whole_of_it == Some(Whole::All) {
-                    // written into the buffer once and drawn where it lies,
-                    // per spec 0059. A run that is kept whole is not copied
-                    // at all, which is what a frame of a world that is
-                    // standing still costs: nothing.
-                    let (first, count) = *whole.get_or_insert_with(|| {
-                        let first = instances.len() as u32;
-                        instances.extend(quarter.iter().map(|one| one.from_the_eye(eye)));
+                    // **Drawn where it was written, if it was written.**
+                    // Spec 0063: a kept run lies in a buffer of its own,
+                    // relative to its own middle, and a view that can see
+                    // the whole of it draws it there. Nothing is copied and
+                    // nothing is sent, which is what a frame of a world
+                    // standing still should cost.
+                    let run = match (one.home, one.quarters) {
+                        (Some(home), Some(quarters)) => {
+                            let (first, count) = quarters[kind];
 
-                        (first, quarter.len() as u32)
-                    });
+                            Batch {
+                                mesh: one.mesh,
+                                texture: one.texture,
+                                first: home.base + first,
+                                count,
+                                from: Where::Kept,
+                                standing: home.standing,
+                            }
+                        }
+                        // a run with no home, or one whose kinds are mixed
+                        // up through it so that this kind is not a span of
+                        // it, is written this frame like anything else
+                        _ => {
+                            let (first, count) = *whole.get_or_insert_with(|| {
+                                let first = instances.len() as u32;
+                                instances.extend(quarter.iter().map(|one| one.shifted(carry)));
 
-                    let run = (one.mesh, one.texture, first, count);
+                                (first, quarter.len() as u32)
+                            });
+
+                            Batch {
+                                mesh: one.mesh,
+                                texture: one.texture,
+                                first,
+                                count,
+                                from: Where::Frame,
+                                standing: 0,
+                            }
+                        }
+                    };
+
                     if see_through {
                         runs.translucent.push(run);
                     } else {
@@ -319,7 +398,9 @@ pub(crate) fn pick(
 
                 keeps.clear();
                 keeps.extend(quarter.iter().map(|instance| {
-                    let (at, radius) = sphere(&one.bounds, &instance.matrix());
+                    // measured in the world, which a kept instance is not
+                    // in: it is relative to its run's middle, per spec 0063
+                    let (at, radius) = sphere(&one.bounds, &instance.shifted(middle).matrix());
 
                     view.keeps(at, radius)
                 }));
@@ -333,7 +414,7 @@ pub(crate) fn pick(
                 let (first, count) = if count as usize == quarter.len() {
                     *whole.get_or_insert_with(|| {
                         let first = instances.len() as u32;
-                        instances.extend(quarter.iter().map(|one| one.from_the_eye(eye)));
+                        instances.extend(quarter.iter().map(|one| one.shifted(carry)));
 
                         (first, count)
                     })
@@ -344,13 +425,20 @@ pub(crate) fn pick(
                             .iter()
                             .zip(keeps.iter())
                             .filter(|(_, kept)| **kept)
-                            .map(|(one, _)| one.from_the_eye(eye)),
+                            .map(|(one, _)| one.shifted(carry)),
                     );
 
                     (first, count)
                 };
 
-                let run = (one.mesh, one.texture, first, count);
+                let run = Batch {
+                    mesh: one.mesh,
+                    texture: one.texture,
+                    first,
+                    count,
+                    from: Where::Frame,
+                    standing: 0,
+                };
                 if see_through {
                     runs.translucent.push(run);
                 } else {
@@ -614,11 +702,12 @@ mod tests {
             quarters: None,
             hidden: false,
             round: None,
+            home: None,
         }];
         let views = views_for(&looking(), Some((behind, 3.0)));
         let (_, drawn) = pick(&views, &pushed, &[], Vec3::ZERO);
 
-        let kept = |runs: &Runs| runs.opaque.iter().map(|(_, _, _, n)| n).sum::<u32>();
+        let kept = |runs: &Runs| runs.opaque.iter().map(|batch| batch.count).sum::<u32>();
 
         assert_eq!(kept(drawn.picture()), 1, "the picture drew the one behind");
         assert_eq!(
@@ -662,6 +751,7 @@ mod tests {
             quarters: None,
             hidden: false,
             round: None,
+            home: None,
         }];
         let views = views_for(&looking(), Some((Vec3::new(40.0, 0.0, 0.0), 2.0)));
         let (written, drawn) = pick(&views, &pushed, &[], Vec3::ZERO);
@@ -669,7 +759,7 @@ mod tests {
         for (slot, view) in views.iter().enumerate() {
             let mut drew: Vec<Vec3> = Vec::new();
 
-            for (_, _, first, count) in drawn.at(slot).opaque.iter() {
+            for Batch { first, count, .. } in drawn.at(slot).opaque.iter() {
                 assert!(
                     (*first + *count) as usize <= written.len(),
                     "slot {} reads past the end of the buffer",
@@ -718,6 +808,7 @@ mod tests {
             quarters: None,
             hidden: false,
             round: None,
+            home: None,
         }];
         let (written, drawn) = pick(&views_for(&looking(), None), &pushed, &[], Vec3::ZERO);
 
@@ -741,6 +832,7 @@ mod tests {
             quarters: None,
             hidden: false,
             round: None,
+            home: None,
         }];
         let (written, drawn) = pick(&[Seen::All], &pushed, &[], Vec3::ZERO);
 
@@ -789,6 +881,7 @@ mod tests {
             quarters: None,
             hidden: false,
             round: None,
+            home: None,
         }];
         let as_kept = vec![Pushed {
             mesh: MeshId(0),
@@ -797,6 +890,7 @@ mod tests {
             instances: &instances,
             quarters: None,
             hidden: false,
+            home: None,
             round: Some(keeping_at(&bounds, &instances)),
         }];
 
@@ -806,7 +900,7 @@ mod tests {
         let drew = |written: &[Instance], runs: &Runs| {
             let mut out: Vec<[f32; 3]> = Vec::new();
 
-            for (_, _, first, count) in runs.opaque.iter() {
+            for Batch { first, count, .. } in runs.opaque.iter() {
                 for n in *first..(*first + *count) {
                     let model = written[n as usize].model;
 
@@ -849,6 +943,7 @@ mod tests {
             instances: &instances,
             quarters: None,
             hidden: false,
+            home: None,
             round: Some(keeping_at(&bounds, &instances)),
         }];
         let (written, drawn) = pick(&views_for(&looking(), None), &[], &kept, Vec3::ZERO);
@@ -876,6 +971,7 @@ mod tests {
             instances: &instances,
             quarters: crate::renderer::scene::quarters_of(&instances),
             hidden: true,
+            home: None,
             round: Some(keeping_at(&bounds, &instances)),
         }];
         let mut views = views_for(&looking(), None);
@@ -895,7 +991,11 @@ mod tests {
             1,
             "a hidden run stopped casting"
         );
-        assert_eq!(drawn.at(SUN).casting[0].3, 2, "it cast less than all of it");
+        assert_eq!(
+            drawn.at(SUN).casting[0].count,
+            2,
+            "it cast less than all of it"
+        );
     }
 
     /// Spec 0058: a kept run wholly in view is copied whole, without any of
@@ -916,19 +1016,20 @@ mod tests {
             instances: &instances,
             quarters: None,
             hidden: false,
+            home: None,
             round: Some(keeping_at(&bounds, &instances)),
         }];
         let (written, drawn) = pick(&views_for(&looking(), None), &[], &kept, Vec3::ZERO);
 
         assert_eq!(written.len(), 3, "it was not copied whole");
         assert_eq!(drawn.picture().opaque.len(), 1, "it was not one run");
-        assert_eq!(drawn.picture().opaque[0].3, 3);
+        assert_eq!(drawn.picture().opaque[0].count, 3);
     }
 
     /// Spec 0058: a kept run that straddles a view is measured instance by
     /// instance, and only what is in view is drawn.
     #[test]
-    fn a_kept_run_that_straddles_is_measured() {
+    fn a_run_with_nowhere_to_lie_that_straddles_is_measured() {
         let bounds = cube();
         let both = [
             Vec3::new(0.0, 0.0, -10.0),
@@ -943,6 +1044,7 @@ mod tests {
             instances: &instances,
             quarters: None,
             hidden: false,
+            home: None,
             round: Some(keeping_at(&bounds, &instances)),
         }];
         let views = views_for(&looking(), None);
@@ -958,7 +1060,106 @@ mod tests {
             "this run does not straddle, so the test is checking nothing"
         );
         assert_eq!(written.len(), 2, "the one behind was drawn");
-        assert_eq!(drawn.picture().opaque[0].3, 2);
+        assert_eq!(drawn.picture().opaque[0].count, 2);
+    }
+
+    /// Spec 0063: a kept run that straddles the frustum is drawn whole,
+    /// where it lies, rather than measured one instance at a time.
+    ///
+    /// The instance behind the camera is drawn and thrown away by the
+    /// rasteriser. That is the trade this spec is: at four million cubes it
+    /// took the frame's CPU work from 9.12 ms to 0.585.
+    #[test]
+    fn a_kept_run_that_straddles_is_drawn_whole() {
+        let bounds = cube();
+        let both = [
+            Vec3::new(0.0, 0.0, -10.0),
+            Vec3::new(0.0, 0.0, -12.0),
+            Vec3::new(0.0, 0.0, 30.0),
+        ];
+        let instances = at_home(&both);
+        let round = keeping_at(&bounds, &pushed_at(&both));
+        let kept = vec![Pushed {
+            mesh: MeshId(0),
+            texture: TextureId::WHITE,
+            bounds,
+            instances: &instances,
+            quarters: crate::renderer::scene::quarters_of(&instances),
+            hidden: false,
+            home: Some(Home {
+                base: 7,
+                standing: 3,
+            }),
+            round: Some(round),
+        }];
+        let views = views_for(&looking(), None);
+
+        assert!(
+            views[PICTURE].keeps(round.at, round.reach)
+                && !views[PICTURE].keeps_all_of(round.at, round.reach),
+            "this run does not straddle, so the test is checking nothing"
+        );
+
+        let (written, drawn) = pick(&views, &[], &kept, Vec3::ZERO);
+        let batch = drawn.picture().opaque[0];
+
+        assert!(written.is_empty(), "a run that lies somewhere was copied");
+        assert_eq!(batch.count, 3, "the run was not drawn whole");
+        assert_eq!(batch.from, Where::Kept);
+        assert_eq!(batch.first, 7, "the run was not drawn where it lies");
+        assert_eq!(batch.standing, 3);
+    }
+
+    /// Spec 0063: and one no view can see is still left out of all of them.
+    ///
+    /// The point of the test above is a run drawn that need not be. This is
+    /// the line past which that stops: a run the frustum rejects whole
+    /// costs one sphere test and no draw.
+    #[test]
+    fn a_kept_run_out_of_view_is_still_left_out() {
+        let bounds = cube();
+        let behind = [Vec3::new(0.0, 0.0, 40.0), Vec3::new(2.0, 0.0, 42.0)];
+        let instances = at_home(&behind);
+        let kept = vec![Pushed {
+            mesh: MeshId(0),
+            texture: TextureId::WHITE,
+            bounds,
+            instances: &instances,
+            quarters: crate::renderer::scene::quarters_of(&instances),
+            hidden: false,
+            home: Some(Home {
+                base: 0,
+                standing: 1,
+            }),
+            round: Some(keeping_at(&bounds, &pushed_at(&behind))),
+        }];
+        let mut views = views_for(&looking(), None);
+
+        for view in views.iter_mut() {
+            *view = Seen::Nothing;
+        }
+
+        views[PICTURE] = Seen::Through(looking().frustum());
+
+        let (written, drawn) = pick(&views, &[], &kept, Vec3::ZERO);
+
+        assert!(written.is_empty());
+        assert!(
+            drawn.picture().opaque.is_empty(),
+            "a run behind the camera was drawn"
+        );
+    }
+
+    /// The instances of a kept run as the scene stores them: relative to the
+    /// middle of what holds them, per spec 0063.
+    fn at_home(places: &[Vec3]) -> Vec<Instance> {
+        let instances = pushed_at(places);
+        let round = keeping_at(&cube(), &instances);
+
+        instances
+            .iter()
+            .map(|instance| instance.shifted(-round.at))
+            .collect()
     }
 
     fn seen_holds(seen: &Seen, at: Vec3) -> bool {

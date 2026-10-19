@@ -1,8 +1,9 @@
 # 0056 What a frame costs
 
-**Status:** built, 2026-10-17, comparison included, and on the site to be
-played with rather than only run from a checkout.
+**Status:** implemented
 **Date:** 2026-10-17
+**Built:** 2026-10-17, comparison included, and on the site to be played with
+rather than only run from a checkout.
 
 ## Goal
 

@@ -1,6 +1,8 @@
 # 0054 What is on the examples page, and in what order
 
-**Status:** implemented, 2026-10-16
+**Status:** implemented
+**Date:** 2026-10-16
+**Built:** 2026-10-16
 
 ## Goal
 

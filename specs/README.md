@@ -69,6 +69,7 @@ not a priority, and it never changes once a spec exists.
 | [0060](0060-room-for-four-million.md) | Asking for the buffer the adapter will give and taking an instance from 120 bytes to 68: four million cubes draw in two thirds of what Bevy takes, eight million draw at all, and the second buffer was argued out of it |
 | [0061](0061-what-a-wall-hides.md) | Leaving out what is in front of you and behind a wall, by asking the GPU about a box during the prepass: knowing nothing means drawing everything, and a query nobody wrote answers nought |
 | [0062](0062-a-test-that-looks-at-the-picture.md) | Drawing a frame in a test and comparing it against one that was right, because five hundred tests passed while the sun stopped casting shadows: the first tolerance was loose enough to call a missing shadow a match |
+| [0063](0063-a-kept-run-drawn-where-it-lies.md) | Storing an instance relative to its run so the eye comes off once a run rather than once an instance: four million cubes went from 10.12 ms of CPU work a frame to 0.59, and the compute pass this was written to build was argued out of it |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.

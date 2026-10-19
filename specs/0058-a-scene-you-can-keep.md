@@ -112,8 +112,15 @@ and in `load` go on meaning what they mean.
   instance. — `renderer::culling::tests::a_kept_run_out_of_view_is_not_measured`
 - A kept run wholly inside a view is copied whole, without measuring any of
   its instances. — `renderer::culling::tests::a_kept_run_in_view_is_not_measured_either`
-- A kept run that straddles a view is measured instance by
-  instance. — `renderer::culling::tests::a_kept_run_that_straddles_is_measured`
+- A run that straddles a view is measured instance by
+  instance. — `renderer::culling::tests::a_run_with_nowhere_to_lie_that_straddles_is_measured`
+
+  **Spec 0063 took this back for a kept run.** Once a run lies in a buffer
+  of its own it is drawn whole as soon as any of it is seen, because
+  measuring its instances cost ten times what it saved. The criterion above
+  is now about a run with nowhere to lie, which is what a pushed one is, and
+  `renderer::culling::tests::a_kept_run_that_straddles_is_drawn_whole` is
+  the kept half of it.
 - Dropping a run drops its instances with it, and the handle to it stops
   answering. — `renderer::scene::tests::a_dropped_run_is_gone`
 - A handle to a run that was dropped does nothing at all, rather than

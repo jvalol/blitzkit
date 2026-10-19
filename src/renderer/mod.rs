@@ -92,6 +92,23 @@ pub struct Renderer {
     /// Bound by the 3D pipeline, which arrives with meshes in spec 0010.
     #[allow(dead_code)]
     camera_bind_group: wgpu::BindGroup,
+    /// Every kept run's instances, written when the run was kept and left
+    /// where they were put. Spec 0063.
+    kept_buffer: wgpu::Buffer,
+    /// Where each kept run lies in that buffer, by the run's own name.
+    kept_homes: std::collections::HashMap<u64, culling::Home>,
+    /// What the kept buffer holds: each run and the version of it that was
+    /// written. A run that moved, or a run that came or went, is what makes
+    /// this disagree with the scene and the buffer be written again.
+    kept_built: Vec<(u64, u64)>,
+    /// One entry a kept run, holding the run's middle with the eye taken
+    /// off, which the vertex stage adds to every instance of it. Entry
+    /// nought adds nothing and is what a run written this frame uses.
+    standing_buffer: wgpu::Buffer,
+    /// How far apart those entries are, which the device decides: a
+    /// dynamic offset has to be a multiple of its alignment, and sixteen
+    /// bytes of use costs two hundred and fifty six of room.
+    standing_stride: u64,
     /// Kept so that pipeline can be built against the same layout.
     #[allow(dead_code)]
     camera_bind_group_layout: wgpu::BindGroupLayout,
@@ -487,19 +504,53 @@ impl Renderer {
             )]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        let camera_bind_group_layout = uniform_bind_group_layout(
-            &device,
-            "Scene",
-            wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-        );
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Camera Bind Group"),
-            layout: &camera_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
+        // the scene's own uniform, and beside it the one entry of the
+        // standing table this draw is for. Spec 0063: the second is read at
+        // a dynamic offset, which is the one way a value can differ from
+        // draw to draw without being in the instance itself.
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Scene Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: true,
+                            min_binding_size: wgpu::BufferSize::new(STANDING),
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let standing_stride = device
+            .limits()
+            .min_uniform_buffer_offset_alignment
+            .max(STANDING as u32) as u64;
+        let standing_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Standing"),
+            size: standing_stride,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
+        let camera_bind_group = standing_bind_group(
+            &device,
+            &camera_bind_group_layout,
+            &camera_buffer,
+            &standing_buffer,
+        );
+        let kept_buffer = create_buffer(&device, 0, wgpu::BufferUsages::VERTEX);
 
         let pipeline = create_render_pipeline(&device, drawn, &screen_bind_group_layout);
 
@@ -872,6 +923,11 @@ impl Renderer {
             camera_buffer,
             camera_bind_group,
             camera_bind_group_layout,
+            kept_buffer,
+            kept_homes: std::collections::HashMap::new(),
+            kept_built: Vec::new(),
+            standing_buffer,
+            standing_stride,
             vertex_buffer,
             index_buffer,
             text_brush,
@@ -1428,6 +1484,111 @@ impl Renderer {
     ///
     /// Rgba8, row by row, with the padding a copy to a buffer needs taken
     /// out again, so what comes back is what a person would see.
+    /// Writes every kept run into a buffer of its own, and only when the
+    /// runs have changed. Spec 0063.
+    ///
+    /// **This is the whole point of the spec.** A world that stands still
+    /// is written once and drawn out of what was written, however many
+    /// frames go by and wherever the eye goes. What makes that possible is
+    /// that a kept instance is stored relative to its run's middle, so
+    /// nothing in this buffer depends on where anybody is standing.
+    ///
+    /// The whole buffer is written again when anything changes rather than
+    /// the one run that did. A run is kept and dropped far less often than
+    /// it is drawn, and a free list that packs runs into the gaps left by
+    /// dropped ones is a thing to write when something needs it.
+    fn lay_out_what_is_kept(&mut self, holding: &[&crate::renderer::scene::Keeping]) {
+        let built: Vec<(u64, u64)> = holding
+            .iter()
+            .map(|keeping| (keeping.id, keeping.version))
+            .collect();
+
+        if built == self.kept_built {
+            return;
+        }
+
+        let mut instances: Vec<Instance> = Vec::new();
+
+        self.kept_homes.clear();
+
+        for (n, keeping) in holding.iter().enumerate() {
+            self.kept_homes.insert(
+                keeping.id,
+                culling::Home {
+                    base: instances.len() as u32,
+                    // nought is the entry that adds nothing, so a run's own
+                    // entry is one past its place in this list
+                    standing: n as u32 + 1,
+                },
+            );
+            instances.extend_from_slice(&keeping.instances);
+        }
+
+        let wanted = instances.len() as u64 * Instance::SIZE;
+        let most = self.device.limits().max_buffer_size;
+
+        if let Some(size) = instance_room(self.kept_buffer.size(), wanted, most) {
+            self.kept_buffer = create_buffer(&self.device, size, wgpu::BufferUsages::VERTEX);
+        }
+
+        if !instances.is_empty() {
+            self.queue
+                .write_buffer(&self.kept_buffer, 0, bytemuck::cast_slice(&instances));
+        }
+
+        self.kept_built = built;
+
+        log::info!(
+            "{} kept instances in {} runs, written again",
+            instances.len(),
+            holding.len()
+        );
+    }
+
+    /// Writes where each kept run stands this frame, which is its middle
+    /// with the eye taken off. Spec 0063.
+    ///
+    /// This is all the CPU sends for a world that is standing still: four
+    /// numbers a run rather than sixty eight bytes an instance.
+    fn say_where_they_stand(
+        &mut self,
+        holding: &[&crate::renderer::scene::Keeping],
+        eye: glam::Vec3,
+    ) {
+        let stride = self.standing_stride;
+        let wanted = stride * (holding.len() as u64 + 1);
+
+        if wanted > self.standing_buffer.size() {
+            self.standing_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Standing"),
+                size: wanted,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.camera_bind_group = standing_bind_group(
+                &self.device,
+                &self.camera_bind_group_layout,
+                &self.camera_buffer,
+                &self.standing_buffer,
+            );
+        }
+
+        // one write rather than one a run, since a dynamic offset wants
+        // them a stride apart and the gaps between are never read
+        let mut table = vec![0u8; wanted as usize];
+
+        for (n, keeping) in holding.iter().enumerate() {
+            let at = keeping.round.at - eye;
+            let entry = [at.x, at.y, at.z, 0.0];
+            let at = (n as u64 + 1) * stride;
+
+            table[at as usize..at as usize + STANDING as usize]
+                .copy_from_slice(bytemuck::cast_slice(&entry));
+        }
+
+        self.queue.write_buffer(&self.standing_buffer, 0, &table);
+    }
+
     pub fn picture(
         &mut self,
         scene: &Scene,
@@ -1635,11 +1796,12 @@ impl Renderer {
                 }
 
                 shadow_pass.set_pipeline(&self.shadow_pipeline);
-                shadow_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                shadow_pass.set_bind_group(0, &self.camera_bind_group, &[0]);
                 shadow_pass.set_bind_group(1, &self.which_bind_groups[which as usize], &[]);
-                shadow_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
-                for (mesh_id, texture_id, first, count) in drawn.at(slot).casting.iter() {
+                for batch in drawn.at(slot).casting.iter() {
+                    let (mesh_id, texture_id, first, count) =
+                        (&batch.mesh, &batch.texture, &batch.first, &batch.count);
                     // a texture with holes casts no shadow here, for the
                     // reason the prepass skips it: this pass has no texture
                     // bound, so a line of lettering would throw the shadow
@@ -1651,6 +1813,14 @@ impl Renderer {
                     if mesh.index_count == 0 {
                         continue;
                     }
+                    as_it_stands(
+                        &mut shadow_pass,
+                        batch,
+                        &self.camera_bind_group,
+                        self.standing_stride,
+                        &self.instance_buffer,
+                        &self.kept_buffer,
+                    );
                     shadow_pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                     shadow_pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                     counted.saw(mesh.index_count, *count);
@@ -1689,12 +1859,13 @@ impl Renderer {
                 }
 
                 shadow_pass.set_pipeline(&self.point_shadow_pipeline);
-                shadow_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                shadow_pass.set_bind_group(0, &self.camera_bind_group, &[0]);
                 shadow_pass.set_bind_group(1, &self.which_bind_groups[layer], &[]);
                 shadow_pass.set_bind_group(2, &self.point_faces_bind_group, &[]);
-                shadow_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
 
-                for (mesh_id, texture_id, first, count) in drawn.at(slot).casting.iter() {
+                for batch in drawn.at(slot).casting.iter() {
+                    let (mesh_id, texture_id, first, count) =
+                        (&batch.mesh, &batch.texture, &batch.first, &batch.count);
                     // a texture with holes casts no shadow here, for the
                     // reason the prepass skips it: this pass has no texture
                     // bound, so a line of lettering would throw the shadow
@@ -1706,6 +1877,14 @@ impl Renderer {
                     if mesh.index_count == 0 {
                         continue;
                     }
+                    as_it_stands(
+                        &mut shadow_pass,
+                        batch,
+                        &self.camera_bind_group,
+                        self.standing_stride,
+                        &self.instance_buffer,
+                        &self.kept_buffer,
+                    );
                     shadow_pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                     shadow_pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                     counted.saw(mesh.index_count, *count);
@@ -1738,10 +1917,11 @@ impl Renderer {
             // the mesh pass either, per spec 0018
             if !drawn.picture().opaque.is_empty() {
                 prepass.set_pipeline(&self.prepass_pipeline);
-                prepass.set_bind_group(0, &self.camera_bind_group, &[]);
-                prepass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+                prepass.set_bind_group(0, &self.camera_bind_group, &[0]);
 
-                for (mesh_id, texture_id, first, count) in drawn.picture().opaque.iter() {
+                for batch in drawn.picture().opaque.iter() {
+                    let (mesh_id, texture_id, first, count) =
+                        (&batch.mesh, &batch.texture, &batch.first, &batch.count);
                     let mesh = &self.meshes[mesh_id.0];
                     // a texture with holes in it cannot write depth with this
                     // pipeline: it has no texture bound and would fill in the
@@ -1752,6 +1932,14 @@ impl Renderer {
                     {
                         continue;
                     }
+                    as_it_stands(
+                        &mut prepass,
+                        batch,
+                        &self.camera_bind_group,
+                        self.standing_stride,
+                        &self.instance_buffer,
+                        &self.kept_buffer,
+                    );
                     prepass.set_vertex_buffer(0, mesh.vertices.slice(..));
                     prepass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                     counted.saw(mesh.index_count, *count);
@@ -1764,7 +1952,9 @@ impl Renderer {
                 // per batch where the run above binds nothing at all.
                 prepass.set_pipeline(&self.cutout_prepass_pipeline);
 
-                for (mesh_id, texture_id, first, count) in drawn.picture().opaque.iter() {
+                for batch in drawn.picture().opaque.iter() {
+                    let (mesh_id, texture_id, first, count) =
+                        (&batch.mesh, &batch.texture, &batch.first, &batch.count);
                     let mesh = &self.meshes[mesh_id.0];
                     if mesh.index_count == 0
                         || !self.holed.get(texture_id.0).copied().unwrap_or(false)
@@ -1772,6 +1962,14 @@ impl Renderer {
                         continue;
                     }
                     prepass.set_bind_group(1, &self.textures[texture_id.0], &[]);
+                    as_it_stands(
+                        &mut prepass,
+                        batch,
+                        &self.camera_bind_group,
+                        self.standing_stride,
+                        &self.instance_buffer,
+                        &self.kept_buffer,
+                    );
                     prepass.set_vertex_buffer(0, mesh.vertices.slice(..));
                     prepass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                     counted.saw(mesh.index_count, *count);
@@ -1805,7 +2003,7 @@ impl Renderer {
                 let mesh = &self.meshes[cube.0];
 
                 hiding.set_pipeline(&self.hidden_pipeline);
-                hiding.set_bind_group(0, &self.camera_bind_group, &[]);
+                hiding.set_bind_group(0, &self.camera_bind_group, &[0]);
                 hiding.set_vertex_buffer(0, mesh.vertices.slice(..));
                 hiding.set_vertex_buffer(1, asking.boxes.slice(..));
                 hiding.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -1859,8 +2057,7 @@ impl Renderer {
             // This pass clears the frame, so it runs even with nothing 3D in
             // it. Only the drawing waits on an instance buffer that exists.
             if drawn.anything {
-                mesh_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-                mesh_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+                mesh_pass.set_bind_group(0, &self.camera_bind_group, &[0]);
 
                 // solid first, so it is in the depth buffer before anything is
                 // blended over it. Then the far side of everything see-through,
@@ -1877,7 +2074,9 @@ impl Renderer {
                     }
                     mesh_pass.set_pipeline(pipeline);
 
-                    for (mesh_id, texture_id, first, count) in batches.iter() {
+                    for batch in batches.iter() {
+                        let (mesh_id, texture_id, first, count) =
+                            (&batch.mesh, &batch.texture, &batch.first, &batch.count);
                         let mesh = &self.meshes[mesh_id.0];
                         if mesh.index_count == 0 {
                             continue;
@@ -1885,6 +2084,14 @@ impl Renderer {
                         mesh_pass.set_bind_group(1, &self.textures[texture_id.0], &[]);
                         mesh_pass.set_bind_group(2, &self.shadow_bind_group, &[]);
                         mesh_pass.set_bind_group(3, &self.scene_depth_bind_group, &[]);
+                        as_it_stands(
+                            &mut mesh_pass,
+                            batch,
+                            &self.camera_bind_group,
+                            self.standing_stride,
+                            &self.instance_buffer,
+                            &self.kept_buffer,
+                        );
                         mesh_pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                         mesh_pass
                             .set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -1899,7 +2106,7 @@ impl Renderer {
             // tested, so one behind a wall is hidden.
             if outlines > 0 {
                 mesh_pass.set_pipeline(&self.outline_pipeline);
-                mesh_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                mesh_pass.set_bind_group(0, &self.camera_bind_group, &[0]);
                 mesh_pass.set_vertex_buffer(0, self.outline_buffer.slice(..));
                 counted.draws += 1;
                 mesh_pass.draw(0..outlines, 0..1);
@@ -2199,6 +2406,7 @@ impl Renderer {
                 quarters: None,
                 hidden: false,
                 round: None,
+                home: None,
             });
         }
 
@@ -2237,10 +2445,19 @@ impl Renderer {
         let frame = self.frame;
         let eye = self.camera.position;
 
+        // where the kept runs lie, written only when they change, and the
+        // table that says where each of them stands this frame. Spec 0063.
+        self.lay_out_what_is_kept(&holding);
+        self.say_where_they_stand(&holding, eye);
+
         let kept: Vec<culling::Pushed> = holding
             .iter()
             .map(|keeping| {
-                let mut kept = culling::of_a_keeping(keeping, self.meshes[keeping.mesh.0].bounds);
+                let mut kept = culling::of_a_keeping(
+                    keeping,
+                    self.meshes[keeping.mesh.0].bounds,
+                    self.kept_homes.get(&keeping.id).copied(),
+                );
 
                 kept.hidden = self.occluding && self.hidden.is_hidden(keeping.id, frame);
 
@@ -2257,14 +2474,9 @@ impl Renderer {
         // went with it; the subtraction is back on the CPU and so is this.
         let wanted = instances.len() as u64 * Instance::SIZE;
 
-        if wanted > self.instance_buffer.size() {
-            // asked for twice what is there, so a buffer that grows a little
-            // every frame is not made again every frame, and never for more
-            // than the device will give: doubling at one and a half million
-            // instances asked for more than the usual 256 MB and took the
-            // frame down. Spec 0060.
-            let most = self.device.limits().max_buffer_size;
+        let most = self.device.limits().max_buffer_size;
 
+        if let Some(size) = instance_room(self.instance_buffer.size(), wanted, most) {
             if wanted > most {
                 log::warn!(
                     "a scene wants {} bytes of instances and this device will give {}",
@@ -2273,13 +2485,7 @@ impl Renderer {
                 );
             }
 
-            self.instance_buffer = create_buffer(
-                &self.device,
-                wanted
-                    .max(self.instance_buffer.size() * 2)
-                    .min(most.max(wanted)),
-                wgpu::BufferUsages::VERTEX,
-            );
+            self.instance_buffer = create_buffer(&self.device, size, wgpu::BufferUsages::VERTEX);
         }
 
         if !instances.is_empty() {
@@ -3124,6 +3330,23 @@ fn room(have: u64, want: u64) -> Option<u64> {
     (want > have).then_some(want)
 }
 
+/// The same question for the instance buffer, which differs in two ways: it
+/// asks for twice what it needs, and there is a ceiling.
+///
+/// **Twice**, so a scene that grows by a little every frame is not allocated
+/// again every frame. **A ceiling**, because doubling is what killed the
+/// frame at a million and a half instances: the buffer asked for more than
+/// the 256 MB a device usually gives and the allocation failed. `most` is
+/// what this device said it would give.
+///
+/// A scene that wants more than `most` on its own is asked for anyway. The
+/// device refuses it and says so, which is the honest end of it; quietly
+/// handing back a smaller buffer would draw part of a scene and call it a
+/// frame. Spec 0060.
+fn instance_room(have: u64, want: u64, most: u64) -> Option<u64> {
+    room(have, want).map(|want| want.max(have * 2).min(most.max(want)))
+}
+
 /// Puts `contents` in `buffer`, replacing it when it is too small.
 fn refill(
     device: &wgpu::Device,
@@ -3166,6 +3389,69 @@ const QUAD_DEPTH_STENCIL: Option<wgpu::DepthStencilState> = None;
 /// A uniform buffer binding, which is the shape both the screen size and the
 /// scene use. `visibility` matters: the scene uniform carries the light, so the
 /// fragment stage reads it too, and a vertex-only layout fails validation.
+/// Binds what one batch needs that its pass has not already bound: the
+/// buffer its instances lie in, and the entry of the standing table that
+/// puts them back in the world. Spec 0063.
+///
+/// A free function rather than a method, because every pass does this and
+/// each of them is already holding a borrow of the renderer.
+fn as_it_stands(
+    pass: &mut wgpu::RenderPass<'_>,
+    batch: &crate::renderer::scene::Batch,
+    camera: &wgpu::BindGroup,
+    standing_stride: u64,
+    frame: &wgpu::Buffer,
+    kept: &wgpu::Buffer,
+) {
+    use crate::renderer::scene::Where;
+
+    pass.set_bind_group(
+        0,
+        camera,
+        &[(batch.standing as u64 * standing_stride) as u32],
+    );
+    pass.set_vertex_buffer(
+        1,
+        match batch.from {
+            Where::Frame => frame,
+            Where::Kept => kept,
+        }
+        .slice(..),
+    );
+}
+
+/// How big one entry of the standing table is: a `vec4` of which three are
+/// the run's middle with the eye taken off. Spec 0063.
+const STANDING: u64 = 16;
+
+/// The scene's uniform and the standing table together, which is one bind
+/// group because the second is read at an offset rather than rebound.
+fn standing_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    camera: &wgpu::Buffer,
+    standing: &wgpu::Buffer,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Camera Bind Group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: standing,
+                    offset: 0,
+                    size: wgpu::BufferSize::new(STANDING),
+                }),
+            },
+        ],
+    })
+}
+
 fn uniform_bind_group_layout(
     device: &wgpu::Device,
     label: &str,
@@ -3836,6 +4122,51 @@ mod tests {
             room(1 << 20, 16),
             None,
             "a big buffer was given up for a small write"
+        );
+    }
+
+    /// Spec 0060: the instance buffer asks for twice what it needs, and never
+    /// for more than this device said it would give.
+    ///
+    /// Doubling is what made four million cubes draw without an allocation a
+    /// frame. Doubling with no ceiling is what killed the frame at a million
+    /// and a half: 256 MB is the room a device usually gives, and the ask
+    /// went past it.
+    #[test]
+    fn a_buffer_asks_for_no_more_than_the_device_will_give() {
+        const MOST: u64 = 256 << 20;
+
+        assert_eq!(
+            instance_room(1 << 20, 1 << 10, MOST),
+            None,
+            "a buffer that already holds it was made again"
+        );
+        assert_eq!(
+            instance_room(1 << 20, (1 << 20) + 1, MOST),
+            Some(2 << 20),
+            "a buffer that grew by a byte did not double"
+        );
+        assert_eq!(
+            instance_room(200 << 20, 210 << 20, MOST),
+            Some(MOST),
+            "doubling past what the device gives was asked for anyway"
+        );
+    }
+
+    /// Spec 0060: and a scene too large for any buffer is asked for all the
+    /// same.
+    ///
+    /// The device refuses it and says why. Handing back the ceiling instead
+    /// would draw two thirds of a scene and call it a frame, which is the
+    /// one outcome nobody can see is wrong.
+    #[test]
+    fn a_scene_past_the_ceiling_is_still_asked_for() {
+        const MOST: u64 = 256 << 20;
+
+        assert_eq!(
+            instance_room(1 << 20, 300 << 20, MOST),
+            Some(300 << 20),
+            "a scene larger than the device allows was quietly cut down"
         );
     }
 

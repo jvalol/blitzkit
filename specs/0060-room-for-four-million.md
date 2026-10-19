@@ -1,7 +1,9 @@
 # 0060 Room for four million
 
-**Status:** draft
+**Status:** implemented
 **Date:** 2026-10-18
+**Built:** 2026-10-18. The several buffers went out again with the spec 0059
+revert the same day; what is below is what shipped.
 
 ## Goal
 
@@ -72,24 +74,39 @@ of two million instances is a game that has not divided one.
 
 ## Acceptance criteria
 
-- The device asks for the adapter's own limit and takes the default when it
-  is refused. — `renderer::tests::a_device_asks_for_the_room_the_adapter_has`
 - An instance is sixty eight bytes or fewer, and its layout is what the
   pipeline is built from, so the two cannot
   drift. — `renderer::scene::tests::an_instance_is_small`
 - A normal rebuilt from the model matrix is the normal the old matrix
   carried, for a turn, a scale, and both
   together. — `renderer::scene::tests::a_rebuilt_normal_is_the_normal`
-- Instances past the first buffer's room go into the next one, and every
-  draw names the buffer it lies
-  in. — `renderer::kept::tests::what_does_not_fit_goes_in_the_next_buffer`
-- A kept run lies inside one buffer, and one too large for any buffer is
-  refused and said once. — `renderer::kept::tests::a_run_lies_in_one_buffer`
-- Draws are sorted by buffer, so a scene in one buffer binds it
-  once. — `renderer::culling::tests::a_scene_in_one_buffer_binds_it_once`
+- The instance buffer asks for twice what it needs and never for more than
+  this device said it would
+  give. — `renderer::tests::a_buffer_asks_for_no_more_than_the_device_will_give`
+- A scene that wants more than any buffer on this device is asked for all
+  the same, so the device refuses it out loud rather than a part of the
+  scene being drawn and called a
+  frame. — `renderer::tests::a_scene_past_the_ceiling_is_still_asked_for`
+
+**What three of these criteria used to say.** They described several
+buffers: instances past the first buffer's room going into the next, a kept
+run lying inside one of them, and draws sorted so a scene in one buffer
+binds it once. That half of this spec lived in `renderer/kept.rs`, which
+went out with the spec 0059 revert, and the three tests went with it. The
+raised limit and the smaller instance are what carry four million now, and a
+second buffer was argued out of this spec anyway (see **Out of scope**).
+
+The dead citations sat here for a day because this spec's status said draft,
+and `check-specs` only reads a spec that says implemented. That is the whole
+failure mode that check was written for, and the status word is what defeats
+it.
 
 ### Verified by hand
 
+- The device asking for the adapter's own limits, and taking the default
+  when refused. It is two `request_device` calls and a log line; a test
+  would need a device that says no, which is the one thing this machine will
+  not do. The line to look for is "a buffer may hold N instances".
 - Four million cubes on the shell, kept, against Bevy's 23.48 milliseconds.
   That is the number this spec exists for.
 - The arcade, which should look the same and cost less: every instance in
