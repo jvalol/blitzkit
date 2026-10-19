@@ -492,3 +492,73 @@ mod pictures {
         }
     }
 }
+
+/// Spec 0065: the GPU says how long it took, and the number is believable.
+///
+/// **The one thing in this engine that cannot be checked without a device.**
+/// The pair of timestamps a frame writes was resolved in the same submission
+/// that wrote it, so the end tick came back holding the frame before's, the
+/// pair went backwards, and a backwards pair is thrown away. The column was
+/// blank on every frame fast enough for the CPU to run ahead, which after
+/// specs 0063 and 0064 is every frame worth measuring.
+///
+/// A handful of frames rather than one, because the reading is some frames
+/// behind the work by design: the GPU writes the ticks and they cannot be
+/// read until the work has run.
+mod clock {
+    pub mod tests {
+        use super::super::*;
+
+        #[test]
+        fn the_gpu_says_how_long_it_took() {
+            let shots = shots();
+            let shot = shots
+                .iter()
+                .find(|shot| shot.name == "a-lit-box-casts-its-shadow")
+                .expect("the lit box");
+            let Some(mut renderer) = pollster::block_on(Renderer::offscreen(WIDE, TALL)) else {
+                eprintln!("no adapter here, so nothing was timed");
+                return;
+            };
+
+            if !renderer.times_frames() {
+                eprintln!("this device will not time a frame, which is not a failure");
+                return;
+            }
+
+            let meshes = Meshes {
+                cube: renderer.add_mesh(&MeshData::cube()),
+                sphere: renderer.add_mesh(&MeshData::sphere(32, 24)),
+                floor: renderer.add_mesh(&MeshData::plane()),
+            };
+            let mut scene = Scene::new();
+            let geometry = Geometry::new();
+            let text = TextRenderer::new();
+
+            (shot.scene)(&mut scene, &meshes);
+
+            let mut camera = Camera::new();
+
+            (shot.camera)(&mut camera);
+            renderer.set_camera(camera);
+
+            let mut said: Option<f32> = None;
+
+            for _ in 0..24 {
+                renderer.picture(&scene, &geometry, &text);
+
+                if let Some(seconds) = renderer.gpu_seconds() {
+                    said = Some(seconds);
+                }
+            }
+
+            let seconds = said.expect("the device timed twenty four frames and said nothing");
+
+            assert!(
+                seconds > 0.0 && seconds < 1.0,
+                "the GPU says a frame of a box on a floor took {} seconds",
+                seconds
+            );
+        }
+    }
+}

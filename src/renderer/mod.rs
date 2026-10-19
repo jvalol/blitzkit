@@ -333,7 +333,10 @@ impl Renderer {
                 None,
                 winit::dpi::PhysicalSize::new(width.max(1), height.max(1)),
                 Presenting::AsFastAsItWill,
-                false,
+                // and it times its frames, so that the one thing in this
+                // engine that can only be checked against a real device
+                // has a test. Spec 0065.
+                true,
             )
             .await,
         )
@@ -1742,6 +1745,21 @@ impl Renderer {
                 label: Some("Renderer Encoder"),
             });
 
+        // **The pair the last frame wrote, resolved in this frame's
+        // encoder.** Spec 0065: resolving it in the same submission that
+        // wrote it gave back an end tick the GPU had not written yet, so
+        // index 1 held the frame before's and the pair came out backwards.
+        // A backwards pair is thrown away, which is why the GPU column was
+        // blank on every frame fast enough to matter.
+        if let Some(timing) = self.timing.as_mut() {
+            if timing.waiting && !timing.reading {
+                encoder.resolve_query_set(&timing.set, 0..2, &timing.resolved, 0);
+                encoder.copy_buffer_to_buffer(&timing.resolved, 0, &timing.read, 0, Timing::BYTES);
+                timing.waiting = false;
+                timing.copied = true;
+            }
+        }
+
         // the light sees translucent things as solid, because a shadow map
         // holds a depth and has nowhere to put an alpha. It does not see a
         // glowing thing at all, per spec 0039.
@@ -2146,15 +2164,6 @@ impl Renderer {
             counted.draws += 1;
         }
 
-        // the pair of ticks out of the query set and on its way back, per
-        // spec 0056. Before the submit, because it is the same encoder.
-        if let Some(timing) = self.timing.as_mut() {
-            if timing.started {
-                encoder.resolve_query_set(&timing.set, 0..2, &timing.resolved, 0);
-                encoder.copy_buffer_to_buffer(&timing.resolved, 0, &timing.read, 0, Timing::BYTES);
-            }
-        }
-
         // the queries into a buffer, and that buffer into one that can be
         // mapped. Both in this encoder, before it is submitted: a resolve
         // after the submit is a resolve of the next frame's answers. Spec
@@ -2176,6 +2185,14 @@ impl Renderer {
         self.queue.submit(std::iter::once(encoder.finish()));
 
         self.counted = counted;
+
+        if let Some(timing) = self.timing.as_mut() {
+            if timing.started {
+                timing.started = false;
+                timing.waiting = true;
+            }
+        }
+
         self.read_the_clock();
         self.read_what_is_hidden();
         self.frame += 1;
@@ -2327,7 +2344,7 @@ impl Renderer {
         };
 
         if !timing.reading {
-            if !timing.started {
+            if !timing.copied {
                 return;
             }
 
@@ -2340,7 +2357,7 @@ impl Renderer {
                     landed.store(got.is_ok(), Ordering::Release);
                 });
             timing.reading = true;
-            timing.started = false;
+            timing.copied = false;
         }
 
         // the callback only runs while the device is polled, and nothing else
@@ -3856,6 +3873,11 @@ struct Timing {
     landed: Arc<AtomicBool>,
     /// Whether this frame has written its first timestamp yet.
     started: bool,
+    /// Whether a pair is sitting in the query set, written but not yet
+    /// resolved.
+    waiting: bool,
+    /// Whether a pair has been copied into the buffer that can be mapped.
+    copied: bool,
     /// The last frame the GPU actually reported.
     last: Option<f32>,
 }
@@ -3887,6 +3909,8 @@ impl Timing {
             reading: false,
             landed: Arc::new(AtomicBool::new(false)),
             started: false,
+            waiting: false,
+            copied: false,
             last: None,
         }
     }
@@ -3900,14 +3924,13 @@ impl Timing {
             return None;
         }
 
-        let beginning = (!self.started).then(|| {
-            self.started = true;
-            0
-        });
-
-        if beginning.is_none() && !last {
+        if !last {
             return None;
         }
+
+        self.started = true;
+
+        let beginning = Some(0);
 
         Some(wgpu::RenderPassTimestampWrites {
             query_set: &self.set,

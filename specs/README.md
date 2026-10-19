@@ -71,6 +71,7 @@ not a priority, and it never changes once a spec exists.
 | [0062](0062-a-test-that-looks-at-the-picture.md) | Drawing a frame in a test and comparing it against one that was right, because five hundred tests passed while the sun stopped casting shadows: the first tolerance was loose enough to call a missing shadow a match |
 | [0063](0063-a-kept-run-drawn-where-it-lies.md) | Storing an instance relative to its run so the eye comes off once a run rather than once an instance: four million cubes went from 10.12 ms of CPU work a frame to 0.59, and the compute pass this was written to build was argued out of it |
 | [0064](0064-keeping-without-the-bookkeeping.md) | One call a frame with a name and a version, so a game lands on the kept path without handles, a lifecycle or a decision about how to cut its world up: the example's 96 patches and the arcade's threshold of 32 are both deleted, and the engine decides what is worth a draw |
+| [0065](0065-a-clock-that-answers.md) | Resolving a frame's pair of timestamps in the next frame's encoder rather than the one that wrote them, because the end tick was not there yet and the pair came back backwards: the GPU column was blank on every frame fast enough to matter |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.
