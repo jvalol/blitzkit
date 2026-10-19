@@ -61,9 +61,13 @@ const SAID: usize = 20;
 pub struct Renderer {
     /// Kept so a game can lock or hide the cursor, per spec 0013. The surface
     /// owns the window too, but does not hand it back.
-    window: Arc<Window>,
+    ///
+    /// Nothing when this renderer has no window, which is what a picture
+    /// test uses: the same device, the same passes and the same pipelines,
+    /// with a texture where the surface would be. Spec 0062.
+    window: Option<Arc<Window>>,
     cursor_locked: bool,
-    surface: wgpu::Surface<'static>,
+    surface: Option<wgpu::Surface<'static>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
@@ -273,12 +277,62 @@ impl Renderer {
         timing: bool,
     ) -> Self {
         let size = window.inner_size();
-
         let instance = wgpu::Instance::new(instance_desc);
         let surface = instance.create_surface(window.clone()).unwrap();
+
+        Self::made(
+            instance,
+            Some(surface),
+            Some(window),
+            size,
+            presenting,
+            timing,
+        )
+        .await
+    }
+
+    /// A renderer with no window, drawing into a texture. Spec 0062.
+    ///
+    /// **The same engine, not a copy of it.** Every pipeline, every pass and
+    /// every uniform is the one a game gets; what differs is that there is
+    /// no surface to present to, so a frame is read back instead. That is
+    /// what makes a picture drawn here worth comparing against one a game
+    /// drew.
+    ///
+    /// Nothing at all on a machine with no adapter, which is what a plain
+    /// container is: a picture test skips there rather than failing.
+    pub async fn offscreen(width: u32, height: u32) -> Option<Self> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+
+        instance
+            .request_adapter(&wgpu::RequestAdapterOptions::default())
+            .await
+            .ok()?;
+
+        Some(
+            Self::made(
+                instance,
+                None,
+                None,
+                winit::dpi::PhysicalSize::new(width.max(1), height.max(1)),
+                Presenting::AsFastAsItWill,
+                false,
+            )
+            .await,
+        )
+    }
+
+    async fn made(
+        instance: wgpu::Instance,
+        surface: Option<wgpu::Surface<'static>>,
+        window: Option<Arc<Window>>,
+        size: winit::dpi::PhysicalSize<u32>,
+        presenting: Presenting,
+        timing: bool,
+    ) -> Self {
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
-                compatible_surface: Some(&surface),
+                compatible_surface: surface.as_ref(),
                 ..Default::default()
             })
             .await
@@ -352,27 +406,56 @@ impl Renderer {
         );
         let timing = clocked.then(|| Timing::new(&device, &queue));
 
-        let capabilities = surface.get_capabilities(&adapter);
-        let (format, drawn) = formats(&capabilities.formats);
-        let present_mode = presenting.out_of(&capabilities.present_modes);
+        // a surface says what it can do; a texture is told. The formats a
+        // window offers are the ones a picture test asks for by hand, so
+        // both go through `formats` and come out drawing the same way.
+        let offered = match &surface {
+            Some(surface) => surface.get_capabilities(&adapter).formats,
+            None => vec![wgpu::TextureFormat::Rgba8Unorm],
+        };
+        let (format, drawn) = formats(&offered);
+        let present_mode = match &surface {
+            Some(surface) => presenting.out_of(&surface.get_capabilities(&adapter).present_modes),
+            None => wgpu::PresentMode::Fifo,
+        };
 
         if presenting != Presenting::WaitForTheDisplay {
             log::info!("presenting {:?}, asked for {:?}", present_mode, presenting);
         }
 
-        let config = wgpu::SurfaceConfiguration {
-            format,
-            present_mode,
-            view_formats: if drawn == format {
-                Vec::new()
-            } else {
-                vec![drawn]
+        let config = match &surface {
+            Some(surface) => wgpu::SurfaceConfiguration {
+                format,
+                present_mode,
+                view_formats: if drawn == format {
+                    Vec::new()
+                } else {
+                    vec![drawn]
+                },
+                ..surface
+                    .get_default_config(&adapter, size.width.max(1), size.height.max(1))
+                    .unwrap()
             },
-            ..surface
-                .get_default_config(&adapter, size.width.max(1), size.height.max(1))
-                .unwrap()
+            None => wgpu::SurfaceConfiguration {
+                color_space: wgpu::SurfaceColorSpace::Srgb,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format,
+                width: size.width.max(1),
+                height: size.height.max(1),
+                present_mode,
+                desired_maximum_frame_latency: 2,
+                alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+                view_formats: if drawn == format {
+                    Vec::new()
+                } else {
+                    vec![drawn]
+                },
+            },
         };
-        surface.configure(&device, &config);
+
+        if let Some(surface) = &surface {
+            surface.configure(&device, &config);
+        }
 
         let screen_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Screen Uniform"),
@@ -1199,14 +1282,17 @@ impl Renderer {
             winit::window::CursorGrabMode::None
         };
 
-        let grabbed = match self.window.set_cursor_grab(mode) {
+        // a renderer with no window has no cursor to lock either, per spec
+        // 0062: a picture test asks for nothing of the sort, and a game
+        // always has one
+        let Some(window) = self.window.as_ref() else {
+            return false;
+        };
+        let grabbed = match window.set_cursor_grab(mode) {
             Ok(()) => true,
             Err(e) if locked => {
                 // some platforms only confine the cursor, which is close enough
-                match self
-                    .window
-                    .set_cursor_grab(winit::window::CursorGrabMode::Confined)
-                {
+                match window.set_cursor_grab(winit::window::CursorGrabMode::Confined) {
                     Ok(()) => true,
                     Err(_) => {
                         log::warn!("could not lock the cursor: {}", e);
@@ -1217,7 +1303,7 @@ impl Renderer {
             Err(_) => false,
         };
 
-        self.window.set_cursor_visible(!locked || !grabbed);
+        window.set_cursor_visible(!locked || !grabbed);
         self.cursor_locked = locked && grabbed;
         self.cursor_locked
     }
@@ -1245,7 +1331,9 @@ impl Renderer {
         log::info!("drawing {} by {}", new_size.width, new_size.height);
         self.config.width = new_size.width;
         self.config.height = new_size.height;
-        self.surface.configure(&self.device, &self.config);
+        if let Some(surface) = &self.surface {
+            surface.configure(&self.device, &self.config);
+        }
         self.queue.write_buffer(
             &self.screen_buffer,
             0,
@@ -1268,9 +1356,6 @@ impl Renderer {
     }
 
     pub fn render(&mut self, scene: &Scene, geometry: &Geometry, text_renderer: &TextRenderer) {
-        // Tallied into locals rather than into the field, because every pass
-        // below holds a borrow of `self` for as long as it is open. Spec 0056.
-        let mut counted = Counted::default();
         // before anything is asked of the surface, so a frame that turns out
         // not to draw still answers a check that was owed
         self.answer_fights(scene);
@@ -1281,14 +1366,21 @@ impl Renderer {
         // the engine's: every scene this machine can draw inside a frame
         // comes out at exactly one frame, however little it cost. Spec 0056.
         let asking = Instant::now();
-        let got = self.surface.get_current_texture();
+        // a renderer with no window draws through `picture` instead, per
+        // spec 0062
+        let Some(surface) = self.surface.as_ref() else {
+            return;
+        };
+        let got = surface.get_current_texture();
 
         self.waited = asking.elapsed().as_secs_f32();
 
         let asked = Asked::at(&got);
 
         if asked.reconfigure {
-            self.surface.configure(&self.device, &self.config);
+            if let Some(surface) = &self.surface {
+                surface.configure(&self.device, &self.config);
+            }
         }
         if asked.complain {
             log::error!("Failed to acquire surface texture: {:?}", got);
@@ -1326,6 +1418,134 @@ impl Renderer {
             format: Some(self.drawn),
             ..Default::default()
         });
+
+        self.draw_into(&view, scene, geometry, text_renderer);
+        self.queue.present(frame);
+    }
+
+    /// Draws one frame and hands back its pixels, for a picture test. Spec
+    /// 0062.
+    ///
+    /// Rgba8, row by row, with the padding a copy to a buffer needs taken
+    /// out again, so what comes back is what a person would see.
+    pub fn picture(
+        &mut self,
+        scene: &Scene,
+        geometry: &Geometry,
+        text_renderer: &TextRenderer,
+    ) -> Picture {
+        let (width, height) = (self.config.width, self.config.height);
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Picture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.config.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[self.drawn],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.drawn),
+            ..Default::default()
+        });
+
+        self.draw_into(&view, scene, geometry, text_renderer);
+
+        // a copy to a buffer wants its rows on 256 bytes, which is not what
+        // a picture is, so the padding comes off on the way out
+        let row = width * 4;
+        let padded =
+            row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let read = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Picture Read"),
+            size: (padded * height) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Picture Encoder"),
+            });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &read,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        let landed = Arc::new(AtomicBool::new(false));
+        let told = landed.clone();
+
+        read.slice(..).map_async(wgpu::MapMode::Read, move |got| {
+            told.store(got.is_ok(), Ordering::Release);
+        });
+
+        // waited for rather than polled around: a picture test has nothing
+        // else to do, and a frame that never lands is a test that hangs
+        // rather than a test that passes
+        let _ = self.device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
+
+        let mut pixels = Vec::with_capacity((row * height) as usize);
+
+        if landed.load(Ordering::Acquire) {
+            if let Ok(got) = read.slice(..).get_mapped_range() {
+                for line in 0..height {
+                    let from = (line * padded) as usize;
+
+                    pixels.extend_from_slice(&got[from..from + row as usize]);
+                }
+            }
+        }
+
+        read.unmap();
+
+        Picture {
+            width,
+            height,
+            pixels,
+        }
+    }
+
+    /// Draws one frame into a view, which is a surface's texture for a game
+    /// and a texture of its own for a picture test. Spec 0062.
+    ///
+    /// Everything between the two is the same code, because a picture of a
+    /// frame drawn some other way would be a picture of something nobody
+    /// plays.
+    fn draw_into(
+        &mut self,
+        view: &wgpu::TextureView,
+        scene: &Scene,
+        geometry: &Geometry,
+        text_renderer: &TextRenderer,
+    ) {
+        let mut counted = Counted::default();
 
         self.queue.write_buffer(
             &self.camera_buffer,
@@ -1605,8 +1825,8 @@ impl Renderer {
             // afterwards, onto what came out, because text is already smoothed
             // by its own atlas and a quad has no edge worth four samples.
             let (into, onto) = match &self.colour {
-                Some(many) => (many, Some(&view)),
-                None => (&view, None),
+                Some(many) => (many, Some(view)),
+                None => (view, None),
             };
             let mut mesh_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Mesh Pass"),
@@ -1690,7 +1910,7 @@ impl Renderer {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -1747,7 +1967,6 @@ impl Renderer {
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
-        self.queue.present(frame);
 
         self.counted = counted;
         self.read_the_clock();
@@ -3436,6 +3655,17 @@ impl Presenting {
             .find(|mode| offered.contains(mode))
             .unwrap_or(wgpu::PresentMode::Fifo)
     }
+}
+
+/// A frame, as pixels. Spec 0062.
+///
+/// Rgba8 with no padding, top row first, which is what a picture test
+/// compares and what it writes out when the comparison fails.
+#[derive(Debug, Clone)]
+pub struct Picture {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<u8>,
 }
 
 /// What one frame of drawing came to, which travels with its time in

@@ -1,2 +1,7 @@
 target/
 Cargo.lock
+
+# What a failed picture test writes beside the reference, which is there to be
+# looked at and not to be committed. Spec 0062.
+tests/pictures/*-drawn.png
+tests/pictures/*-diff.png
