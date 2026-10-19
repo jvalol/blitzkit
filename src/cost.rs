@@ -23,6 +23,39 @@ use std::collections::VecDeque;
 /// what happens to the scene.
 pub const WINDOW: usize = 240;
 
+/// The passes a frame is made of, in the order the engine runs them, and
+/// the slot each one writes its pair of timestamps into. Spec 0067.
+///
+/// **Fixed slots rather than a running counter.** A pass that did not
+/// happen, a spot nobody claimed or the occlusion pass with the dial off,
+/// leaves its slot alone and is reported as nothing. A frame where the
+/// slots shift is a frame where one pass is read as another, which is the
+/// same reasoning that gives spec 0057 its view slots.
+pub const SUN: usize = 0;
+pub const FIRST_SPOT: usize = 1;
+pub const FIRST_LAMP_FACE: usize = FIRST_SPOT + crate::lighting::MAX_SPOT_LIGHTS;
+/// Six faces for each lamp that may cast, per spec 0022.
+pub const LAMP_FACES: usize = 6 * crate::lighting::MAX_SHADOWING_POINT_LIGHTS;
+pub const PREPASS: usize = FIRST_LAMP_FACE + LAMP_FACES;
+pub const HIDDEN: usize = PREPASS + 1;
+pub const MESH: usize = HIDDEN + 1;
+pub const OVERLAY: usize = MESH + 1;
+/// How many slots there are, which is two queries each.
+pub const PASSES: usize = OVERLAY + 1;
+
+/// What each pass is called, for a readout and for a sweep's columns.
+pub fn pass_name(slot: usize) -> &'static str {
+    match slot {
+        SUN => "sun",
+        HIDDEN => "hidden",
+        PREPASS => "prepass",
+        MESH => "mesh",
+        OVERLAY => "overlay",
+        _ if slot >= FIRST_LAMP_FACE => "lamps",
+        _ => "spots",
+    }
+}
+
 /// What one frame cost and what was in it.
 ///
 /// The counts travel with the time on purpose. A number that moves is worth

@@ -1752,11 +1752,11 @@ impl Renderer {
         // A backwards pair is thrown away, which is why the GPU column was
         // blank on every frame fast enough to matter.
         if let Some(timing) = self.timing.as_mut() {
-            if timing.waiting && !timing.reading {
-                encoder.resolve_query_set(&timing.set, 0..2, &timing.resolved, 0);
+            if timing.waiting != 0 && !timing.reading {
+                encoder.resolve_query_set(&timing.set, 0..Timing::QUERIES, &timing.resolved, 0);
                 encoder.copy_buffer_to_buffer(&timing.resolved, 0, &timing.read, 0, Timing::BYTES);
-                timing.waiting = false;
-                timing.copied = true;
+                timing.copied = timing.waiting;
+                timing.waiting = 0;
             }
         }
 
@@ -1802,7 +1802,14 @@ impl Renderer {
                         }),
                         stencil_ops: None,
                     }),
-                    timestamp_writes: timing_writes(&mut self.timing, false),
+                    timestamp_writes: timing_writes(
+                        &mut self.timing,
+                        if which >= sun {
+                            crate::cost::SUN
+                        } else {
+                            crate::cost::FIRST_SPOT + which as usize
+                        },
+                    ),
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
@@ -1865,7 +1872,10 @@ impl Renderer {
                         }),
                         stencil_ops: None,
                     }),
-                    timestamp_writes: timing_writes(&mut self.timing, false),
+                    timestamp_writes: timing_writes(
+                        &mut self.timing,
+                        crate::cost::FIRST_LAMP_FACE + layer,
+                    ),
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
@@ -1926,7 +1936,7 @@ impl Renderer {
                     }),
                     stencil_ops: None,
                 }),
-                timestamp_writes: timing_writes(&mut self.timing, false),
+                timestamp_writes: timing_writes(&mut self.timing, crate::cost::PREPASS),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -2012,7 +2022,7 @@ impl Renderer {
                     }),
                     stencil_ops: None,
                 }),
-                timestamp_writes: None,
+                timestamp_writes: timing_writes(&mut self.timing, crate::cost::HIDDEN),
                 occlusion_query_set: self.asking.as_ref().map(|asking| &asking.set),
                 multiview_mask: None,
             });
@@ -2067,7 +2077,7 @@ impl Renderer {
                     depth_ops: None,
                     stencil_ops: None,
                 }),
-                timestamp_writes: timing_writes(&mut self.timing, false),
+                timestamp_writes: timing_writes(&mut self.timing, crate::cost::MESH),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -2144,7 +2154,7 @@ impl Renderer {
                     },
                 })],
                 depth_stencil_attachment: None,
-                timestamp_writes: timing_writes(&mut self.timing, true),
+                timestamp_writes: timing_writes(&mut self.timing, crate::cost::OVERLAY),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -2189,7 +2199,8 @@ impl Renderer {
         if let Some(timing) = self.timing.as_mut() {
             if timing.started {
                 timing.started = false;
-                timing.waiting = true;
+                timing.waiting = timing.wrote;
+                timing.wrote = 0;
             }
         }
 
@@ -2319,12 +2330,53 @@ impl Renderer {
     /// What the GPU said its own last frame took, in seconds, where the
     /// device will say at all. Spec 0056.
     ///
+    /// The first pass of the frame beginning to the last one ending. **Not
+    /// the passes added up**, which spec 0067 found can come to more than
+    /// the frame did: a pass's pair says when it began and ended, and at
+    /// four million instances those came to 23 ms inside a 16 ms frame.
+    /// [`Self::gpu_passes`] is for weighing passes against each other and
+    /// not for adding up.
+    ///
     /// Some frames behind what is on the screen, because a timestamp is
     /// written by the GPU and cannot be read until the work has run. What
     /// comes back is a real frame from a moment ago, which for a number
     /// averaged over a window of them is the same number.
     pub fn gpu_seconds(&self) -> Option<f32> {
         self.timing.as_ref().and_then(|timing| timing.last)
+    }
+
+    /// What each pass of that frame took, by name. Spec 0067.
+    ///
+    /// Only the passes that ran: a spot nobody claimed and the occlusion
+    /// pass with the dial off are not in here at all, rather than in here
+    /// as a nought or as somebody else's time.
+    ///
+    /// The lamps are six passes each and the spots one each, and they come
+    /// back under one name apiece with their times added, because twelve
+    /// columns that each read a fifth of a millisecond say less than one
+    /// that reads two and a half.
+    ///
+    /// **These weigh passes against each other and do not add up to a
+    /// frame.** See [`Self::gpu_seconds`] for why.
+    pub fn gpu_passes(&self) -> Vec<(&'static str, f32)> {
+        let Some(timing) = self.timing.as_ref() else {
+            return Vec::new();
+        };
+        let mut out: Vec<(&'static str, f32)> = Vec::new();
+
+        for (slot, seconds) in timing.passes.iter().enumerate() {
+            let Some(seconds) = seconds else {
+                continue;
+            };
+            let name = crate::cost::pass_name(slot);
+
+            match out.iter_mut().find(|(called, _)| *called == name) {
+                Some((_, already)) => *already += seconds,
+                None => out.push((name, *seconds)),
+            }
+        }
+
+        out
     }
 
     /// Whether this device agreed to time a frame at all, which is a
@@ -2344,7 +2396,7 @@ impl Renderer {
         };
 
         if !timing.reading {
-            if !timing.copied {
+            if timing.copied == 0 {
                 return;
             }
 
@@ -2357,7 +2409,8 @@ impl Renderer {
                     landed.store(got.is_ok(), Ordering::Release);
                 });
             timing.reading = true;
-            timing.copied = false;
+            timing.read_of = timing.copied;
+            timing.copied = 0;
         }
 
         // the callback only runs while the device is polled, and nothing else
@@ -2371,11 +2424,44 @@ impl Renderer {
         if timing.reading && timing.landed.swap(false, Ordering::AcqRel) {
             if let Ok(got) = timing.read.slice(..).get_mapped_range() {
                 let ticks: &[u64] = bytemuck::cast_slice(&got);
+                let read_of = timing.read_of;
+                let period = timing.period;
+                // the frame is the first pass beginning to the last one
+                // ending, which is what there is once each pass owns its
+                // own pair. Spec 0067.
+                let mut first = u64::MAX;
+                let mut last = 0u64;
 
-                // a pair that went backwards is a frame the device gave up
-                // on rather than a frame that took no time
-                timing.last = (ticks[1] > ticks[0])
-                    .then(|| (ticks[1] - ticks[0]) as f32 * timing.period * 1e-9);
+                for slot in 0..crate::cost::PASSES {
+                    if read_of & (1 << slot) == 0 {
+                        timing.passes[slot] = None;
+
+                        continue;
+                    }
+
+                    let (began, ended) = (ticks[slot * 2], ticks[slot * 2 + 1]);
+
+                    // a pair that went backwards is a pass the device gave
+                    // up on rather than one that took no time
+                    timing.passes[slot] =
+                        (ended > began).then(|| (ended - began) as f32 * period * 1e-9);
+
+                    if ended > began {
+                        first = first.min(began);
+                        last = last.max(ended);
+                    }
+                }
+
+                // **The frame is the span, and the parts do not add up to
+                // it.** A pass's pair is when that pass began and ended on
+                // the device, which is not the same as how long it had the
+                // device to itself: at four million instances the passes
+                // here come to 23 ms inside a frame of 16, so they overlap
+                // or they count waiting. What they are good for is weight,
+                // which is the question this spec was written to answer,
+                // and the span is what a frame cost.
+                timing.last = (last > first).then(|| (last - first) as f32 * period * 1e-9);
+                timing.span = timing.last;
             }
 
             timing.read.unmap();
@@ -3832,9 +3918,9 @@ pub enum Presenting {
 /// borrow of it.
 fn timing_writes(
     timing: &mut Option<Timing>,
-    last: bool,
+    slot: usize,
 ) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
-    timing.as_mut().and_then(|timing| timing.writes(last))
+    timing.as_mut().and_then(|timing| timing.writes(slot))
 }
 
 impl Counted {
@@ -3873,25 +3959,39 @@ struct Timing {
     landed: Arc<AtomicBool>,
     /// Whether this frame has written its first timestamp yet.
     started: bool,
-    /// Whether a pair is sitting in the query set, written but not yet
-    /// resolved.
-    waiting: bool,
-    /// Whether a pair has been copied into the buffer that can be mapped.
-    copied: bool,
-    /// The last frame the GPU actually reported.
+    /// Which slots this frame has written into, one bit each. Spec 0067:
+    /// the query set is never cleared, so a slot nobody wrote holds the
+    /// last frame that did, and this is what says which are worth reading.
+    wrote: u32,
+    /// The same, for the pair sitting in the query set unresolved, and for
+    /// the one copied into the buffer that can be mapped, and for the one
+    /// being read. Each travels with its data because they are three
+    /// different frames.
+    waiting: u32,
+    copied: u32,
+    read_of: u32,
+    /// What each pass of the last reported frame took. Spec 0067.
+    passes: [Option<f32>; crate::cost::PASSES],
+    /// The last frame the GPU reported: its first pass beginning to its
+    /// last one ending.
     last: Option<f32>,
+    /// The same number under its other name, which the passes are held
+    /// against.
+    span: Option<f32>,
 }
 
 impl Timing {
-    /// How many ticks are kept, which is one frame's pair.
-    const BYTES: u64 = 16;
+    /// How many queries there are: a pair for each pass. Spec 0067.
+    const QUERIES: u32 = crate::cost::PASSES as u32 * 2;
+    /// And how many bytes that resolves to, which is a `u64` each.
+    const BYTES: u64 = Self::QUERIES as u64 * 8;
 
     fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         Self {
             set: device.create_query_set(&wgpu::QuerySetDescriptor {
                 label: Some("Frame Timestamps"),
                 ty: wgpu::QueryType::Timestamp,
-                count: 2,
+                count: Self::QUERIES,
             }),
             resolved: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Timestamps Resolved"),
@@ -3909,33 +4009,40 @@ impl Timing {
             reading: false,
             landed: Arc::new(AtomicBool::new(false)),
             started: false,
-            waiting: false,
-            copied: false,
+            wrote: 0,
+            waiting: 0,
+            copied: 0,
+            read_of: 0,
+            passes: [None; crate::cost::PASSES],
             last: None,
+            span: None,
         }
     }
 
-    /// What a pass writes, which is the beginning if nothing has yet and the
-    /// end if this is the pass that always runs last.
-    fn writes(&mut self, last: bool) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
-        // nothing is written while a read is in flight, or the pair being
-        // read would be overwritten by the frame that is reading it
-        if self.reading {
-            return None;
-        }
-
-        if !last {
+    /// The pair of queries one pass writes, which is its own two and
+    /// nobody else's. Spec 0067.
+    ///
+    /// **A slot a pass, so there is no first and last to get wrong.** This
+    /// used to take a `last` flag and hand the beginning to whichever pass
+    /// asked first and the end to the one that always runs last. A
+    /// diagnostic left in by mistake made every pass but the last return
+    /// nothing here, and the engine reported the 2D pass as the frame for a
+    /// day without anything noticing. A pass that names its own slot cannot
+    /// be read as another one.
+    fn writes(&mut self, slot: usize) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
+        // nothing is written while a read is in flight, or the pairs being
+        // read would be overwritten by the frame that is reading them
+        if self.reading || slot >= crate::cost::PASSES {
             return None;
         }
 
         self.started = true;
-
-        let beginning = Some(0);
+        self.wrote |= 1 << slot;
 
         Some(wgpu::RenderPassTimestampWrites {
             query_set: &self.set,
-            beginning_of_pass_write_index: beginning,
-            end_of_pass_write_index: last.then_some(1),
+            beginning_of_pass_write_index: Some(slot as u32 * 2),
+            end_of_pass_write_index: Some(slot as u32 * 2 + 1),
         })
     }
 }

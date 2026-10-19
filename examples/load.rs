@@ -342,6 +342,8 @@ struct Load {
     /// the top of the frame rather than worked out here.
     counted: (u32, u32),
     gpu: Option<f32>,
+    /// What each pass of the last reported frame took. Spec 0067.
+    passes: Vec<(&'static str, f32)>,
     /// Whether a frame has gone by yet, since the first one has nothing to
     /// be measured against.
     ran: bool,
@@ -394,6 +396,7 @@ impl Load {
             sweeping,
             counted: (0, 0),
             gpu: None,
+            passes: Vec::new(),
             ran: false,
             headed: false,
             settling: SETTLE,
@@ -504,7 +507,8 @@ impl Load {
     /// without them is a number nobody can reproduce.
     fn header() -> &'static str {
         "cubes,spread,held,wall,occluding,meshes,lamps,casting,culling,present,samples,\
-         surface,draws,triangles,frames,work_ms,work_95_ms,work_worst_ms,between_ms,gpu_ms"
+         surface,draws,triangles,frames,work_ms,work_95_ms,work_worst_ms,between_ms,gpu_ms,\
+         sun_ms,spots_ms,lamps_ms,prepass_ms,hidden_ms,mesh_ms,overlay_ms"
     }
 
     /// The configuration, as the line of a sweep.
@@ -521,7 +525,7 @@ impl Load {
         };
 
         format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{}x{},{},{},{},{:.3},{:.3},{:.3},{:.3},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{}x{},{},{},{},{:.3},{:.3},{:.3},{:.3},{},{}",
             self.dials.cubes,
             self.dials.spread.says().replace(' ', "-"),
             if self.dials.kept { "kept" } else { "pushed" },
@@ -547,6 +551,19 @@ impl Load {
             worst,
             self.costs.between_middle_ms().unwrap_or(0.0),
             gpu,
+            // each pass of the last frame the device reported, in the
+            // order the header names them. Spec 0067.
+            ["sun", "spots", "lamps", "prepass", "hidden", "mesh", "overlay"]
+                .iter()
+                .map(|named| {
+                    self.passes
+                        .iter()
+                        .find(|(name, _)| name == named)
+                        .map(|(_, seconds)| format!("{:.3}", seconds * 1000.0))
+                        .unwrap_or_default()
+                })
+                .collect::<Vec<String>>()
+                .join(","),
         )
     }
 
@@ -830,6 +847,12 @@ impl Game for Load {
         renderer.set_culling(self.dials.culling);
         renderer.set_occluding(self.dials.occluding);
         self.gpu = renderer.gpu_seconds();
+
+        let passes = renderer.gpu_passes();
+
+        if !passes.is_empty() {
+            self.passes = passes;
+        }
         self.waiting = renderer.waiting_for_the_display();
         self.samples = renderer.samples();
         self.surface = renderer.surface_size();

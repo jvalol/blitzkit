@@ -183,6 +183,33 @@ fn shots() -> Vec<Shot> {
                 camera.far = 10.0;
             },
         },
+        // spec 0067: something with enough in its mesh pass that the pass
+        // reads heavier than one box does
+        Shot {
+            name: "a-thousand-boxes",
+            scene: |scene, meshes| {
+                scene.light.direction = vec3(-0.8, -0.9, 0.5).normalize();
+                scene.push_colored(
+                    meshes.floor,
+                    &Transform::at(Vec3::ZERO).with_scale(vec3(60.0, 1.0, 60.0)),
+                    vec4(0.6, 0.6, 0.62, 1.0),
+                );
+
+                for n in 0..1000 {
+                    let n = n as f32;
+
+                    scene.push_colored(
+                        meshes.cube,
+                        &Transform::at(vec3((n * 0.7).sin() * 18.0, 0.5, (n * 0.31).cos() * 18.0)),
+                        vec4(0.8, 0.5, 0.3, 1.0),
+                    );
+                }
+            },
+            camera: |camera| {
+                camera.position = vec3(0.0, 9.0, 26.0);
+                camera.target = vec3(0.0, 0.0, 0.0);
+            },
+        },
         // the see-through pass and its ordering, per spec 0018
         Shot {
             name: "glass-over-a-wall",
@@ -508,6 +535,156 @@ mod pictures {
 mod clock {
     pub mod tests {
         use super::super::*;
+
+        /// Spec 0067: each pass says what it took, and a pass that did not
+        /// run says nothing.
+        ///
+        /// The occlusion pass of spec 0061 is the one that is off unless a
+        /// game asks, so it is the one that has to be absent. If it were
+        /// in here it would be holding another pass's time, which is the
+        /// fault fixed slots exist to make impossible.
+        #[test]
+        fn every_pass_of_a_frame_is_timed() {
+            let Some((passes, _)) = timed("a-lit-box-casts-its-shadow") else {
+                return;
+            };
+
+            assert!(
+                passes.iter().any(|(name, _)| *name == "mesh"),
+                "the mesh pass did not say what it took"
+            );
+            assert!(
+                passes.iter().any(|(name, _)| *name == "sun"),
+                "the sun's shadow pass did not say what it took"
+            );
+            assert!(
+                !passes.iter().any(|(name, _)| *name == "hidden"),
+                "a pass that never ran reported a time"
+            );
+
+            // **And every pass that did run is in there.** This is the
+            // check that would have caught the diagnostic left in spec
+            // 0065, where every pass but the last stopped writing a
+            // timestamp and the engine reported the 2D pass as the frame
+            // for a day.
+            for named in ["sun", "prepass", "mesh", "overlay"] {
+                assert!(
+                    passes.iter().any(|(name, _)| *name == named),
+                    "the {} pass of a frame that drew one was not timed",
+                    named
+                );
+            }
+
+            for (name, seconds) in &passes {
+                assert!(
+                    *seconds > 0.0 && *seconds < 1.0,
+                    "the {} pass says it took {} seconds",
+                    name,
+                    seconds
+                );
+            }
+        }
+
+        /// Spec 0067: no pass claims more than the frame it is part of.
+        ///
+        /// What this catches is slots crossed or written over, which is
+        /// what forty four queries invite: a pair taken from two different
+        /// frames reads longer than the frame did.
+        ///
+        /// It deliberately does not check that the passes add up to the
+        /// frame. They do not: a pass's pair says when it began and ended
+        /// on the device, and at four million instances those come to 23 ms
+        /// inside a frame of 16. `every_pass_of_a_frame_is_timed` is what
+        /// holds the thing that check was for.
+        #[test]
+        fn no_pass_is_longer_than_the_frame() {
+            let Some((passes, span)) = timed("a-lit-box-casts-its-shadow") else {
+                return;
+            };
+            for (name, seconds) in &passes {
+                assert!(
+                    *seconds <= span,
+                    "the {} pass says it took {} of a {} second frame",
+                    name,
+                    seconds,
+                    span
+                );
+            }
+        }
+
+        /// Spec 0067: a pass with more in it reads heavier.
+        ///
+        /// A clock that reports a plausible number for everything is a
+        /// clock nobody can tell from a constant.
+        #[test]
+        fn a_heavier_pass_reads_heavier() {
+            let (Some((few, _)), Some((many, _))) = (
+                timed("a-lit-box-casts-its-shadow"),
+                timed("a-thousand-boxes"),
+            ) else {
+                return;
+            };
+            let mesh = |passes: &[(&'static str, f32)]| {
+                passes
+                    .iter()
+                    .find(|(name, _)| *name == "mesh")
+                    .map(|(_, seconds)| *seconds)
+                    .expect("a mesh pass")
+            };
+
+            assert!(
+                mesh(&many) > mesh(&few),
+                "a thousand boxes cost {} and one cost {}",
+                mesh(&many),
+                mesh(&few)
+            );
+        }
+
+        /// Draws a shot for long enough that the clock reports, and hands
+        /// back what each pass took and how long the GPU held the frame.
+        fn timed(name: &str) -> Option<(Vec<(&'static str, f32)>, f32)> {
+            let shots = shots();
+            let shot = shots.iter().find(|shot| shot.name == name)?;
+            let mut renderer = pollster::block_on(Renderer::offscreen(WIDE, TALL))?;
+
+            if !renderer.times_frames() {
+                eprintln!("this device will not time a frame, which is not a failure");
+
+                return None;
+            }
+
+            let meshes = Meshes {
+                cube: renderer.add_mesh(&MeshData::cube()),
+                sphere: renderer.add_mesh(&MeshData::sphere(32, 24)),
+                floor: renderer.add_mesh(&MeshData::plane()),
+            };
+            let mut scene = Scene::new();
+            let geometry = Geometry::new();
+            let text = TextRenderer::new();
+
+            (shot.scene)(&mut scene, &meshes);
+
+            let mut camera = Camera::new();
+
+            (shot.camera)(&mut camera);
+            renderer.set_camera(camera);
+
+            let mut said = None;
+
+            for _ in 0..24 {
+                renderer.picture(&scene, &geometry, &text);
+
+                if let Some(span) = renderer.gpu_seconds() {
+                    let passes = renderer.gpu_passes();
+
+                    if !passes.is_empty() {
+                        said = Some((passes, span));
+                    }
+                }
+            }
+
+            Some(said.expect("the device timed twenty four frames and said nothing"))
+        }
 
         #[test]
         fn the_gpu_says_how_long_it_took() {

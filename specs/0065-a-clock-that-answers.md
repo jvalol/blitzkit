@@ -104,6 +104,26 @@ CPU, and the GPU is waiting.
   passing to "the device timed twenty four frames and said nothing".
 - The sweep above, whose column is full for the first time.
 
+## What this spec shipped wrong
+
+**A diagnostic was left in it.** While the cause above was being hunted,
+`Timing::writes` was changed so that both ticks came from a single pass, to
+rule out the two passes being the problem. It was restored, and then a
+backup taken before the restore was copied over the file. What was
+committed reads `if !last { return None; }`, so **only the final 2D pass
+wrote timestamps**, and every number this spec reports is that pass rather
+than the frame.
+
+The table above is wrong in what it measures. It is left as it was written
+because spec 0067 replaces the machinery and records what the passes
+actually cost, and because a spec that quietly corrects its own numbers
+teaches nothing. The fault it describes and the fix for it are both real:
+resolving in the writing submission does give back ticks the GPU has not
+written, and the resolve does belong in the next frame's encoder.
+
+Spec 0066 was measured with this clock and its conclusion did not survive
+being measured again.
+
 ## Out of scope
 
 **A timestamp around each pass.** "The shadow pass is 4 ms" is a better
