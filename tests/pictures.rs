@@ -30,21 +30,9 @@ use glam::{vec3, vec4, Vec3};
 const WIDE: u32 = 320;
 const TALL: u32 = 240;
 
-/// How far a channel may differ before a pixel counts as changed, and how
-/// many pixels may change before a picture does.
-///
-/// Two GPUs rarely agree to the bit, and a driver that rounds a shadow's
-/// edge differently should not fail a test about whether there is a shadow.
-/// Both numbers live here rather than at each test, so a picture that fails
-/// fails for a reason rather than for a tolerance somebody tuned.
-///
-/// **The share started at a hundredth and was too loose to do its job.**
-/// Turning the sun's shadow off changed 0.96% of the frame, so the box stood
-/// on no shadow at all and this file called it a match. A hundredth of a 320
-/// by 240 picture is 768 pixels, which is a shadow.
-/// `the_tolerance_can_see_a_highlight` is what holds the number down now.
-const CHANNEL: i32 = 8;
-const SHARE: f32 = 0.002;
+/// How different is too different lives in the engine now, per the arcade's
+/// spec 0027: a game cannot reach a test, and two tolerances would drift.
+use blitzkit::picture::{CHANNEL, SHARE};
 
 /// What the tests draw, and the one place a scene is described.
 struct Shot {
@@ -262,17 +250,6 @@ fn beside(name: &str, what: &str) -> std::path::PathBuf {
         .join(format!("{}{}.png", name, what))
 }
 
-fn write(path: &std::path::Path, picture: &Picture) {
-    image::save_buffer(
-        path,
-        &picture.pixels,
-        picture.width,
-        picture.height,
-        image::ColorType::Rgba8,
-    )
-    .expect("a picture that can be written");
-}
-
 /// How many pixels differ by more than a channel's worth, and a picture of
 /// where.
 fn apart(was: &image::RgbaImage, now: &Picture) -> (usize, image::RgbaImage) {
@@ -317,50 +294,8 @@ fn looks_right(name: &str) {
         return;
     };
 
-    assert!(
-        !picture.pixels.is_empty(),
-        "{} came back with no pixels at all",
-        name
-    );
-
-    let reference = beside(name, "");
-
-    if std::env::var("BLESS").is_ok() || !reference.exists() {
-        write(&reference, &picture);
-        eprintln!("blessed {}", reference.display());
-        return;
-    }
-
-    let was = image::open(&reference)
-        .expect("a reference that can be read")
-        .to_rgba8();
-
-    assert_eq!(
-        (was.width(), was.height()),
-        (picture.width, picture.height),
-        "{} is a different size from its reference",
-        name
-    );
-
-    let (count, diff) = apart(&was, &picture);
-    let share = count as f32 / (picture.width * picture.height) as f32;
-
-    if share > SHARE {
-        let drawn_at = beside(name, "-drawn");
-        let diff_at = beside(name, "-diff");
-
-        write(&drawn_at, &picture);
-        diff.save(&diff_at).expect("a diff that can be written");
-
-        panic!(
-            "{} differs from its reference in {:.1}% of its pixels. What was drawn is at {} and \
-             the difference is at {}. If the change was meant, BLESS=1 cargo test --test pictures \
-             and look at what it writes.",
-            name,
-            share * 100.0,
-            drawn_at.display(),
-            diff_at.display()
-        );
+    if let Err(why) = blitzkit::picture::looks_right(&picture, &beside(name, "")) {
+        panic!("{}", why);
     }
 }
 
