@@ -195,6 +195,9 @@ pub struct Scene {
     /// Whether the game has been told what pushing a large scene costs
     /// it. Spec 0068: once, and not every frame.
     said_so: bool,
+    /// How many instances this scene is holding, for the budget spec 0071
+    /// keeps a browser inside.
+    held: usize,
     /// What a game is standing by name, per spec 0064: the slots each name
     /// holds, the version they were built at, and the frame each was last
     /// mentioned.
@@ -250,6 +253,9 @@ struct Turned {
     casting: usize,
     spots: usize,
     outlines: usize,
+    /// Instances a run wanted to keep that would not fit in what this
+    /// build may hold. Spec 0071, and nought on anything but wasm32.
+    kept: usize,
 }
 
 impl Turned {
@@ -308,9 +314,21 @@ impl Scene {
             casting,
             spots,
             outlines,
+            kept,
         } = self.turned;
 
         self.spoke += 1;
+
+        if kept > 0 {
+            log::warn!(
+                "a game tried to keep {} more instances than this build holds, which is {} of \
+                 them. They are not being drawn. A browser addresses four gigabytes and an \
+                 allocation past that stops the drawing without a word, so this engine refuses \
+                 first; see spec 0071",
+                kept,
+                BUDGET
+            );
+        }
 
         if lamps > 0 {
             log::warn!(
@@ -515,12 +533,30 @@ impl Scene {
     /// reaches the GPU has the eye taken out of it, per spec 0051, which is
     /// why these are held here rather than written into the instance buffer
     /// and left: the eye moves and the world does not.
-    pub fn keep(&mut self, mesh: MeshId, texture: TextureId, instances: &[Instance]) -> Kept {
-        // and stored relative to the middle of what holds it, per spec
-        // 0063, so that what reaches the GPU is a small number however far
-        // out the run stands and the eye comes off the middle rather than
-        // off every instance in it
-        let mut instances = instances.to_vec();
+    pub fn keep(&mut self, mesh: MeshId, texture: TextureId, instances: Vec<Instance>) -> Kept {
+        // **In a tab, what is held is what there is.** Spec 0071: a wasm32
+        // module addresses four gigabytes and an allocation past them is an
+        // abort rather than a panic, so nothing in this engine gets to say
+        // anything and the canvas goes black. Refused here instead, which
+        // is what every other cap in this engine does.
+        if !fits_the_budget(self.held, instances.len(), BUDGET) {
+            self.turned.kept += instances.len();
+
+            return Kept(usize::MAX);
+        }
+
+        self.held += instances.len();
+        // **Taken rather than borrowed.** Spec 0070: this copied the
+        // instances to shift them, and that copy was one of four a run
+        // lived in at once while it was being handed over, which is what
+        // stopped a browser at eight million of them. Shifted in place
+        // now, in the `Vec` the caller built.
+        //
+        // Stored relative to the middle of what holds it, per spec 0063,
+        // so that what reaches the GPU is a small number however far out
+        // the run stands and the eye comes off the middle rather than off
+        // every instance in it.
+        let mut instances = instances;
         let round = Round::of(&instances);
 
         for instance in &mut instances {
@@ -631,7 +667,7 @@ impl Scene {
             As::Runs(
                 cells(&building)
                     .into_iter()
-                    .map(|cell| self.keep(mesh, texture, &cell))
+                    .map(|cell| self.keep(mesh, texture, cell))
                     .collect(),
             )
         };
@@ -751,6 +787,10 @@ impl Scene {
     /// Lets go of a kept run. Its handle stops answering.
     pub fn drop(&mut self, kept: Kept) {
         if let Some(slot) = self.kept.get_mut(kept.0) {
+            if let Some(holding) = slot.as_ref() {
+                self.held = self.held.saturating_sub(holding.instances.len());
+            }
+
             *slot = None;
         }
     }
@@ -907,6 +947,38 @@ pub(crate) fn cells(instances: &[Instance]) -> Vec<Vec<Instance>> {
     out.retain(|cell| !cell.is_empty());
     out
 }
+
+/// Whether a run of `wants` instances fits when `held` are already held.
+/// Spec 0071.
+///
+/// Its own function so that it can be asked on any machine. The budget
+/// itself is `usize::MAX` on a desktop, so a test that called `keep` here
+/// would be a test of nothing, and the one case worth holding is the one
+/// this build cannot reach.
+pub(crate) fn fits_the_budget(held: usize, wants: usize, budget: usize) -> bool {
+    held.saturating_add(wants) <= budget
+}
+
+/// How many instances this build may keep at once. Spec 0071.
+///
+/// **A browser is four gigabytes and an abort.** A wasm32 module addresses
+/// 4 GB, a run of instances lives in two copies while it is being kept per
+/// spec 0070, and Rust answers an allocation it cannot make by aborting,
+/// which is not a panic and so prints nothing: the canvas goes black and
+/// the console says nothing at all. Twelve million draws in a tab and
+/// sixteen million does that.
+///
+/// Fourteen million, which is between the two and leaves the rest of the
+/// address space to the game, the page and whatever wgpu stages. The
+/// number is a judgement; that there is one is not.
+///
+/// **There is no budget on a desktop.** Nothing there has a number worth
+/// inventing: the ceiling is the GPU buffer, which spec 0069 already
+/// refuses out loud.
+#[cfg(target_arch = "wasm32")]
+pub const BUDGET: usize = 14_000_000;
+#[cfg(not(target_arch = "wasm32"))]
+pub const BUDGET: usize = usize::MAX;
 
 /// How many instances a frame has to push before the engine says
 /// something about it. Spec 0068.
@@ -1076,7 +1148,7 @@ mod tests {
     fn what_is_kept_outlives_a_frame() {
         let mut scene = Scene::new();
         let instances = vec![one_at(glam::Vec3::ZERO), one_at(glam::Vec3::X)];
-        let kept = scene.keep(MeshId(0), TextureId::WHITE, &instances);
+        let kept = scene.keep(MeshId(0), TextureId::WHITE, instances.clone());
 
         scene.push(MeshId(0), &Transform::at(glam::Vec3::Y));
         assert_eq!(scene.batches().len(), 1, "the push is not there");
@@ -1095,7 +1167,7 @@ mod tests {
     fn moving_one_leaves_the_others_alone() {
         let mut scene = Scene::new();
         let instances = vec![one_at(glam::Vec3::ZERO), one_at(glam::Vec3::X * 2.0)];
-        let kept = scene.keep(MeshId(0), TextureId::WHITE, &instances);
+        let kept = scene.keep(MeshId(0), TextureId::WHITE, instances.clone());
         let was = scene.keepings().next().expect("the run").round;
 
         scene.moved(
@@ -1140,7 +1212,7 @@ mod tests {
         let mut scene = Scene::new();
         let instances: Vec<Instance> = places.iter().map(|at| one_at(*at)).collect();
 
-        scene.keep(MeshId(0), TextureId::WHITE, &instances);
+        scene.keep(MeshId(0), TextureId::WHITE, instances.clone());
 
         let run = scene.keepings().next().expect("the run");
 
@@ -1168,8 +1240,8 @@ mod tests {
     #[test]
     fn a_dropped_run_is_gone() {
         let mut scene = Scene::new();
-        let first = scene.keep(MeshId(0), TextureId::WHITE, &[one_at(glam::Vec3::ZERO)]);
-        let second = scene.keep(MeshId(1), TextureId::WHITE, &[one_at(glam::Vec3::X)]);
+        let first = scene.keep(MeshId(0), TextureId::WHITE, vec![one_at(glam::Vec3::ZERO)]);
+        let second = scene.keep(MeshId(1), TextureId::WHITE, vec![one_at(glam::Vec3::X)]);
 
         scene.drop(first);
 
@@ -1183,7 +1255,7 @@ mod tests {
 
         // and the room comes back: the next run takes the empty slot rather
         // than growing the list
-        let third = scene.keep(MeshId(2), TextureId::WHITE, &[one_at(glam::Vec3::Y)]);
+        let third = scene.keep(MeshId(2), TextureId::WHITE, vec![one_at(glam::Vec3::Y)]);
 
         assert_eq!(third, first, "the empty slot was not reused");
         assert_eq!(scene.keepings().count(), 2);
@@ -1194,7 +1266,7 @@ mod tests {
     #[test]
     fn a_handle_to_nothing_does_nothing() {
         let mut scene = Scene::new();
-        let kept = scene.keep(MeshId(0), TextureId::WHITE, &[one_at(glam::Vec3::ZERO)]);
+        let kept = scene.keep(MeshId(0), TextureId::WHITE, vec![one_at(glam::Vec3::ZERO)]);
 
         scene.drop(kept);
         scene.moved(
@@ -1334,6 +1406,69 @@ mod tests {
             scene.keepings().count(),
             1,
             "a run mentioned every frame was let go"
+        );
+    }
+
+    /// Spec 0071: a run past what this build may hold does not fit, and
+    /// the room already taken counts against it.
+    ///
+    /// Asked of the arithmetic rather than of `keep`, because the budget
+    /// is `usize::MAX` on the machine these tests run on and the case
+    /// worth holding is the one this build cannot reach.
+    #[test]
+    fn what_will_not_fit_in_a_tab_is_left_out() {
+        assert!(
+            fits_the_budget(0, 100, 100),
+            "a run that exactly fits did not"
+        );
+        assert!(
+            !fits_the_budget(0, 101, 100),
+            "a run past the budget fitted"
+        );
+        assert!(
+            !fits_the_budget(60, 50, 100),
+            "a run fitted on its own when the room was already taken"
+        );
+        assert!(fits_the_budget(60, 40, 100));
+        assert!(
+            !fits_the_budget(usize::MAX - 1, 2, usize::MAX - 1),
+            "the arithmetic wrapped rather than refusing"
+        );
+    }
+
+    /// Spec 0071: and a desktop has no budget at all.
+    #[test]
+    fn a_desktop_has_no_budget() {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            assert_eq!(
+                BUDGET,
+                usize::MAX,
+                "a desktop grew a ceiling it does not need"
+            );
+
+            let mut scene = Scene::new();
+
+            scene.keep(MeshId(0), TextureId::WHITE, spread(WORTH_A_DRAW));
+
+            assert_eq!(scene.keepings().count(), 1);
+            assert_eq!(scene.turned.kept, 0, "a desktop turned something away");
+        }
+    }
+
+    /// Spec 0071: letting a run go gives its room back.
+    #[test]
+    fn letting_a_run_go_gives_its_room_back() {
+        let mut scene = Scene::new();
+        let kept = scene.keep(MeshId(0), TextureId::WHITE, spread(WORTH_A_DRAW));
+
+        assert_eq!(scene.held, WORTH_A_DRAW);
+
+        scene.drop(kept);
+
+        assert_eq!(
+            scene.held, 0,
+            "a run that was let go is still counted against the budget"
         );
     }
 

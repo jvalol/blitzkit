@@ -1087,7 +1087,7 @@ mod tests {
 
         let mut kept = Scene::new();
 
-        kept.keep(MeshId(0), TextureId::WHITE, &instances);
+        kept.keep(MeshId(0), TextureId::WHITE, instances.clone());
 
         let mut stood = Scene::new();
 

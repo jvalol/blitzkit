@@ -76,6 +76,8 @@ not a priority, and it never changes once a spec exists.
 | [0067](0067-a-clock-for-each-pass.md) | A pair of timestamps for each of the twenty passes in a frame rather than one pair round all of them, because about 11 ms goes somewhere and this project has guessed wrong twice (draft) |
 | [0068](0068-the-slow-path-should-be-the-loud-one.md) | Telling a game once that pushing a hundred thousand instances a frame costs twenty times what handing them over does: the machinery that would have done it for them was built, measured at eleven per cent, found to do nothing at all for the arcade, and thrown away with its numbers written down |
 | [0069](0069-a-scene-too-big-to-draw.md) | This engine draws 62,914,560 instances and dies on the next one, because spec 0060 chose to ask for a buffer the device had already refused: draw what fits and say what did not, the way every other cap here behaves (draft) |
+| [0070](0070-four-copies-of-a-world.md) | A kept run existed four times at once while it was being kept, which is why a tab stopped at eight million instances where the desktop goes to sixty three: two copies now, and a tab reaches twelve |
+| [0071](0071-running-out-in-a-tab.md) | Sixteen million instances in a browser turned the canvas black and said nothing at all, because an allocation failure in wasm is an abort rather than a panic: a budget of fourteen million, and a line saying what it turned away |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.

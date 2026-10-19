@@ -700,7 +700,7 @@ impl Game for Load {
                 self.walling = Some(scene.keep(
                     cube,
                     TextureId::WHITE,
-                    &[Instance::new(
+                    vec![Instance::new(
                         &Transform::at(vec3(SHELL * 0.25, 0.0, 0.0)).with_scale(vec3(
                             SHELL * 0.02,
                             SHELL * 2.4,

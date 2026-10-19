@@ -162,7 +162,7 @@ fn shots() -> Vec<Shot> {
                     })
                     .collect();
 
-                scene.keep(meshes.cube, TextureId::WHITE, &instances);
+                scene.keep(meshes.cube, TextureId::WHITE, instances);
             },
             camera: |camera| {
                 camera.position = vec3(0.0, 0.07, 33_280.0 - 0.35);

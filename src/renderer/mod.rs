@@ -1517,7 +1517,13 @@ impl Renderer {
             return;
         }
 
-        let mut instances: Vec<Instance> = Vec::new();
+        // **Nothing is gathered up first.** Spec 0070: this used to
+        // concatenate every run into one `Vec` so that one `write_buffer`
+        // could send the lot, which at eight million instances is 544 MB
+        // held for the length of one call and one of the four copies a run
+        // lived in while it was being kept. Each run knows its own base,
+        // per spec 0063, so each writes itself there: one call a run
+        // rather than one a frame, and nothing in between.
         // **What a buffer on this device holds, which is where a scene
         // stops.** Spec 0069.
         let fits = (self.device.limits().max_buffer_size / Instance::SIZE) as usize;
@@ -1527,19 +1533,20 @@ impl Renderer {
             .collect();
         let (drawn, turned) = what_fits(&lengths, fits);
 
+        let (bases, taken) = where_they_lie(&lengths[..drawn]);
+
         self.kept_homes.clear();
 
         for (n, keeping) in holding.iter().enumerate().take(drawn) {
             self.kept_homes.insert(
                 keeping.id,
                 culling::Home {
-                    base: instances.len() as u32,
+                    base: bases[n],
                     // nought is the entry that adds nothing, so a run's own
                     // entry is one past its place in this list
                     standing: n as u32 + 1,
                 },
             );
-            instances.extend_from_slice(&keeping.instances);
         }
 
         self.turned_away = turned;
@@ -1561,23 +1568,36 @@ impl Renderer {
             );
         }
 
-        let wanted = instances.len() as u64 * Instance::SIZE;
+        let wanted = taken as u64 * Instance::SIZE;
         let most = self.device.limits().max_buffer_size;
 
         if let Some(size) = instance_room(self.kept_buffer.size(), wanted, most) {
             self.kept_buffer = create_buffer(&self.device, size, wgpu::BufferUsages::VERTEX);
         }
 
-        if !instances.is_empty() {
-            self.queue
-                .write_buffer(&self.kept_buffer, 0, bytemuck::cast_slice(&instances));
+        // the buffer exists before anything is written into it, which is
+        // why this is a second pass over the same runs rather than one
+        for keeping in holding.iter().take(drawn) {
+            let Some(home) = self.kept_homes.get(&keeping.id) else {
+                continue;
+            };
+
+            if keeping.instances.is_empty() {
+                continue;
+            }
+
+            self.queue.write_buffer(
+                &self.kept_buffer,
+                home.base as u64 * Instance::SIZE,
+                bytemuck::cast_slice(&keeping.instances),
+            );
         }
 
         self.kept_built = built;
 
         log::info!(
             "{} kept instances in {} runs, written again",
-            instances.len(),
+            taken,
             holding.len()
         );
     }
@@ -3494,6 +3514,27 @@ fn room(have: u64, want: u64) -> Option<u64> {
 /// a small one that would have. Packing the gaps would make what is drawn
 /// depend on the sizes of what is not, which is the kind of rule a person
 /// cannot hold in their head while looking at a hole in their world.
+/// Where each run lies in the kept buffer, and how many instances they
+/// come to altogether. Spec 0070.
+///
+/// Each run starts where the one before it ended, with nothing between
+/// them: the buffer is read as one array of instances and a gap would be
+/// read as instances nobody wrote. This exists as a function because the
+/// runs are written one at a time now, each at its own offset, so the
+/// arithmetic that used to be a `Vec` growing is the only thing holding
+/// them in the right places.
+fn where_they_lie(lengths: &[usize]) -> (Vec<u32>, usize) {
+    let mut at = 0;
+    let mut bases = Vec::with_capacity(lengths.len());
+
+    for length in lengths {
+        bases.push(at as u32);
+        at += length;
+    }
+
+    (bases, at)
+}
+
 fn what_fits(lengths: &[usize], fits: usize) -> (usize, usize) {
     let mut taken = 0;
     let mut drawn = 0;
@@ -4345,6 +4386,35 @@ mod tests {
             Some(MOST),
             "doubling past what the device gives was asked for anyway"
         );
+    }
+
+    /// Spec 0070: every run lies where the one before it ended, with
+    /// nothing between them.
+    ///
+    /// The runs are written one at a time now, each at its own offset, so
+    /// this arithmetic is the only thing putting them in the right places.
+    /// A gap would be read as instances nobody wrote, which is a hole in
+    /// the world made of whatever the buffer held before.
+    #[test]
+    fn every_run_is_written_where_it_lies() {
+        assert_eq!(where_they_lie(&[3, 1, 4]), (vec![0, 3, 4], 8));
+        assert_eq!(where_they_lie(&[]), (vec![], 0));
+        assert_eq!(
+            where_they_lie(&[0, 5]),
+            (vec![0, 0], 5),
+            "an empty run moved the one after it"
+        );
+
+        // and the general shape of it: each base is the sum of what came
+        // before, which is what "nothing between them" means
+        let lengths = [7usize, 11, 0, 29, 3];
+        let (bases, all) = where_they_lie(&lengths);
+
+        for (n, base) in bases.iter().enumerate() {
+            assert_eq!(*base as usize, lengths[..n].iter().sum::<usize>());
+        }
+
+        assert_eq!(all, lengths.iter().sum::<usize>());
     }
 
     /// Spec 0069: a run that will not fit is left out whole, and the ones
