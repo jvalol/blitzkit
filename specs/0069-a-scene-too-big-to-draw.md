@@ -1,7 +1,8 @@
 # 0069 A scene too big to draw
 
-**Status:** draft
+**Status:** implemented
 **Date:** 2026-10-19
+**Built:** 2026-10-19
 
 ## Goal
 
@@ -77,23 +78,52 @@ spec is about the edge, not the size.
 Leaving out the furthest, or the smallest, or the least recently seen is a
 policy, and a policy the engine invents is a policy a game cannot predict.
 
+## What it came to
+
+63,700,000 cubes, which is the number that killed it:
+
+```
+WARN blitzkit::renderer] a scene kept 578220 more instances than the
+63161283 a buffer holds on this device, so that many are not being drawn.
+The runs are left out whole and in the order they were kept; see spec 0069
+```
+
+It then draws 197,775,000 triangles in 277 draws and goes on running.
+62,914,560 is unchanged at about 170 ms, which is the other half of the
+check: a scene that fits must not notice this spec at all.
+
+**The line is said by the renderer rather than by `Scene`**, which is where
+every other cap's line lives. The renderer is what knows how big a buffer
+this device gives, and it holds the scene by shared reference, so the count
+cannot travel the other way without plumbing that would exist for one line.
+
+**Everything after the first run that does not fit is left out too**, even
+a small one that would have fitted in the gap. Packing the gaps would make
+what is drawn depend on the sizes of what is not, which is a rule nobody
+can hold in their head while looking at a hole in their world.
+
 ## Acceptance criteria
 
 - A buffer is never asked for more than the device
   gives. — `renderer::tests::a_buffer_never_asks_for_more_than_the_device_gives`
 - A run that will not fit is left out whole, and the ones before it are
   still drawn. — `renderer::tests::what_does_not_fit_is_left_out_whole`
-- The count is said once, with the number, like every other
-  cap. — `renderer::scene::tests::what_would_not_fit_is_said_once`
 - The pictures of spec 0062 are unchanged, since nothing about a scene that
   fits changes. — `pictures::tests::a_kept_run_is_drawn_where_it_lies`
 
-### To be verified by hand
+### Verified by hand
 
 - Sixty three million seven hundred thousand cubes, which is the number
-  that killed it, drawing what fits and saying what it dropped.
-- The same one cube under the ceiling, which must be unchanged: 62,914,560
-  at about 171 ms.
+  that killed it, now drawing what fits and saying what it dropped. The
+  line is quoted above.
+- 62,914,560, one cube under the ceiling, unchanged at about 170 ms.
+- Both tests watched failing: a `what_fits` that cuts a run in half to make
+  it fit, and the clamp put back the way spec 0060 had it.
+
+**The count being said once is not held by a test.** It is a flag on the
+renderer and a `log::warn!`, and testing it would want a renderer, which
+wants a device. What a device-less test could check is the flag, which is
+the test checking that an assignment happened.
 
 ## Out of scope
 

@@ -105,6 +105,11 @@ pub struct Renderer {
     /// off, which the vertex stage adds to every instance of it. Entry
     /// nought adds nothing and is what a run written this frame uses.
     standing_buffer: wgpu::Buffer,
+    /// How many kept instances would not fit in a buffer on this device,
+    /// and so were not drawn. Spec 0069.
+    turned_away: usize,
+    /// Whether that has been said. Once, like every other cap here.
+    said_what_did_not_fit: bool,
     /// How far apart those entries are, which the device decides: a
     /// dynamic offset has to be a multiple of its alignment, and sixteen
     /// bytes of use costs two hundred and fifty six of room.
@@ -929,6 +934,8 @@ impl Renderer {
             kept_buffer,
             kept_homes: std::collections::HashMap::new(),
             kept_built: Vec::new(),
+            turned_away: 0,
+            said_what_did_not_fit: false,
             standing_buffer,
             standing_stride,
             vertex_buffer,
@@ -1511,10 +1518,18 @@ impl Renderer {
         }
 
         let mut instances: Vec<Instance> = Vec::new();
+        // **What a buffer on this device holds, which is where a scene
+        // stops.** Spec 0069.
+        let fits = (self.device.limits().max_buffer_size / Instance::SIZE) as usize;
+        let lengths: Vec<usize> = holding
+            .iter()
+            .map(|keeping| keeping.instances.len())
+            .collect();
+        let (drawn, turned) = what_fits(&lengths, fits);
 
         self.kept_homes.clear();
 
-        for (n, keeping) in holding.iter().enumerate() {
+        for (n, keeping) in holding.iter().enumerate().take(drawn) {
             self.kept_homes.insert(
                 keeping.id,
                 culling::Home {
@@ -1525,6 +1540,25 @@ impl Renderer {
                 },
             );
             instances.extend_from_slice(&keeping.instances);
+        }
+
+        self.turned_away = turned;
+
+        // once, with the number, the way spec 0020 says what the lamp cap
+        // refused. The renderer says it rather than `Scene`, which is
+        // where every other cap's line lives, because the renderer is what
+        // knows how big a buffer this device gives and it holds the scene
+        // by shared reference.
+        if turned > 0 && !self.said_what_did_not_fit {
+            self.said_what_did_not_fit = true;
+
+            log::warn!(
+                "a scene kept {} more instances than the {} a buffer holds on this device, so \
+                 that many are not being drawn. The runs are left out whole and in the order \
+                 they were kept; see spec 0069",
+                turned,
+                fits
+            );
         }
 
         let wanted = instances.len() as u64 * Instance::SIZE;
@@ -3446,8 +3480,38 @@ fn room(have: u64, want: u64) -> Option<u64> {
 /// device refuses it and says so, which is the honest end of it; quietly
 /// handing back a smaller buffer would draw part of a scene and call it a
 /// frame. Spec 0060.
+/// How many of a scene's runs fit in a buffer that holds `fits`
+/// instances, and how many instances the rest come to. Spec 0069.
+///
+/// **A run is left out whole or not at all.** A run cut in half is a
+/// building with one wall, and nothing downstream can tell that from a
+/// building. In the order they were kept, which is the order a game handed
+/// them over: leaving out the furthest, or the smallest, or the least
+/// recently seen is a policy, and a policy the engine invents is one a
+/// game cannot predict.
+///
+/// Everything after the first run that does not fit is left out too, even
+/// a small one that would have. Packing the gaps would make what is drawn
+/// depend on the sizes of what is not, which is the kind of rule a person
+/// cannot hold in their head while looking at a hole in their world.
+fn what_fits(lengths: &[usize], fits: usize) -> (usize, usize) {
+    let mut taken = 0;
+    let mut drawn = 0;
+
+    for length in lengths {
+        if taken + length > fits {
+            break;
+        }
+
+        taken += length;
+        drawn += 1;
+    }
+
+    (drawn, lengths[drawn..].iter().sum())
+}
+
 fn instance_room(have: u64, want: u64, most: u64) -> Option<u64> {
-    room(have, want).map(|want| want.max(have * 2).min(most.max(want)))
+    room(have, want).map(|want| want.max(have * 2).min(most))
 }
 
 /// Puts `contents` in `buffer`, replacing it when it is too small.
@@ -4283,20 +4347,52 @@ mod tests {
         );
     }
 
-    /// Spec 0060: and a scene too large for any buffer is asked for all the
-    /// same.
-    ///
-    /// The device refuses it and says why. Handing back the ceiling instead
-    /// would draw two thirds of a scene and call it a frame, which is the
-    /// one outcome nobody can see is wrong.
+    /// Spec 0069: a run that will not fit is left out whole, and the ones
+    /// before it are still drawn.
     #[test]
-    fn a_scene_past_the_ceiling_is_still_asked_for() {
+    fn what_does_not_fit_is_left_out_whole() {
+        // four runs of a thousand into a buffer that holds two and a half
+        // thousand: two fit, and the third is left out rather than the
+        // first five hundred of it being drawn
+        assert_eq!(what_fits(&[1000, 1000, 1000, 1000], 2500), (2, 2000));
+        assert_eq!(
+            what_fits(&[1000, 1000], 2500),
+            (2, 0),
+            "a scene that fits had something turned away"
+        );
+        assert_eq!(
+            what_fits(&[4000], 2500),
+            (0, 4000),
+            "one run too big for any buffer was drawn anyway"
+        );
+        assert_eq!(what_fits(&[], 2500), (0, 0));
+        // and a small run after a large one goes too, rather than being
+        // packed into the gap the large one left
+        assert_eq!(what_fits(&[2000, 1000, 10], 2500), (1, 1010));
+    }
+
+    /// Spec 0069: a buffer is never asked for more than the device gives.
+    ///
+    /// **Spec 0060 decided the other way and was wrong.** It asked for the
+    /// whole of what a scene wanted even after the device had said no, on
+    /// the grounds that the device would refuse it out loud rather than
+    /// two thirds of a scene being drawn and called a frame. The out loud
+    /// is a fatal validation error from inside wgpu, which is not this
+    /// engine saying anything, and it is the only cap here that kills the
+    /// game instead of saying what it turned away.
+    #[test]
+    fn a_buffer_never_asks_for_more_than_the_device_gives() {
         const MOST: u64 = 256 << 20;
 
         assert_eq!(
             instance_room(1 << 20, 300 << 20, MOST),
-            Some(300 << 20),
-            "a scene larger than the device allows was quietly cut down"
+            Some(MOST),
+            "a buffer was asked for more than this device will give"
+        );
+        assert_eq!(
+            instance_room(1 << 20, MOST, MOST),
+            Some(MOST),
+            "a scene that exactly fits was not given the room"
         );
     }
 

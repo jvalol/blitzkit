@@ -83,10 +83,16 @@ of two million instances is a game that has not divided one.
 - The instance buffer asks for twice what it needs and never for more than
   this device said it would
   give. — `renderer::tests::a_buffer_asks_for_no_more_than_the_device_will_give`
-- A scene that wants more than any buffer on this device is asked for all
-  the same, so the device refuses it out loud rather than a part of the
-  scene being drawn and called a
-  frame. — `renderer::tests::a_scene_past_the_ceiling_is_still_asked_for`
+- A buffer is never asked for more than this device will
+  give. — `renderer::tests::a_buffer_never_asks_for_more_than_the_device_gives`
+
+  **This criterion used to say the opposite** and spec 0069 reversed it.
+  The reasoning here was that a scene too large to fit should be asked for
+  anyway, so that the device refused it out loud rather than a part of the
+  scene being drawn and called a frame. The out loud is a fatal validation
+  error from inside wgpu, which is not this engine saying anything, and it
+  made the instance buffer the one cap here that kills the game rather than
+  drawing what fits and saying what it turned away.
 
 **What three of these criteria used to say.** They described several
 buffers: instances past the first buffer's room going into the next, a kept
