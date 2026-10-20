@@ -32,9 +32,9 @@ not a priority, and it never changes once a spec exists.
 | [0022](0022-point-light-shadows.md) | Lamps that cast, six projections each |
 | [0023](0023-menu-text.md) | Which lines can be chosen, and which one is |
 | [0024](0024-textured-quads.md) | An image on a 2D quad (draft) |
-| [0025](0025-cursor-rays.md) | A cursor position as a ray into the world (draft) |
-| [0026](0026-sierpinski-tetrahedron.md) | Four copies of itself, each half the size (draft) |
-| [0027](0027-menger-sponge.md) | Twenty copies of itself, each a third the size (draft) |
+| [0025](0025-cursor-rays.md) | A cursor position as a ray into the world |
+| [0026](0026-sierpinski-tetrahedron.md) | Four copies of itself, each half the size |
+| [0027](0027-menger-sponge.md) | Twenty copies of itself, each a third the size |
 | [0028](0028-hilbert-curve.md) | A line that fills a cube, swept as a tube |
 | [0029](0029-contact-shadows.md) | Shadows in the first fraction of a unit, where a map cannot reach |
 | [0030](0030-sphere-bodies.md) | Spheres with mass, bounce, friction and spin |
@@ -73,9 +73,9 @@ not a priority, and it never changes once a spec exists.
 | [0064](0064-keeping-without-the-bookkeeping.md) | One call a frame with a name and a version, so a game lands on the kept path without handles, a lifecycle or a decision about how to cut its world up: the example's 96 patches and the arcade's threshold of 32 are both deleted, and the engine decides what is worth a draw |
 | [0065](0065-a-clock-that-answers.md) | Resolving a frame's pair of timestamps in the next frame's encoder rather than the one that wrote them, because the end tick was not there yet and the pair came back backwards: the GPU column was blank on every frame fast enough to matter |
 | [0066](0066-what-the-triangles-cost.md) | Asking for twelve million triangles instead of twenty four takes about a millisecond off the GPU and three tenths back on the CPU: measured three times, once against a broken clock that said the opposite and once at two points that overstated it |
-| [0067](0067-a-clock-for-each-pass.md) | A pair of timestamps for each of the twenty passes in a frame rather than one pair round all of them, because about 11 ms goes somewhere and this project has guessed wrong twice (draft) |
+| [0067](0067-a-clock-for-each-pass.md) | A pair of timestamps for each of the twenty passes in a frame rather than one pair round all of them, because about 11 ms goes somewhere and this project has guessed wrong twice |
 | [0068](0068-the-slow-path-should-be-the-loud-one.md) | Telling a game once that pushing a hundred thousand instances a frame costs twenty times what handing them over does: the machinery that would have done it for them was built, measured at eleven per cent, found to do nothing at all for the arcade, and thrown away with its numbers written down |
-| [0069](0069-a-scene-too-big-to-draw.md) | This engine draws 62,914,560 instances and dies on the next one, because spec 0060 chose to ask for a buffer the device had already refused: draw what fits and say what did not, the way every other cap here behaves (draft) |
+| [0069](0069-a-scene-too-big-to-draw.md) | This engine draws 62,914,560 instances and dies on the next one, because spec 0060 chose to ask for a buffer the device had already refused: draw what fits and say what did not, the way every other cap here behaves |
 | [0070](0070-four-copies-of-a-world.md) | A kept run existed four times at once while it was being kept, which is why a tab stopped at eight million instances where the desktop goes to sixty three: two copies now, and a tab reaches twelve |
 | [0071](0071-running-out-in-a-tab.md) | Sixteen million instances in a browser turned the canvas black and said nothing at all, because an allocation failure in wasm is an abort rather than a panic: a budget of fourteen million, and a line saying what it turned away |
 | [0072](0072-eight-thousand-growing-vectors.md) | The cells a run is cut into used to start empty and double, eight thousand of them a dozen times each: counted first and allocated once, which takes a tab from twelve million instances to sixteen and turns the silence past it into a panic with a message |
