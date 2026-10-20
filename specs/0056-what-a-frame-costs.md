@@ -83,6 +83,8 @@ An example, `load`, that draws a scene with dials on it:
 - whether the cubes are one mesh instanced or that many distinct meshes,
   which is the difference between one draw call and thousands and is the
   thing the prediction above turns on
+- whether the contact march runs, added 2026-10-20 once spec 0073 made it a
+  number worth having beside the others
 - the present mode, so the same scene can be watched with vsync and without
 
 and a readout of what that costs:
@@ -181,9 +183,23 @@ API.
 
 What was not matched: the window is 1920 by 1080 against 1600 by 1200, the
 samples are four against eight, the camera paths differ, and blitzkit's rows
-carry one directional shadow pass that Bevy's do not. All of those are fill
-and none of them moves the per-entity cost that the comparison turns on, but
-they are the reason the two columns should not be subtracted from each other.
+carry one directional shadow pass and a contact march that Bevy's do not. All
+of those are fill and none of them moves the per-entity cost that the
+comparison turns on, but they are the reason the two columns should not be
+subtracted from each other.
+
+The march is the one of those that had to be measured rather than reasoned
+about, because spec 0073 found it costs 6 ms of a four million instance frame
+and then said, wrongly, that every row above carried that. It does not. On
+2026-10-20 `load` was given a dial for it and the whole of the table above was
+taken again with the march on and off a line apart, twice: the march is worth
+between nothing and 1.8 ms on the GPU's own clock at these counts, and nothing
+at all in the column above, which is the time between frames. Those rows are
+either inside a frame, where a couple of milliseconds of GPU work is time the
+display was going to spend waiting, or they are bound on the CPU handing over
+a hundred and ninety two thousand draw calls, where the march finished long
+before the frame did. In both passes the two rows that are not pinned to the
+display came out slower with the march **off**. Spec 0073 carries the numbers.
 
 And it compares two scenes that two people wrote, on one machine, with one
 driver, at one moment. It is a fair answer to what this costs on this Mac
@@ -257,6 +273,15 @@ because `MAX_SHADOWING_POINT_LIGHTS` is two: at most twelve extra draws over
 a scene that is already one instanced call. A shadow pass is expensive when
 it is a pass over a large scene, and this scene is not large in the way that
 matters.
+
+**A third of the `gpu` column is the contact march**, which is worth saying
+because that column is the one somebody would read as what the device spends
+on a scene. The march is on in every row of it. Seventeen hundred cubes come
+out at 2.4 ms with it and 1.6 without; thirteen thousand at 4.2 and 2.5. It is
+work the engine is doing and the number is honest, but it is a feature rather
+than a floor, and a game with nothing resting on anything turns it off with
+one call. The arcade does. Spec 0073 has the rest of it, and the dial that
+takes these pairs is S.
 
 ## A count that is not a cube cannot fill a cube
 

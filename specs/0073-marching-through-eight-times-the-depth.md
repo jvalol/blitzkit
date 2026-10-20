@@ -3,7 +3,8 @@
 **Status:** implemented
 **Date:** 2026-10-19
 **Built:** 2026-10-19, built and taken back out. The hypothesis was wrong
-and the measurement is the spec.
+and the measurement is the spec. Corrected 2026-10-20: the number was
+right and what this spec said it meant for the Bevy comparison was not.
 
 ## Goal
 
@@ -80,10 +81,61 @@ the march off, and `load` is the only thing here that leaves it on.
 
 ## What this leaves behind
 
-**A number for the Bevy comparison.** `load` runs with the march on and
-every figure this project has quoted against Bevy's `many_cubes` carries
-5.9 ms of it. Spec 0056 lists the directional shadow pass as unmatched;
-this is a second one and larger.
+**A dial.** `load` runs with the march on, so a row of it carries work
+Bevy's `many_cubes` is not doing. S turns the march off a line away from
+a row with it on, for the same reason K does it for culling: on a machine
+that drifts by a factor of two, the two numbers have to come out of one
+run or they cannot be read against each other.
+
+## What this spec got wrong
+
+It said every figure this project has quoted against Bevy's `many_cubes`
+carries 5.9 ms of march. That was this scene's number handed to scenes it
+was never measured on, and it is wrong by most of itself.
+
+Measured on 2026-10-20 with the dial above, the march on and off a line
+apart, at every count spec 0056's table was taken at, and the whole sweep
+twice:
+
+| scene | the march, on the GPU's clock | between frames |
+| --- | --- | --- |
+| 1728 in a block, one mesh | 0.85 / 0.86 ms | nothing |
+| 4096 in a block, one mesh | 1.10 / 1.16 ms | nothing |
+| 13824 in a block, one mesh | 1.72 / 1.74 ms | nothing |
+| 64000 in a block, one mesh | -0.44 / -0.35 ms | nothing |
+| 1728 in a block, a mesh each | 1.06 / 1.02 ms | nothing |
+| 4096 in a block, a mesh each | 1.81 / 1.27 ms | nothing |
+| 13824 in a block, a mesh each | 1.05 / 1.22 ms | -0.41 / +0.67 ms |
+| 64000 in a block, a mesh each | 0.84 / 1.63 ms | -0.55 / -1.13 ms |
+| 4096000 kept on a shell | 6.2 / 6.3 ms | +0.23 / +0.20 ms |
+
+The last row is this spec's own scene and it reproduces: 6.2 and 6.3
+where the table at the top of this spec says 5.9, which is inside the
+drift that spec 0056 measured and wrote down. Everything above it is
+between nothing and 1.8.
+
+**The march does not cost what the cube count costs.** It costs
+fragments that march, and a cube's count says nothing about how many
+of those there are. Sixty four thousand in a block is forty a side at
+one and a half units in a spread of sixty, so the block is solid and
+the prepass leaves the march almost nothing behind the front faces:
+the march reads as free there, and as -0.4 ms, which is noise sitting
+on zero. Four million on a shell is the other end, where nearly every
+cube is smaller than a pixel and nearly every fragment is a partial
+one. That reading of the sixty four thousand row is the obvious one
+and was not measured on its own.
+
+**And the column the comparison is quoted in moves by nothing at all.**
+Spec 0056's Bevy table is the time between frames, because that is what
+Bevy's own diagnostic reports. Those rows are either inside a frame, where
+2 ms of GPU work is 2 ms the display was going to wait anyway, or they are
+bound on the CPU handing over a hundred and ninety two thousand draw
+calls, where the GPU has the march done long before the CPU is finished.
+In both of the two passes above, the two rows that are not pinned to the
+display came out with the march **off** as the slower one.
+
+So the comparison stands as it was published. What was unmatched is still
+the directional shadow pass that spec 0056 already names.
 
 ## Acceptance criteria
 
@@ -97,6 +149,12 @@ and repeated.
 - The flattening built, the fourteen pictures of spec 0062 passing
   unchanged with it in, and the A and B above measured minutes apart.
 - The code taken back out, and the tests green after it.
+- And the correction above: `load --march --vsync`, twice, which is
+  twenty four pairs a line apart, plus the four million row with the cube
+  count and the keeping patched in by hand and put back. The dial writes
+  one float into one uniform and the shader returns early on it, so the
+  two rows of a pair are the same passes, the same draws and the same
+  buffers.
 
 ## Out of scope
 

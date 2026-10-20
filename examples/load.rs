@@ -22,6 +22,10 @@
 //! it has a windowful of frames, writes a comma separated line for each, and
 //! quits. That is the one to run for a number worth keeping: a run before a
 //! change and a run after it are a diff.
+//!
+//! `--march` is a narrower one: the same counts spec 0056's comparison was
+//! taken at, with the contact march on and off a line apart, because spec
+//! 0073 asked what a published row of it was carrying.
 
 use blitzkit::camera::Camera;
 use blitzkit::cost::{Costs, Frame, WINDOW};
@@ -206,6 +210,15 @@ struct Dials {
     /// keypress apart in one run of one binary or the two numbers cannot be
     /// read against each other. Spec 0056 on how steady any of this is.
     culling: bool,
+    /// Whether the contact march runs, per spec 0029.
+    ///
+    /// A dial because spec 0073 found the march costs 5.9 ms of a four
+    /// million instance frame, and nothing in spec 0056's comparison table
+    /// knew that. Bevy's `many_cubes` does not march, so every row taken
+    /// with this on carries work the other side is not doing. How much work
+    /// turns out to depend on how big a cube is on screen, which is what
+    /// this dial is here to say.
+    march: bool,
 }
 
 impl Dials {
@@ -239,6 +252,7 @@ impl Dials {
                         kept: false,
                         wall: false,
                         occluding: false,
+                        march: true,
                     });
                 }
             }
@@ -258,6 +272,7 @@ impl Dials {
                     kept,
                     wall: false,
                     occluding: false,
+                    march: true,
                 });
             }
         }
@@ -273,6 +288,7 @@ impl Dials {
                 kept: false,
                 wall: false,
                 occluding: false,
+                march: true,
             });
         }
 
@@ -287,6 +303,7 @@ impl Dials {
                 kept: false,
                 wall: false,
                 occluding: false,
+                march: true,
             });
             out.push(Dials {
                 cubes: 1728,
@@ -298,7 +315,51 @@ impl Dials {
                 kept: false,
                 wall: false,
                 occluding: false,
+                march: true,
             });
+        }
+
+        out
+    }
+
+    /// The march on and off at each of the counts spec 0056's table was
+    /// taken at, and at the shell spec 0057's was.
+    ///
+    /// Its own sweep rather than lines added to the one above, because the
+    /// question is narrow: how much of a published row is work Bevy was not
+    /// doing. Paired and not blocked, for the drift the comment above
+    /// describes.
+    fn marching() -> Vec<Dials> {
+        let mut out = Vec::new();
+        let quiet = Dials {
+            cubes: 0,
+            lamps: 0,
+            casting: false,
+            meshes: Meshes::One,
+            culling: true,
+            spread: Spread::Block,
+            kept: false,
+            wall: false,
+            occluding: false,
+            march: true,
+        };
+
+        for (spread, meshes) in [
+            (Spread::Block, Meshes::One),
+            (Spread::Block, Meshes::Many),
+            (Spread::Shell, Meshes::One),
+        ] {
+            for cubes in CUBES {
+                for march in [true, false] {
+                    out.push(Dials {
+                        cubes,
+                        spread,
+                        meshes,
+                        march,
+                        ..quiet
+                    });
+                }
+            }
         }
 
         out
@@ -364,8 +425,13 @@ struct Load {
 
 impl Load {
     fn new() -> Self {
-        let sweeping = if asked("--sweep") {
-            let mut all = Dials::sweep();
+        let sweeping = if asked("--sweep") || asked("--march") {
+            let mut all = if asked("--march") {
+                Dials::marching()
+            } else {
+                Dials::sweep()
+            };
+
             all.reverse();
             all
         } else {
@@ -383,6 +449,7 @@ impl Load {
                 kept: false,
                 wall: false,
                 occluding: false,
+                march: true,
             }),
             kept_for: None,
             walling: None,
@@ -428,10 +495,11 @@ impl Load {
             String::from("Up and down for cubes, left and right for lamps, C to cast."),
             String::from(
                 "M for one mesh or a mesh each, K for culling, B for a block or a shell, \
-                 P to keep them, O for a wall, H to ask what it hides, escape to quit.",
+                 P to keep them, O for a wall, H to ask what it hides, \
+                 S for the contact march, escape to quit.",
             ),
             format!(
-                "{} cubes {}, {}, {}, {} lamps, {} casting, culling {}, {}{}, {}",
+                "{} cubes {}, {}, {}, {} lamps, {} casting, culling {}, {}{}{}, {}",
                 self.dials.cubes,
                 self.dials.spread.says(),
                 if self.dials.kept { "kept" } else { "pushed" },
@@ -446,6 +514,11 @@ impl Load {
                 },
                 if self.dials.occluding {
                     ", asking what it hides"
+                } else {
+                    ""
+                },
+                if self.dials.march {
+                    ", marching for contact"
                 } else {
                     ""
                 },
@@ -506,7 +579,7 @@ impl Load {
     /// hundred by twelve hundred is most of a frame on its own, and a row
     /// without them is a number nobody can reproduce.
     fn header() -> &'static str {
-        "cubes,spread,held,wall,occluding,meshes,lamps,casting,culling,present,samples,\
+        "cubes,spread,held,wall,occluding,march,meshes,lamps,casting,culling,present,samples,\
          surface,draws,triangles,frames,work_ms,work_95_ms,work_worst_ms,between_ms,gpu_ms,\
          sun_ms,spots_ms,lamps_ms,prepass_ms,hidden_ms,mesh_ms,overlay_ms"
     }
@@ -525,7 +598,7 @@ impl Load {
         };
 
         format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{}x{},{},{},{},{:.3},{:.3},{:.3},{:.3},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{}x{},{},{},{},{:.3},{:.3},{:.3},{:.3},{},{}",
             self.dials.cubes,
             self.dials.spread.says().replace(' ', "-"),
             if self.dials.kept { "kept" } else { "pushed" },
@@ -535,6 +608,7 @@ impl Load {
             } else {
                 "unasked"
             },
+            if self.dials.march { "marching" } else { "flat" },
             self.dials.meshes.says().replace(' ', "-"),
             self.dials.lamps,
             self.dials.casters(),
@@ -793,6 +867,7 @@ impl Game for Load {
             self.dials.kept,
             self.dials.wall,
             self.dials.occluding,
+            self.dials.march,
         );
 
         match input.key {
@@ -813,6 +888,7 @@ impl Game for Load {
             KeyboardKey::P => self.dials.kept = !self.dials.kept,
             KeyboardKey::O => self.dials.wall = !self.dials.wall,
             KeyboardKey::H => self.dials.occluding = !self.dials.occluding,
+            KeyboardKey::S => self.dials.march = !self.dials.march,
             _ => (),
         }
 
@@ -827,6 +903,7 @@ impl Game for Load {
                 self.dials.kept,
                 self.dials.wall,
                 self.dials.occluding,
+                self.dials.march,
             )
         {
             self.costs.clear();
@@ -846,6 +923,7 @@ impl Game for Load {
         // and 0061.
         renderer.set_culling(self.dials.culling);
         renderer.set_occluding(self.dials.occluding);
+        renderer.set_contact_shadows(self.dials.march);
         self.gpu = renderer.gpu_seconds();
 
         let passes = renderer.gpu_passes();

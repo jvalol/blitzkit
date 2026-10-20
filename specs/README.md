@@ -62,7 +62,7 @@ not a priority, and it never changes once a spec exists.
 | [0053](0053-the-engine-in-a-browser.md) | The engine in a browser, and every example on the site made playable |
 | [0054](0054-the-order-of-the-examples.md) | What the examples page shows and in what order: worth looking at rather than chronological, groups kept whole, and tower gone altogether because cairn is the better example of the same thing |
 | [0055](0055-everything-playable-in-the-page.md) | Every game playable from the site, not built: surveyed by building starry for a browser and playing it, which costs three lines of Cargo.toml a game, six in build-web, and 2.66 MB rather than the arcade's 7.69 |
-| [0056](0056-what-a-frame-costs.md) | What a frame costs and how to measure it, since nothing here has ever been timed: vsync, the delta cap, and a scene with dials on it (draft) |
+| [0056](0056-what-a-frame-costs.md) | What a frame costs and how to measure it, since nothing here has ever been timed: vsync, the delta cap, and a scene with dials on it |
 | [0057](0057-not-drawing-what-you-cannot-see.md) | Leaving out of each pass what that pass cannot see: a quarter of the draws in the arcade, a loss in a benchmark that fills the frame, and a dial to tell them apart |
 | [0058](0058-a-scene-you-can-keep.md) | Handing the engine a part of the world once instead of every frame: a million cubes goes from 53 milliseconds to 9, and the patches that make it work are the game's to draw |
 | [0059](0059-kept-where-it-lies.md) | Writing a kept run into the buffer once with the eye coming off on the GPU, which took the sun's shadows with it and was reverted the same day (what survived is in the spec) |
@@ -79,7 +79,7 @@ not a priority, and it never changes once a spec exists.
 | [0070](0070-four-copies-of-a-world.md) | A kept run existed four times at once while it was being kept, which is why a tab stopped at eight million instances where the desktop goes to sixty three: two copies now, and a tab reaches twelve |
 | [0071](0071-running-out-in-a-tab.md) | Sixteen million instances in a browser turned the canvas black and said nothing at all, because an allocation failure in wasm is an abort rather than a panic: a budget of fourteen million, and a line saying what it turned away |
 | [0072](0072-eight-thousand-growing-vectors.md) | The cells a run is cut into used to start empty and double, eight thousand of them a dozen times each: counted first and allocated once, which takes a tab from twelve million instances to sixteen and turns the silence past it into a panic with a message |
-| [0073](0073-marching-through-eight-times-the-depth.md) | The contact march costs 5.9 ms at eight samples a pixel and 0.85 at one: marching through a flattened depth was built, made it slower, and came back out, leaving the real answer, which is that MSAA multiplies fragment invocations on sub-pixel triangles |
+| [0073](0073-marching-through-eight-times-the-depth.md) | The contact march costs 5.9 ms at eight samples a pixel and 0.85 at one on a frame of four million sub-pixel cubes: marching through a flattened depth was built, made it slower, and came back out, leaving the real answer, which is that MSAA multiplies fragment invocations. The number is that scene's, which this spec then said it was every scene's, and that part is corrected |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.
