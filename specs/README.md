@@ -78,6 +78,7 @@ not a priority, and it never changes once a spec exists.
 | [0069](0069-a-scene-too-big-to-draw.md) | This engine draws 62,914,560 instances and dies on the next one, because spec 0060 chose to ask for a buffer the device had already refused: draw what fits and say what did not, the way every other cap here behaves (draft) |
 | [0070](0070-four-copies-of-a-world.md) | A kept run existed four times at once while it was being kept, which is why a tab stopped at eight million instances where the desktop goes to sixty three: two copies now, and a tab reaches twelve |
 | [0071](0071-running-out-in-a-tab.md) | Sixteen million instances in a browser turned the canvas black and said nothing at all, because an allocation failure in wasm is an abort rather than a panic: a budget of fourteen million, and a line saying what it turned away |
+| [0072](0072-eight-thousand-growing-vectors.md) | The cells a run is cut into used to start empty and double, eight thousand of them a dozen times each: counted first and allocated once, which takes a tab from twelve million instances to sixteen and turns the silence past it into a panic with a message |
 
 `cargo run --example cubes` draws what specs 0007 through 0012 built: lit,
 textured, depth sorted, instanced geometry with a camera that moves.

@@ -929,9 +929,7 @@ pub(crate) fn cells(instances: &[Instance]) -> Vec<Vec<Instance>> {
     // is flat in one axis is still divided in the other two
     let (least, most) = (round.at - round.reach, round.at + round.reach);
     let size = (most - least).max(Vec3::splat(f32::MIN_POSITIVE));
-    let mut out: Vec<Vec<Instance>> = vec![Vec::new(); across * across * across];
-
-    for instance in instances {
+    let which = |instance: &Instance| {
         let at = Vec3::new(
             instance.model[3][0],
             instance.model[3][1],
@@ -939,9 +937,29 @@ pub(crate) fn cells(instances: &[Instance]) -> Vec<Vec<Instance>> {
         );
         let cell = |along: f32| ((along * across as f32) as usize).min(across - 1);
         let along = (at - least) / size;
-        let n = cell(along.x) * across * across + cell(along.y) * across + cell(along.z);
 
-        out[n].push(*instance);
+        cell(along.x) * across * across + cell(along.y) * across + cell(along.z)
+    };
+
+    // **Counted before anything is put anywhere.** Spec 0072: these used
+    // to start empty and double as instances landed in them, which at
+    // twelve million instances is eight thousand vectors each growing a
+    // dozen times, and a bucket part way through growing holds itself
+    // twice. Counting first is one more pass over numbers already in cache
+    // and makes every allocation exact and final.
+    let mut counts = vec![0usize; across * across * across];
+
+    for instance in instances {
+        counts[which(instance)] += 1;
+    }
+
+    let mut out: Vec<Vec<Instance>> = counts
+        .iter()
+        .map(|count| Vec::with_capacity(*count))
+        .collect();
+
+    for instance in instances {
+        out[which(instance)].push(*instance);
     }
 
     out.retain(|cell| !cell.is_empty());
@@ -968,15 +986,18 @@ pub(crate) fn fits_the_budget(held: usize, wants: usize, budget: usize) -> bool 
 /// the console says nothing at all. Twelve million draws in a tab and
 /// sixteen million does that.
 ///
-/// Fourteen million, which is between the two and leaves the rest of the
-/// address space to the game, the page and whatever wgpu stages. The
-/// number is a judgement; that there is one is not.
+/// Sixteen million, which is what a tab draws. Spec 0071 set it at
+/// fourteen when twelve was the most that worked and sixteen died; spec
+/// 0072 sized the cells a run is cut into exactly rather than letting them
+/// double, which moved that to sixteen working and twenty panicking, so
+/// this moved with it. The number is a judgement; that there is one is
+/// not.
 ///
 /// **There is no budget on a desktop.** Nothing there has a number worth
 /// inventing: the ceiling is the GPU buffer, which spec 0069 already
 /// refuses out loud.
 #[cfg(target_arch = "wasm32")]
-pub const BUDGET: usize = 14_000_000;
+pub const BUDGET: usize = 16_000_000;
 #[cfg(not(target_arch = "wasm32"))]
 pub const BUDGET: usize = usize::MAX;
 
@@ -1599,6 +1620,30 @@ mod tests {
         assert_eq!(cells(&spread(CELL)).len(), 1);
         assert_eq!(cells(&spread(7)).len(), 1);
         assert_eq!(cells(&[]).len(), 1);
+    }
+
+    /// Spec 0072: a cell is allocated once, at the size it ends up.
+    ///
+    /// The capacity is the test because the capacity is the point. A cell
+    /// that grew holds more room than it uses and held itself twice on the
+    /// way there, and at twelve million instances in eight thousand cells
+    /// that churn is what stopped a browser.
+    #[test]
+    fn a_cell_is_allocated_once_and_exactly() {
+        let cut = cells(&spread(CELL * 3));
+
+        assert!(
+            cut.len() > 1,
+            "this run was not cut up, so nothing is tested"
+        );
+
+        for cell in &cut {
+            assert_eq!(
+                cell.len(),
+                cell.capacity(),
+                "a cell was grown into rather than counted first"
+            );
+        }
     }
 
     /// Spec 0064: cutting a run up loses nothing and copies nothing twice.
