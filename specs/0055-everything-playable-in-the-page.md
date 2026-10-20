@@ -1,7 +1,9 @@
 # 0055 Everything playable in the page
 
-**Status:** not built. The intent, and what it will cost.
+**Status:** draft
 **Date:** 2026-10-16
+**Surveyed:** 2026-10-20, by building a game for a browser and playing it.
+What that found is under **What the survey answered**.
 
 ## Goal
 
@@ -34,46 +36,63 @@ being a phone. None of that is per game.
 so a game named by a shortcode is a game it will try to build, and a build
 nobody offers is one `./check-listings` reports.
 
-## What it will cost
+## What the survey answered
 
-**Fourteen repos, each on crates.io's engine.** A game takes `blitzkit` from
-crates.io rather than from the checkout, which is deliberate and is what makes
-these a real test of what a stranger gets. It also means a game cannot be
-built for a browser until a released engine can be, and the released one is
-whatever was last published rather than what is in the tree.
+One game, starry, was built for a browser and played in a tab. Four of this
+spec's unknowns came back with numbers.
 
-**Size, which is the one number that will decide how far this goes.**
-`blitzkit/web` is 26 megabytes for twelve examples and the arcade, and the
-arcade alone is 7.3 of it. Fourteen games at the arcade's weight is a hundred
-megabytes in a repository that is also a website, and Netlify builds it on
-every push. The examples are about half a megabyte each because they draw
-almost nothing; a game with art in it is the arcade's case rather than theirs.
+**It is three lines of `Cargo.toml` a game, not a port.** The only thing
+that stopped starry compiling was `getrandom`, which a browser needs told
+about, and this project reaches **three major versions of it**: 0.2 wants
+`features = ["js"]`, 0.3 and 0.4 want `["wasm_js"]`, and which of them a
+game pulls in depends on what else it uses. The engine declares its own and
+a game has to declare the rest.
 
-**What a game loads off disk.** The arcade needed a `build.rs` that reads the
-`games` folder at build time and bakes the screenshots in, because a browser
-has no folder to read. Every game that opens a file has the same problem and
-the same shape of answer.
+**`build-web` needs six lines.** Its `where_is` knows `arcade` and assumes
+everything else is an example. A game is `games/<name>` and a `bin`, which
+is the shape it already builds the arcade as.
 
-**Input that has nowhere to go in a page.** Not surveyed. Several of these
-read the mouse with the pointer locked and at least one reads scroll, and a
-canvas in a scrolling document is not the same place as a window.
+**Nothing reads a file at runtime.** All fourteen were checked. Four use
+`include_bytes!` or `include_str!`, which a browser is fine with, and none
+opens a path. The `build.rs` the arcade needed was about the games' own
+screenshots and is not a pattern the games repeat.
 
-## What is not decided
+**And the size is a third of what this spec feared.**
+
+| | raw | gzipped |
+| --- | --- | --- |
+| starry | 2.66 MB | 1.13 MB |
+| the arcade | 7.69 MB | |
+| an example | about 1.8 MB | |
+
+This spec guessed at the arcade's weight and a hundred megabytes. The
+arcade is heavy because it bakes in every game's screenshot; a game is
+nearer an example. Fourteen at starry's weight is about 37 MB added to the
+31 MB `blitzkit/web` already holds.
+
+**It plays.** Arrow keys reached it, a tile slid, and the par went from 21
+to 20. No pointer lock was tested, which is the one input question this
+spec raised that the survey did not answer.
+
+## What is still not decided
 
 - **Where the built files live.** `blitzkit/web` holds them now because the
   site is in this repo and the examples are. A game is its own repo, so its
   build is either copied here or served from there, and the second is a
-  different kind of change.
+  different kind of change. 37 MB says this is a real question rather than a
+  formality.
 - **Who builds them.** `./build-web` runs on this machine, by hand. Fourteen
   more is where that stops being reasonable.
 - **Whether all fourteen are worth it.** The examples page learned this
   lesson on the same day, in spec 0054: a page that shows everything is not a
   showcase. The games page may want the same treatment, and Jake has already
   started it by putting starry at the top.
+- **Pointer lock in a scrolling document**, for the games that use it.
 
 ## Out of scope
 
-**The engine.** Nothing here asks it for anything it does not already do.
+**The engine.** Nothing here asks it for anything it does not already do,
+and the survey confirmed that: starry built against the engine as it is.
 
 **Deciding the order of the games page**, which is its own question and
 happened first.

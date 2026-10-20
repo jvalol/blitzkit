@@ -61,7 +61,7 @@ not a priority, and it never changes once a spec exists.
 | [0052](0052-smoothing-the-edges.md) | The best of eight, four and one samples a pixel that the device will give, so an edge is an edge rather than a staircase |
 | [0053](0053-the-engine-in-a-browser.md) | The engine in a browser, and every example on the site made playable |
 | [0054](0054-the-order-of-the-examples.md) | What the examples page shows and in what order: worth looking at rather than chronological, groups kept whole, and tower gone altogether because cairn is the better example of the same thing |
-| [0055](0055-everything-playable-in-the-page.md) | Every game playable in the page the way the examples are: what already holds, what fourteen repos will cost, and what is not decided |
+| [0055](0055-everything-playable-in-the-page.md) | Every game playable from the site, not built: surveyed by building starry for a browser and playing it, which costs three lines of Cargo.toml a game, six in build-web, and 2.66 MB rather than the arcade's 7.69 |
 | [0056](0056-what-a-frame-costs.md) | What a frame costs and how to measure it, since nothing here has ever been timed: vsync, the delta cap, and a scene with dials on it (draft) |
 | [0057](0057-not-drawing-what-you-cannot-see.md) | Leaving out of each pass what that pass cannot see: a quarter of the draws in the arcade, a loss in a benchmark that fills the frame, and a dial to tell them apart |
 | [0058](0058-a-scene-you-can-keep.md) | Handing the engine a part of the world once instead of every frame: a million cubes goes from 53 milliseconds to 9, and the patches that make it work are the game's to draw |
