@@ -90,6 +90,36 @@ pub fn looks_right(drawn: &Picture, reference: &Path) -> Result<(), String> {
     ))
 }
 
+/// What share of two drawn frames differ by more than a channel's worth.
+///
+/// For a control: a test that breaks something on purpose and wants the
+/// number rather than a pass or a fail. **It touches no file**, which is
+/// the point. The arcade's control for spec 0027 held a darkened room
+/// against the reference on disc, and on a run where that file did not
+/// exist yet it blessed the dark room as the reference instead. A control
+/// that can write what it is checking against is a control that can poison
+/// it.
+pub fn how_far_apart(one: &Picture, two: &Picture) -> f32 {
+    if one.width != two.width || one.height != two.height || one.pixels.is_empty() {
+        return 1.0;
+    }
+
+    let mut count = 0;
+
+    for at in (0..one.pixels.len()).step_by(4) {
+        let off = (0..3)
+            .map(|n| (one.pixels[at + n] as i32 - two.pixels[at + n] as i32).abs())
+            .max()
+            .unwrap_or(0);
+
+        if off > CHANNEL {
+            count += 1;
+        }
+    }
+
+    count as f32 / (one.width * one.height) as f32
+}
+
 /// How many pixels differ by more than a channel's worth, and a picture of
 /// where: the difference in red over a dimmed copy of what was drawn, so
 /// that what changed can be seen against what did not.
