@@ -499,7 +499,7 @@ impl Load {
                  S for the contact march, escape to quit.",
             ),
             format!(
-                "{} cubes {}, {}, {}, {} lamps, {} casting, culling {}, {}{}{}, {}",
+                "{} cubes {}, {}, {}, {} lamps, {} casting, culling {}{}{}{}, {}",
                 self.dials.cubes,
                 self.dials.spread.says(),
                 if self.dials.kept { "kept" } else { "pushed" },
