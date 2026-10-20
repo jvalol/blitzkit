@@ -1,9 +1,9 @@
 # 0055 Everything playable in the page
 
-**Status:** draft
+**Status:** implemented
 **Date:** 2026-10-16
-**Surveyed:** 2026-10-20, by building a game for a browser and playing it.
-What that found is under **What the survey answered**.
+**Built:** 2026-10-20, for four games rather than fourteen. What that cost
+is under **What it came to**.
 
 ## Goal
 
@@ -74,20 +74,69 @@ nearer an example. Fourteen at starry's weight is about 37 MB added to the
 to 20. No pointer lock was tested, which is the one input question this
 spec raised that the survey did not answer.
 
+## What it came to
+
+Four games: starry, snake, slider and poolhall, chosen by Jake. Each is a
+`play` shortcode on the games page, which is the same button the examples
+have had since spec 0053, with the game's own screenshot standing in for a
+clip the way the arcade's does.
+
+| | raw | gzipped |
+| --- | --- | --- |
+| starry | 2.66 MB | 1.13 MB |
+| snake | 2.21 MB | 0.72 MB |
+| slider | 1.81 MB | 0.53 MB |
+| poolhall | 1.85 MB | 0.55 MB |
+
+8.5 MB in all, which took `blitzkit/web` from 31 MB to 39.
+
+**Two of the four needed nothing at all.** slider and poolhall built for a
+browser untouched, which is spec 0053's finding holding: a game that uses
+the engine and reads no files needs a target added and nothing else.
+starry and snake each needed the `getrandom` block, because each reaches a
+version of it that a browser has to be told about.
+
+**`build-web` learned what a game is**, in the six lines the survey said:
+a name with a `games/<name>/Cargo.toml` is a `bin` in that repo, which is
+the shape it already builds the arcade as. Read off the disc rather than
+listed, for the reason `./list-repos` exists.
+
+**And the gate closed behind it.** `./check-listings` already scans the
+site for `play name="..."` and fails when the build is not there, so a game
+offered and not built is caught, and so is a build nobody offers.
+
+## What was decided, and what that left
+
+**Four rather than fourteen**, which answers the question this spec could
+not: at four, the 37 MB that made where-they-live and who-builds-them real
+questions is 8.5 MB, and they live where the examples live and are built by
+the same command. Spec 0054's lesson applies to the games page as it did to
+the examples: a page that shows everything is not a showcase.
+
+The rest of the fourteen are three lines of `Cargo.toml` and a shortcode
+each, whenever one is worth offering. Nothing about this stops at four; it
+is just that nobody has to carry ten more megabytes to find that out.
+
 ## What is still not decided
 
-- **Where the built files live.** `blitzkit/web` holds them now because the
-  site is in this repo and the examples are. A game is its own repo, so its
-  build is either copied here or served from there, and the second is a
-  different kind of change. 37 MB says this is a real question rather than a
-  formality.
-- **Who builds them.** `./build-web` runs on this machine, by hand. Fourteen
-  more is where that stops being reasonable.
-- **Whether all fourteen are worth it.** The examples page learned this
-  lesson on the same day, in spec 0054: a page that shows everything is not a
-  showcase. The games page may want the same treatment, and Jake has already
-  started it by putting starry at the top.
-- **Pointer lock in a scrolling document**, for the games that use it.
+- **Pointer lock in a scrolling document**, for the games that use it. None
+  of these four do, which is part of why they are these four.
+- **Where they would live at fourteen**, and who would build them, which
+  are the questions four games does not have to answer.
+
+## Acceptance criteria
+
+- The site offers a game and the build is there, or the gate
+  says so. — `./check-listings`, which scans every page for
+  `play name="..."`.
+- A build nobody offers is reported too, by the same check.
+
+### Verified by hand
+
+- All four played in a browser: starry's tiles slid and its par went from
+  21 to 20, snake ran itself into a wall and offered to start again, slider
+  drew its tunnel, poolhall racked its break.
+- The console on each, which said nothing.
 
 ## Out of scope
 

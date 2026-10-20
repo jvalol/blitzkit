@@ -16,7 +16,8 @@ One has three lifts to take a tile out and set it down anywhere. If that's not e
 
 [github.com/jvalol/starry](https://github.com/jvalol/starry)
 
-![Starry: the painting cut into sixteen thick tiles in a tray, one square empty, the cypress and the village broken across the wrong squares](https://raw.githubusercontent.com/jvalol/starry/main/media/screenshot.png)
+{{< play name="starry" poster="https://raw.githubusercontent.com/jvalol/starry/main/media/screenshot.png"
+    alt="Starry: the painting cut into sixteen thick tiles in a tray, one square empty, the cypress and the village broken across the wrong squares" >}}
 
 ## arcade
 
@@ -50,7 +51,8 @@ In which I develop a snake game using blitzkit.
 
 [github.com/jvalol/snake](https://github.com/jvalol/snake)
 
-![Snake: a nine segment snake winding through two turns in the middle of the board, with a pellet away to the lower left](https://raw.githubusercontent.com/jvalol/snake/main/media/screenshot.png)
+{{< play name="snake" poster="https://raw.githubusercontent.com/jvalol/snake/main/media/screenshot.png"
+    alt="Snake: a nine segment snake winding through two turns in the middle of the board, with a pellet away to the lower left" >}}
 
 ## tessera
 
@@ -77,7 +79,8 @@ slows you down, and so does missing a ring.
 
 [github.com/jvalol/slider](https://github.com/jvalol/slider)
 
-![Looking down a checkered tunnel bending hard to the right, with a gold ring hanging in the middle distance](https://raw.githubusercontent.com/jvalol/slider/main/media/screenshot.png)
+{{< play name="slider" poster="https://raw.githubusercontent.com/jvalol/slider/main/media/screenshot.png"
+    alt="Looking down a checkered tunnel bending hard to the right, with a gold ring hanging in the middle distance" >}}
 
 ## lantern
 
@@ -109,7 +112,8 @@ In which one breaks a rack of fifteen. Like pool.
 
 [github.com/jvalol/poolhall](https://github.com/jvalol/poolhall)
 
-![A pool table seen from above the head rail, fifteen coloured balls scattered across the far half after a break, the white cue ball among them, and six dark pockets around the cushions](https://raw.githubusercontent.com/jvalol/poolhall/main/media/screenshot.png)
+{{< play name="poolhall" poster="https://raw.githubusercontent.com/jvalol/poolhall/main/media/screenshot.png"
+    alt="A pool table seen from above the head rail, fifteen coloured balls scattered across the far half after a break, the white cue ball among them, and six dark pockets around the cushions" >}}
 
 ## cairn
 
