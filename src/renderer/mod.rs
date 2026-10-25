@@ -181,6 +181,11 @@ pub struct Renderer {
     /// 0049.
     body: Option<crate::reach::Body>,
     textures: Vec<wgpu::BindGroup>,
+    /// The texture behind each of those, kept so it can be written again.
+    /// Spec 0074: the bind group alone cannot be reached through, so a
+    /// picture that changed had to become a second texture that nothing
+    /// ever freed.
+    images: Vec<wgpu::Texture>,
     shadow_pipeline: wgpu::RenderPipeline,
     /// A second one for a lamp's six faces: it has a fragment stage, because
     /// what goes in those maps is distance rather than depth. See spec 0022.
@@ -966,6 +971,7 @@ impl Renderer {
             fights: coplanar::Fights::default(),
             body: None,
             textures: Vec::new(),
+            images: Vec::new(),
             shadow_pipeline,
             point_shadow_pipeline,
             which_bind_groups,
@@ -1046,7 +1052,74 @@ impl Renderer {
         });
 
         self.textures.push(bind_group);
+        self.images.push(texture);
         TextureId(self.textures.len() - 1)
+    }
+
+    /// Writes new pixels into a texture already uploaded, mip chain and
+    /// all. Spec 0074.
+    ///
+    /// Nothing else changes: the same id, the same bind group, the same
+    /// place in `textures`, so everything already drawing with it draws the
+    /// new picture on the next frame.
+    ///
+    /// **The size has to match.** A game wanting a different size wants a
+    /// different texture, and quietly making one here would hand back an id
+    /// for something that is no longer what it says it is.
+    /// Says whether it wrote, because a refusal is otherwise invisible: a
+    /// texture's size does not change either way, and wgpu reports a
+    /// mismatched write through its own error channel rather than here.
+    /// The first test of this asserted the size was unchanged, which is
+    /// true whether the guard runs or not.
+    pub fn write_texture(&mut self, id: TextureId, data: &TextureData) -> bool {
+        let Some(texture) = self.images.get(id.0) else {
+            log::warn!("no texture {} to write", id.0);
+            return false;
+        };
+
+        if texture.width() != data.width()
+            || texture.height() != data.height()
+            || texture.mip_level_count() != data.mip_level_count()
+        {
+            log::warn!(
+                "texture {} is {}x{} with {} mips and the write is {}x{} with {}",
+                id.0,
+                texture.width(),
+                texture.height(),
+                texture.mip_level_count(),
+                data.width(),
+                data.height(),
+                data.mip_level_count()
+            );
+
+            return false;
+        }
+
+        self.holed[id.0] = data.has_holes();
+
+        for (level, mip) in data.levels.iter().enumerate() {
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture,
+                    mip_level: level as u32,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &mip.pixels,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(mip.width * 4),
+                    rows_per_image: Some(mip.height),
+                },
+                wgpu::Extent3d {
+                    width: mip.width,
+                    height: mip.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+
+        true
     }
 
     /// Uploads a mesh once, and hands back the handle a game draws it with.
@@ -4845,6 +4918,96 @@ mod asked {
             wgpu::CurrentSurfaceTexture::Timeout,
             wgpu::CurrentSurfaceTexture::Occluded,
         ]
+    }
+
+    /// Writing a texture again is refused when the size does not match, and
+    /// adds nothing when it does.
+    ///
+    /// **What is not tested here, and why.** That the new pixels reach the
+    /// screen was tried as a drawn frame read back, and what it measured
+    /// was the render pipeline rather than the write: a lit cube came out
+    /// saturated white whatever texture was on it, so both shots matched
+    /// and the test failed for a reason that had nothing to do with this.
+    /// There is no way to read a texture back, so the honest proof is the
+    /// arcade's panel, where a write that did not land is a picture that
+    /// does not change as you move. That is in the spec by hand.
+    /// And writing it adds no texture, which is the leak it is here to stop.
+    #[test]
+    fn writing_a_texture_again_adds_no_texture() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(16, 16)) else {
+            return;
+        };
+
+        let flat =
+            |shade: u8| crate::texture::TextureData::from_pixels(4, 4, vec![shade; 4 * 4 * 4]);
+        let id = renderer.add_texture(&flat(30));
+        let before = renderer.images.len();
+
+        for _ in 0..50 {
+            renderer.write_texture(id, &flat(200));
+        }
+
+        assert_eq!(
+            renderer.images.len(),
+            before,
+            "fifty writes added {} textures",
+            renderer.images.len() - before
+        );
+    }
+
+    /// And it is still the same id, so everything already drawing with it
+    /// draws the new picture.
+    #[test]
+    fn writing_a_texture_again_keeps_its_id() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(16, 16)) else {
+            return;
+        };
+
+        let flat =
+            |shade: u8| crate::texture::TextureData::from_pixels(4, 4, vec![shade; 4 * 4 * 4]);
+
+        let id = renderer.add_texture(&flat(30));
+        let next = renderer.add_texture(&flat(60));
+
+        renderer.write_texture(id, &flat(200));
+
+        assert_eq!(
+            renderer.add_texture(&flat(90)).0,
+            next.0 + 1,
+            "a write moved the ids along"
+        );
+    }
+
+    /// A write of the wrong size is refused rather than half done.
+    ///
+    /// A game wanting a different size wants a different texture. Making
+    /// one here would hand back an id for something that is no longer what
+    /// it says it is.
+    #[test]
+    fn a_write_of_the_wrong_size_is_refused() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(16, 16)) else {
+            return;
+        };
+
+        let id = renderer.add_texture(&crate::texture::TextureData::from_pixels(
+            4,
+            4,
+            vec![30; 4 * 4 * 4],
+        ));
+        assert!(
+            !renderer.write_texture(
+                id,
+                &crate::texture::TextureData::from_pixels(8, 8, vec![200; 8 * 8 * 4]),
+            ),
+            "a write of the wrong size said it had written"
+        );
+        assert!(
+            renderer.write_texture(
+                id,
+                &crate::texture::TextureData::from_pixels(4, 4, vec![200; 4 * 4 * 4]),
+            ),
+            "a write of the right size said it had not"
+        );
     }
 
     /// A frame that draws nothing still hands its staging back.
