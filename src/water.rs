@@ -65,6 +65,33 @@ pub const SPLASH: f32 = 2.0;
 /// a sheet of cloth is what a surface with no detail under a hand's width is.
 pub const CHOP: f32 = 0.45;
 
+/// The ripples the chop is made of: which way each one travels, how many
+/// radians of it fit in a metre, how fast it runs, and how steep it is.
+///
+/// **Travelling waves and not a product of sines.** The first build of this
+/// was `sin(ax + t)·cos(bz - t)` with a second term of the same shape, and a
+/// product like that has every crest on a rectangular lattice however many
+/// terms go into it. Jake read it off the koi pond at once: the same dimple
+/// over and over in rows, which is a tablecloth rather than water.
+///
+/// So each one is a wave going its own way. The directions are a golden angle
+/// apart and none lies along an axis, the wavenumbers are in no simple ratio,
+/// and each runs at its own speed, so no two crests keep station and the
+/// pattern never comes back round. Four of them: one is corduroy, two is a
+/// weave, and past four you are paying for detail smaller than a pixel at the
+/// distance anybody stands.
+///
+/// Steepness falls off as the waves get finer, which is what a real sea does
+/// and is also what keeps the normal from folding over.
+const CHOPS: [(f32, f32, f32, f32); 6] = [
+    (0.36, 7.3, 2.1, 0.55),
+    (0.73, 11.1, 2.6, 0.40),
+    (1.10, 16.9, 3.2, 0.29),
+    (1.93, 25.7, 3.9, 0.21),
+    (2.30, 39.1, 4.7, 0.15),
+    (2.67, 59.4, 5.6, 0.11),
+];
+
 /// How many substeps one `step` will take.
 ///
 /// A frame that arrives late makes the water slower to compute, up to here.
@@ -488,16 +515,21 @@ impl Water {
                     / (self.span(j, self.along) * self.step);
 
                 // the slope the grid knows about, roughened by the ripples it
-                // does not. Two scales, each drifting its own way, so the
-                // detail neither tiles nor marches.
+                // does not: four waves, each going its own way at its own
+                // speed, so the detail neither tiles nor marches.
                 let slope = vec3(-along_x, 1.0, -along_z).normalize();
-                let fine = vec3(
-                    (x * 9.1 + self.since * 2.3).sin() * (z * 7.7 - self.since * 1.7).cos()
-                        + (x * 21.3 - self.since * 3.1).sin() * 0.5,
-                    0.0,
-                    (z * 8.3 + self.since * 2.9).sin() * (x * 6.9 + self.since * 1.3).cos()
-                        + (z * 19.7 + self.since * 2.7).sin() * 0.5,
-                );
+                let mut fine = Vec3::ZERO;
+
+                for (angle, wavenumber, speed, steep) in CHOPS {
+                    let (sin, cos) = angle.sin_cos();
+                    let phase = (x * cos + z * sin) * wavenumber + self.since * speed;
+                    // the slope of that wave is its own gradient, which points
+                    // along the way it travels
+                    let lean = steep * phase.cos();
+
+                    fine += vec3(-cos * lean, 0.0, -sin * lean);
+                }
+
                 let normal = (slope + fine * self.chop).normalize();
 
                 vertices.push(Vertex::new(
@@ -1247,6 +1279,72 @@ mod tests {
             "it stayed at the brim, at {}",
             stirring(&water)
         );
+    }
+
+    /// Spec 0043: no two of the chop's ripples line up, and none runs along an
+    /// axis.
+    ///
+    /// This is a rule about the table rather than about the field, because the
+    /// table is what was wrong. The first build was `sin(ax + t)·cos(bz - t)`
+    /// plus a second term of the same shape: every wave vector along `x` or
+    /// `z`, so every crest on one rectangular lattice, so the koi pond came
+    /// out as the same dimple over and over in rows. Jake read it off a
+    /// screenshot in a second.
+    ///
+    /// A fifth of a right angle off the axes, and a tenth of a half turn apart
+    /// from each other. Both numbers are a margin rather than a measurement:
+    /// what matters is that nobody can add an axis-aligned ripple, or a second
+    /// copy of one that is already there, without this saying so.
+    #[test]
+    fn no_two_ripples_of_the_chop_line_up() {
+        use std::f32::consts::{FRAC_PI_2, PI};
+
+        for (angle, wavenumber, speed, steep) in CHOPS {
+            let off = (angle / FRAC_PI_2 - (angle / FRAC_PI_2).round()).abs() * FRAC_PI_2;
+
+            assert!(
+                off > FRAC_PI_2 * 0.2,
+                "a ripple at {:.2} runs {:.2} off the nearest axis, which is \
+                 along it as far as your eye is concerned",
+                angle,
+                off
+            );
+            assert!(
+                wavenumber > 0.0 && speed > 0.0 && steep > 0.0,
+                "a ripple at {:.2} is standing still or flat",
+                angle
+            );
+        }
+
+        for (n, (one, _, _, _)) in CHOPS.iter().enumerate() {
+            for (two, _, _, _) in CHOPS.iter().skip(n + 1) {
+                // as directions rather than as angles: a wave going one way is
+                // the same pattern as one going the other
+                let apart = (one - two).abs() % PI;
+                let apart = apart.min(PI - apart);
+
+                assert!(
+                    apart > PI * 0.1,
+                    "ripples at {:.2} and {:.2} are {:.2} apart, which is the \
+                     same ripple twice",
+                    one,
+                    two,
+                    apart
+                );
+            }
+        }
+
+        // and no two of them the same size, or the pair beats
+        for (n, (_, one, _, _)) in CHOPS.iter().enumerate() {
+            for (_, two, _, _) in CHOPS.iter().skip(n + 1) {
+                assert!(
+                    (one - two).abs() > 1.0,
+                    "two ripples are {:.1} and {:.1} across, which is one ripple",
+                    one,
+                    two
+                );
+            }
+        }
     }
 
     /// Spec 0043: the chop roughens how the surface shades without moving it.
