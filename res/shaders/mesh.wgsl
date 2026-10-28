@@ -657,6 +657,56 @@ fn point_light(
 // prepass cannot do because it has no texture bound and would fill the holes
 // in. Everything the fragment survives here, it survives in `fs_main` too,
 // because both ask the same question of the same texel.
+// Spec 0075: how far a view ray may be said to travel through a see-through
+// thing. Past this the medium has closed up anyway and the number is only a
+// way of asking the depth buffer a question it cannot answer.
+const FURTHEST_THROUGH: f32 = 100.0;
+
+// Spec 0075: how much of the light falling into a room the room gives back,
+// which is what a surface turned away from you reflects while nothing in this
+// engine knows what is above it.
+const ROOM: f32 = 0.3;
+
+// Spec 0075: how much of a surface reflects rather than lets through, by the
+// angle you meet it at.
+//
+// Schlick, with the dielectric 0.04. Water's own is 0.02 and glass's is 0.04,
+// and one number for both of them is nearer either than no number at all.
+fn fresnel(cos_theta: f32) -> f32 {
+    let f0 = 0.04;
+
+    return f0 + (1.0 - f0) * pow(1.0 - clamp(cos_theta, 0.0, 1.0), 5.0);
+}
+
+// Spec 0075: how far the ray travels through this thing before it meets what
+// is behind it, in world units, or nought when there is nothing behind it to
+// measure to.
+//
+// The depth here holds the solid things, which were drawn and written before
+// this pass ran. Where it holds nothing, this knows nothing: the medium ends
+// at its own back face, which is not in any buffer, because a see-through
+// thing writes no depth. A pane of glass with the sky behind it is that case
+// and so is a pool with the sky past its rim, and both get the alpha the game
+// wrote rather than a frustum's worth of absorption.
+//
+// Sample zero of the multisampled buffer, the same one the march reads. Which
+// sample it is matters to an edge and not to a surface spread over thousands
+// of pixels.
+fn depth_through(at: vec4<f32>) -> f32 {
+    let recorded = textureLoad(scene_depth, vec2<i32>(at.xy), 0);
+    if recorded >= 1.0 {
+        return 0.0;
+    }
+
+    let near = uniforms.contact.y;
+    let far = uniforms.contact.z;
+
+    let behind = linear_depth(recorded, near, far);
+    let here = linear_depth(at.z, near, far);
+
+    return clamp(behind - here, 0.0, FURTHEST_THROUGH);
+}
+
 @fragment
 fn fs_cutout(in: VertexOutput) {
     if textureSample(surface_texture, surface_sampler, in.uv).a < CUTOUT {
@@ -664,8 +714,18 @@ fn fs_cutout(in: VertexOutput) {
     }
 }
 
-@fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+// Spec 0075: what the lighting came to, kept apart so that water can be shaded
+// out of the same arithmetic rather than a copy of it.
+struct Lit {
+    shaded: vec3<f32>,
+    highlight: vec3<f32>,
+    base: vec4<f32>,
+    normal: vec3<f32>,
+    to_viewer: vec3<f32>,
+    light: vec3<f32>,
+}
+
+fn lit_surface(in: VertexOutput) -> Lit {
     let normal = normalize(in.normal);
     let to_light = normalize(-uniforms.light_direction.xyz);
     let to_viewer = normalize(uniforms.camera_position.xyz - in.world_position);
@@ -761,5 +821,62 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         );
     }
 
-    return vec4<f32>(shaded, base.a);
+    return Lit(shaded, specular * lit, base, normal, to_viewer, light);
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    let surface = lit_surface(in);
+
+    return vec4<f32>(surface.shaded, surface.base.a);
+}
+
+// Spec 0075: water, which answers the angle you look at it and how much of it
+// the ray goes through.
+//
+// Its own entry point rather than a branch in `fs_main` on the alpha, because
+// alpha in this engine is not only a medium with a thickness. The arcade draws
+// its grass see-through, and a blade of grass is edge on from nearly
+// everywhere: shaded this way the whole field went grey. What is water is
+// something a game says when it hands the mesh over, per `add_water_mesh`.
+@fragment
+fn fs_water(in: VertexOutput) -> @location(0) vec4<f32> {
+    let surface = lit_surface(in);
+
+    // Both faces, so the far side of a skirt reads the same as the near side.
+    // A normal pointing away is a surface seen from behind rather than a
+    // surface edge on.
+    let glance = fresnel(abs(dot(surface.normal, surface.to_viewer)));
+
+    // Beer's law. The alpha a game writes is what one world unit of the stuff
+    // stops rather than what the whole of it stops, so one number does the
+    // shallow end and the deep end and the far wall closes up by itself. With
+    // nothing behind it to measure to, the number a game wrote is all there is
+    // and it stands.
+    let path = depth_through(in.clip_position);
+    var through = surface.base.a;
+    if path > 0.0 {
+        through = 1.0 - pow(1.0 - surface.base.a, path);
+    }
+
+    // What it gives back is the fill, a share of the sun, and the sun's own
+    // highlight, and all of it is a stand-in until something draws what is
+    // actually above the water.
+    //
+    // The fill alone was tried first and is too dark: water turned away from
+    // you reflects the room, and a room is brighter than the fill that lights
+    // its shadows. The whole of the sun is too bright, and made a pool read as
+    // milk. ROOM is the share between them, which is what a room of ordinary
+    // surfaces gives back of the light falling into it, since the things in a
+    // room are not mirrors.
+    //
+    // The highlight is on this side of the mix because a highlight is the light
+    // source reflected, and everything reflected belongs with everything else
+    // reflected.
+    let given_back = uniforms.ambient.rgb + surface.light * ROOM + surface.highlight;
+
+    return vec4<f32>(
+        mix(surface.shaded, given_back, glance),
+        mix(through, 1.0, glance),
+    );
 }

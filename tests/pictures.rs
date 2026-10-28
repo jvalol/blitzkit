@@ -45,6 +45,8 @@ struct Meshes {
     cube: MeshId,
     sphere: MeshId,
     floor: MeshId,
+    /// The same plane again, handed over as water. Spec 0075.
+    pool: MeshId,
 }
 
 fn shots() -> Vec<Shot> {
@@ -198,6 +200,31 @@ fn shots() -> Vec<Shot> {
                 camera.target = vec3(0.0, 0.0, 0.0);
             },
         },
+        // spec 0075: a pool over a pale floor, from low enough that the far
+        // end of it is nearly edge on and the near end is not
+        Shot {
+            name: "a-pool-answers-the-angle",
+            scene: |scene, meshes| {
+                scene.push_colored(
+                    meshes.floor,
+                    &Transform::at(Vec3::ZERO).with_scale(vec3(40.0, 1.0, 40.0)),
+                    vec4(0.72, 0.68, 0.6, 1.0),
+                );
+                // a tight highlight, the way water is pushed in the ripple
+                // example: a broad one is a sheet of light over the whole
+                // surface and hides the thing this picture is of
+                scene.push_material(
+                    meshes.pool,
+                    &Transform::at(vec3(0.0, 1.4, 0.0)).with_scale(vec3(20.0, 1.0, 20.0)),
+                    vec4(0.16, 0.45, 0.6, 0.12),
+                    220.0,
+                );
+            },
+            camera: |camera| {
+                camera.position = vec3(0.0, 4.0, 14.0);
+                camera.target = vec3(0.0, 1.4, 0.0);
+            },
+        },
         // the see-through pass and its ordering, per spec 0018
         Shot {
             name: "glass-over-a-wall",
@@ -228,6 +255,7 @@ fn drawn(shot: &Shot) -> Option<Picture> {
         cube: renderer.add_mesh(&MeshData::cube()),
         sphere: renderer.add_mesh(&MeshData::sphere(32, 24)),
         floor: renderer.add_mesh(&MeshData::plane()),
+        pool: renderer.add_water_mesh(&MeshData::plane()),
     };
     let mut scene = Scene::new();
     let geometry = Geometry::new();
@@ -299,6 +327,64 @@ fn looks_right(name: &str) {
     }
 }
 
+/// The mean brightness of a band of a picture, which is what spec 0075's two
+/// measurements are made of.
+///
+/// A band and not a whole frame, because both of its claims are about one
+/// part of a picture reading differently from another part of the same one.
+fn brightness(picture: &Picture, left: u32, top: u32, right: u32, bottom: u32) -> f32 {
+    let mut total = 0.0;
+    let mut counted: f32 = 0.0;
+
+    for y in top..bottom {
+        for x in left..right {
+            let at = ((y * picture.width + x) * 4) as usize;
+
+            total += (picture.pixels[at] as f32
+                + picture.pixels[at + 1] as f32
+                + picture.pixels[at + 2] as f32)
+                / 3.0;
+            counted += 1.0;
+        }
+    }
+
+    total / counted.max(1.0)
+}
+
+/// Spec 0075: the pool shot with its floor in a colour of your choosing, for
+/// asking how much of that floor arrives through the water.
+fn drawn_with_a_floor(floor: glam::Vec4) -> Option<Picture> {
+    thread_local! {
+        static FLOOR: std::cell::Cell<[f32; 4]> = const { std::cell::Cell::new([0.0; 4]) };
+    }
+
+    FLOOR.with(|held| held.set(floor.to_array()));
+
+    let shots = shots();
+    let shot = shots
+        .iter()
+        .find(|shot| shot.name == "a-pool-answers-the-angle")
+        .expect("the pool shot");
+
+    drawn(&Shot {
+        name: shot.name,
+        scene: |scene, meshes| {
+            scene.push_colored(
+                meshes.floor,
+                &Transform::at(Vec3::ZERO).with_scale(vec3(40.0, 1.0, 40.0)),
+                glam::Vec4::from(FLOOR.with(|held| held.get())),
+            );
+            scene.push_material(
+                meshes.pool,
+                &Transform::at(vec3(0.0, 1.4, 0.0)).with_scale(vec3(20.0, 1.0, 20.0)),
+                vec4(0.16, 0.45, 0.6, 0.12),
+                220.0,
+            );
+        },
+        camera: shot.camera,
+    })
+}
+
 /// Draws a scene of its own with the camera of a named shot, and says what
 /// share of the pixels differ from that shot's reference. `None` when there is
 /// no adapter.
@@ -366,6 +452,114 @@ mod pictures {
         #[test]
         fn glass_is_drawn_over_what_is_behind_it() {
             looks_right("glass-over-a-wall");
+        }
+
+        /// Spec 0075: the committed picture of a pool, which is the whole of
+        /// it rather than one measurement.
+        #[test]
+        fn a_pool_answers_the_angle() {
+            looks_right("a-pool-answers-the-angle");
+        }
+
+        /// Spec 0075: the far end of a pool shows less of its floor than the
+        /// near end does.
+        ///
+        /// Measured by changing the floor and watching which end of the water
+        /// follows it, rather than by brightness. Brightness would be a claim
+        /// about this scene: a glancing surface gives back the room, and
+        /// whether that is lighter or darker than the floor under it depends
+        /// on the room. How much of the floor arrives is the claim the spec
+        /// actually makes.
+        ///
+        /// Both halves of the spec push this way, the angle and the path, and
+        /// this does not tell them apart. The one below holds the angle still
+        /// and moves only the path, which is the half that can be isolated.
+        #[test]
+        fn the_far_end_of_a_pool_shows_less_of_its_floor() {
+            let Some(pale) = drawn_with_a_floor(vec4(0.72, 0.68, 0.6, 1.0)) else {
+                return;
+            };
+            let Some(dark) = drawn_with_a_floor(vec4(0.06, 0.06, 0.07, 1.0)) else {
+                return;
+            };
+
+            // where this camera puts the two ends of the water: the far edge
+            // is at row 105 and the near one at 200.
+            let far =
+                (brightness(&pale, 80, 110, 240, 132) - brightness(&dark, 80, 110, 240, 132)).abs();
+            let near =
+                (brightness(&pale, 80, 174, 240, 196) - brightness(&dark, 80, 174, 240, 196)).abs();
+
+            assert!(
+                near > far * 1.5,
+                "changing the floor moved the near water by {:.1} and the far water by {:.1}, so \
+                 the far end is showing as much of its floor as the near end",
+                near,
+                far
+            );
+        }
+
+        /// Spec 0075: and the same water over a floor further down hides it.
+        ///
+        /// One camera and one surface, with nothing moved but the floor, so
+        /// the only thing that differs between the two is how far the ray
+        /// travels through the water.
+        #[test]
+        fn deep_water_hides_a_floor_that_shallow_water_shows() {
+            let shots = shots();
+            let shot = shots
+                .iter()
+                .find(|shot| shot.name == "a-pool-answers-the-angle")
+                .expect("the pool shot");
+
+            let deeper = |scene: &mut Scene, meshes: &Meshes| {
+                scene.push_colored(
+                    meshes.floor,
+                    &Transform::at(vec3(0.0, -4.0, 0.0)).with_scale(vec3(40.0, 1.0, 40.0)),
+                    vec4(0.72, 0.68, 0.6, 1.0),
+                );
+                scene.push_material(
+                    meshes.pool,
+                    &Transform::at(vec3(0.0, 1.4, 0.0)).with_scale(vec3(20.0, 1.0, 20.0)),
+                    vec4(0.16, 0.45, 0.6, 0.12),
+                    220.0,
+                );
+            };
+
+            let Some(shallow) = drawn(shot) else {
+                return;
+            };
+            let Some(deep) = drawn(&Shot {
+                name: shot.name,
+                scene: deeper,
+                camera: shot.camera,
+            }) else {
+                return;
+            };
+
+            let over_the_floor = (80, 150, 240, 196);
+            let shallow = brightness(
+                &shallow,
+                over_the_floor.0,
+                over_the_floor.1,
+                over_the_floor.2,
+                over_the_floor.3,
+            );
+            let deep = brightness(
+                &deep,
+                over_the_floor.0,
+                over_the_floor.1,
+                over_the_floor.2,
+                over_the_floor.3,
+            );
+
+            assert!(
+                shallow > deep * 1.1,
+                "water half a metre deep reads {:.1} and water five metres deep {:.1}, so the \
+                 depth is doing nothing",
+                shallow,
+                deep
+            );
         }
 
         /// Spec 0062: the comparison can fail.
@@ -592,6 +786,7 @@ mod clock {
                 cube: renderer.add_mesh(&MeshData::cube()),
                 sphere: renderer.add_mesh(&MeshData::sphere(32, 24)),
                 floor: renderer.add_mesh(&MeshData::plane()),
+                pool: renderer.add_water_mesh(&MeshData::plane()),
             };
             let mut scene = Scene::new();
             let geometry = Geometry::new();
@@ -642,6 +837,7 @@ mod clock {
                 cube: renderer.add_mesh(&MeshData::cube()),
                 sphere: renderer.add_mesh(&MeshData::sphere(32, 24)),
                 floor: renderer.add_mesh(&MeshData::plane()),
+                pool: renderer.add_water_mesh(&MeshData::plane()),
             };
             let mut scene = Scene::new();
             let geometry = Geometry::new();

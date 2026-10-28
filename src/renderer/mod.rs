@@ -194,6 +194,8 @@ pub struct Renderer {
     which_bind_groups: Vec<wgpu::BindGroup>,
     /// The far side of translucent geometry, then the near side.
     translucent_pipelines: [wgpu::RenderPipeline; 2],
+    /// Spec 0075: the same pair, shaded as water.
+    water_pipelines: [wgpu::RenderPipeline; 2],
     shadow_view: wgpu::TextureView,
     /// One view per layer of the spot shadow stack, to render into. See spec
     /// 0021.
@@ -216,6 +218,8 @@ pub struct Renderer {
 
 /// A mesh living on the GPU. Built once, drawn many times.
 struct GpuMesh {
+    /// Spec 0075: drawn by the water pipelines rather than the ordinary ones.
+    water: bool,
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     index_count: u32,
@@ -886,6 +890,7 @@ impl Renderer {
             depth::mesh_primitive_state(),
             depth::read_only_state(),
             samples,
+            "fs_main",
         );
         let cutout_prepass_pipeline = create_cutout_prepass_pipeline(
             &device,
@@ -909,6 +914,28 @@ impl Renderer {
                 depth::translucent_primitive_state(cull),
                 depth::translucent_state(),
                 samples,
+                "fs_main",
+            )
+        });
+
+        // and twice more again for water, per spec 0075, which is the same
+        // pass in every way but its fragment stage. A mesh handed over by
+        // `add_water_mesh` is drawn by these and everything else by the pair
+        // above.
+        let water_pipelines = [wgpu::Face::Front, wgpu::Face::Back].map(|cull| {
+            create_mesh_pipeline(
+                &device,
+                drawn,
+                MeshLayouts {
+                    camera: &camera_bind_group_layout,
+                    texture: &texture_bind_group_layout,
+                    shadow: &shadow_bind_group_layout,
+                    scene_depth: &scene_depth_layout,
+                },
+                depth::translucent_primitive_state(cull),
+                depth::translucent_state(),
+                samples,
+                "fs_water",
             )
         });
         let instance_buffer = create_buffer(&device, 0, wgpu::BufferUsages::VERTEX);
@@ -966,6 +993,7 @@ impl Renderer {
             occluding: false,
             culling: true,
             translucent_pipelines,
+            water_pipelines,
             meshes: Vec::new(),
             asked_fights: false,
             fights: coplanar::Fights::default(),
@@ -1146,9 +1174,33 @@ impl Renderer {
             index_count: data.indices.len() as u32,
             bounds: data.bounds(),
             boxy: data.is_box(),
+            water: false,
         });
 
         MeshId(self.meshes.len() - 1)
+    }
+
+    /// The same, for a body of water. Spec 0075.
+    ///
+    /// What it buys is a surface that goes bright where it turns away from
+    /// you and clear where you stand over it, instead of one flat alpha at
+    /// every angle and every depth. Its alpha then means what one world unit
+    /// of the stuff stops rather than what the whole of it stops, so a game
+    /// moving a surface here wants a smaller number than it had.
+    ///
+    /// Said at the upload and not at the push, because it is a fact about the
+    /// mesh rather than about one copy of it, and because the alternative was
+    /// a flag on every instance in the scene, which every cube in a scene of
+    /// sixty four thousand would have carried for a thing only water uses.
+    ///
+    /// Not inferred from the alpha. The arcade draws its grass see-through,
+    /// and a blade of grass is edge on from nearly everywhere: shaded as
+    /// water the whole field went grey.
+    pub fn add_water_mesh(&mut self, data: &MeshData) -> MeshId {
+        let id = self.add_mesh(data);
+        self.meshes[id.0].water = true;
+
+        id
     }
 
     /// Moves the vertices of a mesh already uploaded, per spec 0042.
@@ -2217,17 +2269,33 @@ impl Renderer {
                 // solid first, so it is in the depth buffer before anything is
                 // blended over it. Then the far side of everything see-through,
                 // then the near side, per spec 0018.
+                // Spec 0075: each see-through run carries the water pipeline
+                // beside the ordinary one, and a batch takes whichever its own
+                // mesh asked for. The solid run has no water in it: a body of
+                // water is see-through or it is a blue floor.
                 let runs = [
-                    (&self.mesh_pipeline, &drawn.picture().opaque),
-                    (&self.translucent_pipelines[0], &drawn.picture().translucent),
-                    (&self.translucent_pipelines[1], &drawn.picture().translucent),
+                    (
+                        &self.mesh_pipeline,
+                        &self.mesh_pipeline,
+                        &drawn.picture().opaque,
+                    ),
+                    (
+                        &self.translucent_pipelines[0],
+                        &self.water_pipelines[0],
+                        &drawn.picture().translucent,
+                    ),
+                    (
+                        &self.translucent_pipelines[1],
+                        &self.water_pipelines[1],
+                        &drawn.picture().translucent,
+                    ),
                 ];
 
-                for (pipeline, batches) in runs {
+                for (pipeline, for_water, batches) in runs {
                     if batches.is_empty() {
                         continue;
                     }
-                    mesh_pass.set_pipeline(pipeline);
+                    let mut set = std::ptr::null();
 
                     for batch in batches.iter() {
                         let (mesh_id, texture_id, first, count) =
@@ -2235,6 +2303,16 @@ impl Renderer {
                         let mesh = &self.meshes[mesh_id.0];
                         if mesh.index_count == 0 {
                             continue;
+                        }
+
+                        // set when it changes rather than once before the
+                        // loop, because which one this batch wants is the
+                        // mesh's own answer
+                        let wanted: *const wgpu::RenderPipeline =
+                            if mesh.water { for_water } else { pipeline };
+                        if wanted != set {
+                            mesh_pass.set_pipeline(if mesh.water { for_water } else { pipeline });
+                            set = wanted;
                         }
                         mesh_pass.set_bind_group(1, &self.textures[texture_id.0], &[]);
                         mesh_pass.set_bind_group(2, &self.shadow_bind_group, &[]);
@@ -3497,6 +3575,8 @@ fn create_mesh_pipeline(
     primitive: wgpu::PrimitiveState,
     depth_stencil: wgpu::DepthStencilState,
     samples: u32,
+    // which fragment stage: the ordinary one, or spec 0075's water
+    shading: &str,
 ) -> wgpu::RenderPipeline {
     let shader = mesh_shader(device, samples);
 
@@ -3522,7 +3602,7 @@ fn create_mesh_pipeline(
         },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
-            entry_point: Some("fs_main"),
+            entry_point: Some(shading),
             targets: &[Some(wgpu::ColorTargetState {
                 format: color_format,
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),

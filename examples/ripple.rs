@@ -129,7 +129,7 @@ impl Ripple {
 
 impl Game for Ripple {
     fn load(&mut self, renderer: &mut Renderer) {
-        self.surface = Some(renderer.add_mesh(&self.water.surface()));
+        self.surface = Some(renderer.add_water_mesh(&self.water.surface()));
         self.ball_mesh = Some(renderer.add_mesh(&MeshData::sphere(24, 16)));
         self.cube = Some(renderer.add_mesh(&MeshData::cube()));
     }
@@ -243,10 +243,15 @@ impl Game for Ripple {
 
         // the water last, and see-through, so what is under it shows. Its
         // vertices are already in the world, so it is drawn where it is.
+        //
+        // The alpha is what a world unit of it stops rather than what the
+        // whole of it stops, per spec 0075, which is why it is a smaller
+        // number than it reads like: the pool is deep enough that 0.72 a
+        // metre would be a lid.
         scene.push_material(
             surface,
             &Transform::at(Vec3::ZERO),
-            vec4(0.16, 0.45, 0.6, 0.72),
+            vec4(0.16, 0.45, 0.6, 0.25),
             220.0,
         );
 
