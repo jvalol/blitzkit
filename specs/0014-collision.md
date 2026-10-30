@@ -14,6 +14,32 @@ Three shapes, all in world space: `Aabb` (a box aligned to the axes, held as a
 min and a max), `Sphere` (a center and a radius), and `Ray` (an origin and a
 direction).
 
+**A slide that starts in contact separates first.** A sweep from a surface
+answers at no distance at all, so nothing is travelled and the movement is
+only turned along the face. Come round to the same contact four times over
+and the call ends where it began, which from the inside is walking into a
+wall at an angle and sticking to it rather than sliding down it. The body is
+moved off by a skin before the rest of the movement is carried along, which
+is what lets the next sweep measure a distance.
+
+Only where there is something left to go along the face, and only off a face
+that is a wall. A body pressed straight into a surface has nowhere to slide
+and stays where it is; without that, every falling body resting on a floor
+gets a millimetre of hover the ground has to take back each frame. And which
+face a sweep calls nearest is a compromise already, so pushing off whatever
+it answers lifts a body a millimetre a frame up a riser it has no ration to
+climb, while pushing off only the horizontal part of it stops a ball rolling
+from one platform onto the next. A wall is the one case where being held
+against it is never what was wanted.
+
+**It has no test here**, which is a gap and is written down rather than
+papered over. Three boxes out of the room it was found in do not reproduce
+it, and nor do five: the spin needs a body that has been walked into the
+contact over many frames, which is a game's job and not this crate's. What
+proves it is the arcade's `nobody_sticks_at_the_foot_of_the_way_up`, which
+walks seven hundred ways at a staircase and has eight of them stand still
+without this and none with it.
+
 **Tests between them** answer whether two shapes overlap: box against box, sphere
 against sphere, sphere against box, and whether a point is inside either.
 

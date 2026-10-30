@@ -497,8 +497,65 @@ pub fn move_and_slide(sphere: Sphere, velocity: Vec3, dt: f32, colliders: &[Aabb
         let direction = remaining.normalize_or_zero();
         position += direction * travelled;
 
+        // **And off the surface by a skin when you were already on it.**
+        // A sweep that starts in contact answers at no distance at all, so
+        // the loop takes the movement along the face and comes round to the
+        // same contact, four times, and the frame ends where it began. From
+        // the inside that is walking into a wall at an angle and sticking to
+        // it. It wants the body separated before it is slid, which is what
+        // every later sweep is measuring from.
+        //
+        // Found at the foot of the arcade's way up: a body coming in at
+        // twenty degrees settled against the bottom step and stood there for
+        // ever. Spec 0042 of that game had written the same fault up as a
+        // threshold that stops you dead on one heading and lets you through
+        // on either side of it.
         let left = remaining.length() - travelled;
         let along = direction - hit.normal * direction.dot(hit.normal);
+
+        // **And off the surface by a skin when you were already on it and
+        // have somewhere to go along it.** A sweep that starts in contact
+        // answers at no distance at all, so nothing is travelled and the
+        // movement is only turned along the face; come round to the same
+        // contact four times and the call ends where it began. From the
+        // inside that is walking into a wall at an angle and sticking to it
+        // rather than sliding down it. Separating first is what lets the
+        // next sweep measure a distance to travel.
+        //
+        // Only where there is something left to slide, so a body pressed
+        // straight into a surface stays where it is. Without that it is
+        // every falling body as well: resting on a floor, the sweep down
+        // answers at no distance, and the skin becomes a millimetre of
+        // hover that the ground has to take back every frame.
+        //
+        // **Off walls only, and not off anything you could be standing on.**
+        // Which face a sweep calls nearest is a compromise already, per
+        // `nearest_face`: a body level with the top of a box reads as
+        // pressed into its side so that it can roll from one platform onto
+        // the next. Three ways of unsticking it were tried against that and
+        // each broke something else. Off the normal whatever it is, and a
+        // body stood against a riser gets a skin of lift a frame and
+        // ratchets over one it had no ration to climb. Off the horizontal
+        // part only, and it will not roll onto the next platform, because
+        // the seam is that platform's side. Along the face, and it walks a
+        // millimetre a frame into whatever it is pressed against.
+        //
+        // What is left is the case this is for: a face that is a wall, where
+        // there is nothing to stand on and nothing to roll onto, and being
+        // held against it is never what was wanted.
+        //
+        // Found at the foot of the arcade's way up, where a body coming in
+        // at twenty degrees settled against the bottom step and stood there
+        // for ever. Spec 0042 of that game had written the same fault up
+        // once already, as a threshold that stops you dead on one heading
+        // and lets you through on either side of it. What proves it is that
+        // game's `nobody_sticks_at_the_foot_of_the_way_up`, which walks
+        // seven hundred ways at the flight: eight of them stand still
+        // without this and none with it.
+        if travelled <= 0.0 && along.length_squared() > 1e-8 && hit.normal.y.abs() < 0.5 {
+            position += hit.normal * SKIN;
+        }
+
         remaining = along * left;
     }
 
