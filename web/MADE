@@ -11,8 +11,8 @@
 # and replaced the first time anything is remade.
 #
 # file	engine	made
-arcade.js	56d753d	arcade@2c52a37	2026-10-31T15:37
-arcade_bg.wasm	56d753d	arcade@2c52a37	2026-10-31T15:37
+arcade.js	e1bc67d	arcade@a4d6c24	2026-10-31T16:06
+arcade_bg.wasm	e1bc67d	arcade@a4d6c24	2026-10-31T16:06
 chain.js	f62df72	-	2026-10-31T12:48
 chain_bg.wasm	f62df72	-	2026-10-31T12:48
 cubes.js	f62df72	-	2026-10-31T12:48
