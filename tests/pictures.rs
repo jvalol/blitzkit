@@ -248,27 +248,41 @@ fn shots() -> Vec<Shot> {
     ]
 }
 
+/// What a shot puts in front of the camera, in the shape spec 0076's
+/// harness asks for: given the renderer, because the meshes have to be
+/// uploaded to it, give back what to draw and where from.
+fn standing(shot: &Shot) -> impl FnOnce(&mut Renderer) -> (Scene, Camera) + '_ {
+    move |renderer| {
+        let meshes = Meshes {
+            cube: renderer.add_mesh(&MeshData::cube()),
+            sphere: renderer.add_mesh(&MeshData::sphere(32, 24)),
+            floor: renderer.add_mesh(&MeshData::plane()),
+            pool: renderer.add_water_mesh(&MeshData::plane()),
+        };
+        let mut scene = Scene::new();
+        let mut camera = Camera::new();
+
+        (shot.scene)(&mut scene, &meshes);
+        (shot.camera)(&mut camera);
+
+        (scene, camera)
+    }
+}
+
 /// Draws one shot, or nothing at all when this machine has no adapter.
+///
+/// **For the controls rather than for the comparisons.** A test that holds
+/// a picture against a file goes through `looks_right` below and never
+/// touches this; what wants the pixels themselves is the handful that
+/// measure a band, draw the same scene twice, or break something on
+/// purpose and ask how far it moved.
 fn drawn(shot: &Shot) -> Option<Picture> {
     let mut renderer = pollster::block_on(Renderer::offscreen(WIDE, TALL))?;
-    let meshes = Meshes {
-        cube: renderer.add_mesh(&MeshData::cube()),
-        sphere: renderer.add_mesh(&MeshData::sphere(32, 24)),
-        floor: renderer.add_mesh(&MeshData::plane()),
-        pool: renderer.add_water_mesh(&MeshData::plane()),
-    };
-    let mut scene = Scene::new();
-    let geometry = Geometry::new();
-    let text = TextRenderer::new();
+    let (scene, camera) = standing(shot)(&mut renderer);
 
-    (shot.scene)(&mut scene, &meshes);
-
-    let mut camera = Camera::new();
-
-    (shot.camera)(&mut camera);
     renderer.set_camera(camera);
 
-    Some(renderer.picture(&scene, &geometry, &text))
+    Some(renderer.picture(&scene, &Geometry::new(), &TextRenderer::new()))
 }
 
 /// Where the references live, and where a failure writes what it saw.
@@ -310,21 +324,18 @@ fn apart(was: &image::RgbaImage, now: &Picture) -> (usize, image::RgbaImage) {
     (count, diff)
 }
 
-/// Draws a shot and holds it against its reference.
+/// Draws a shot and holds it against its reference. Spec 0076: the
+/// renderer, the empty overlay, the comparison and the skip are the
+/// engine's to assemble, so what is left here is which shot and which
+/// file.
 fn looks_right(name: &str) {
     let shots = shots();
     let shot = shots
         .iter()
         .find(|shot| shot.name == name)
         .expect("a shot by that name");
-    let Some(picture) = drawn(shot) else {
-        eprintln!("no adapter here, so {} was not drawn", name);
-        return;
-    };
 
-    if let Err(why) = blitzkit::picture::looks_right(&picture, &beside(name, "")) {
-        panic!("{}", why);
-    }
+    blitzkit::picture::drawn_looks_right(&beside(name, ""), (WIDE, TALL), standing(shot));
 }
 
 /// The mean brightness of a band of a picture, which is what spec 0075's two
@@ -635,6 +646,60 @@ mod pictures {
             assert_eq!(
                 once.pixels, twice.pixels,
                 "the same scene drawn twice came out differently"
+            );
+        }
+
+        /// Spec 0076: the harness draws and compares, and does not only
+        /// skip.
+        ///
+        /// **A call that said true without looking at anything would pass
+        /// every test in this file.** So one shot is written to a
+        /// reference of its own, by the path spec 0062 gave a file that
+        /// does not exist yet, and then a different shot is held against
+        /// it. The second has to panic. The panic it prints on the way
+        /// past is the thing being checked.
+        #[test]
+        fn the_harness_draws_and_compares() {
+            let shots = shots();
+            let one = shots
+                .iter()
+                .find(|shot| shot.name == "a-sphere-has-a-highlight")
+                .expect("the sphere");
+            let other = shots
+                .iter()
+                .find(|shot| shot.name == "a-lamp-throws-a-shadow")
+                .expect("the lamp");
+
+            // somewhere that is not this repo, because a control that can
+            // write next to the committed references is a control that can
+            // poison them
+            let kept = std::env::temp_dir().join("blitzkit-0076-control.png");
+            let litter = ["", "-drawn", "-diff"].map(|what| {
+                std::env::temp_dir().join(format!("blitzkit-0076-control{}.png", what))
+            });
+
+            for path in &litter {
+                let _ = std::fs::remove_file(path);
+            }
+
+            if !blitzkit::picture::drawn_looks_right(&kept, (WIDE, TALL), standing(one)) {
+                eprintln!("no adapter here, so the harness was not exercised");
+
+                return;
+            }
+
+            let fell = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                blitzkit::picture::drawn_looks_right(&kept, (WIDE, TALL), standing(other))
+            }));
+
+            for path in &litter {
+                let _ = std::fs::remove_file(path);
+            }
+
+            assert!(
+                fell.is_err(),
+                "a lamp held against the sphere's own picture passed, so the harness is \
+                 comparing nothing"
             );
         }
 

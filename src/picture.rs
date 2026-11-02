@@ -9,7 +9,11 @@
 //! apart, which is a thing the arcade has written down four times under
 //! other names.
 
-use crate::renderer::Picture;
+use crate::camera::Camera;
+use crate::geometry::Geometry;
+use crate::renderer::render_text::TextRenderer;
+use crate::renderer::scene::Scene;
+use crate::renderer::{Picture, Renderer};
 
 use std::path::{Path, PathBuf};
 
@@ -92,6 +96,53 @@ pub fn looks_right(drawn: &Picture, reference: &Path) -> Result<(), String> {
 
 /// What share of two drawn frames differ by more than a channel's worth.
 ///
+/// Draws one frame with no window and holds it against the file. Spec 0076.
+///
+/// `build` is handed the renderer, so that it can add its meshes and its
+/// textures, and gives back what to draw and where from. The frame is the
+/// 3D and nothing else: the `Geometry` and the `TextRenderer` are made here
+/// and left empty, because a reference holding the 2D overlay changes every
+/// time a line of help does, and at the size these are kept the help covers
+/// the thing being tested. [`crate::renderer::Renderer::picture`] is still
+/// there for a caller that wants the overlay in shot.
+///
+/// Panics with what [`looks_right`] said when the two differ, which is what
+/// makes this one line at a call site. Says whether a frame was drawn at
+/// all: `false` means this machine has no adapter and nothing was checked.
+///
+/// **The skip is the reason this is worth having.** A machine with no
+/// adapter passes every picture test in the project by running none of
+/// them, and that silence reads exactly like success. Written out in each
+/// caller it cannot be changed anywhere; written here it can. So this says
+/// on stderr which reference went unchecked, and hands back the fact so a
+/// suite that wants to count can.
+pub fn drawn_looks_right(
+    reference: &Path,
+    (wide, tall): (u32, u32),
+    build: impl FnOnce(&mut Renderer) -> (Scene, Camera),
+) -> bool {
+    let Some(mut renderer) = pollster::block_on(Renderer::offscreen(wide, tall)) else {
+        eprintln!(
+            "no adapter here, so {} was not checked",
+            reference.display()
+        );
+
+        return false;
+    };
+
+    let (scene, camera) = build(&mut renderer);
+
+    renderer.set_camera(camera);
+
+    let drawn = renderer.picture(&scene, &Geometry::new(), &TextRenderer::new());
+
+    if let Err(why) = looks_right(&drawn, reference) {
+        panic!("{}", why);
+    }
+
+    true
+}
+
 /// For a control: a test that breaks something on purpose and wants the
 /// number rather than a pass or a fail. **It touches no file**, which is
 /// the point. The arcade's control for spec 0027 held a darkened room
