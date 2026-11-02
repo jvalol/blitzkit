@@ -96,6 +96,28 @@ pub fn looks_right(drawn: &Picture, reference: &Path) -> Result<(), String> {
 
 /// What share of two drawn frames differ by more than a channel's worth.
 ///
+/// How big a picture is kept, unless a caller has a reason of its own.
+///
+/// **Small, because every reference is committed and read by a person.** A
+/// shadow and a highlight are plain at this size and a diff of it is
+/// something you can look at, which is the only useful thing to do with a
+/// failed picture test.
+///
+/// **And bigger is not sharper for this job.** Written down because the
+/// opposite was assumed and measured wrong on 2026-11-02: two games were
+/// given twice this on the argument that what tells their pieces apart,
+/// the pips on a domino and the number on a ball, is about a pixel here
+/// and would be lost. Both were then measured by taking the faces off
+/// and asking how far the picture moved. Cascada: 7.7% at this size
+/// against 7.3% at twice it. Poolhall: 0.3% against 0.2%. The share is
+/// pixels changed over pixels in all, so the thing being watched for and
+/// the frame it sits in grow together, and the bigger picture detects no
+/// better while costing four times the bytes in somebody's repository.
+///
+/// A caller that wants another size still passes one. What this is, is
+/// the answer when there is no reason.
+pub const SIZE: (u32, u32) = (320, 240);
+
 /// Draws one frame with no window and holds it against the file. Spec 0076.
 ///
 /// `build` is handed the renderer, so that it can add its meshes and its

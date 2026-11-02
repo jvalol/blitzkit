@@ -22,13 +22,11 @@ use blitzkit::renderer::scene::{Instance, MeshId, Scene, TextureId};
 use blitzkit::renderer::{Picture, Renderer};
 use glam::{vec3, vec4, Vec3};
 
-/// How big a picture is.
-///
-/// Small, because every one of these is committed and read by a person: a
-/// shadow and a highlight are plain at this size and a diff of it is
-/// something you can look at.
-const WIDE: u32 = 320;
-const TALL: u32 = 240;
+/// How big a picture is, which the engine says rather than this file,
+/// because every game that takes one wants the same answer. See
+/// `blitzkit::picture::SIZE`.
+const WIDE: u32 = blitzkit::picture::SIZE.0;
+const TALL: u32 = blitzkit::picture::SIZE.1;
 
 /// How different is too different lives in the engine now, per the arcade's
 /// spec 0027: a game cannot reach a test, and two tolerances would drift.
