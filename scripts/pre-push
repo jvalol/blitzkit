@@ -51,6 +51,39 @@ fi
 behind=$(./check-fresh 2>/dev/null |
   awk '/^== the examples built for a browser/ {on = 1; next} /^$/ {on = 0} on && /behind/ {print}')
 
+# **A build behind only its own repo may be one nobody could tell from the
+# one in the tree.** Nothing here can read a test out of a source file. The
+# arcade keeps a `#[cfg(test)]` const at main.rs line 62 with fourteen
+# thousand lines of game after it, so there is no line to cut at and no path
+# to exclude, the way specs and markdown are excluded in `behind_source`.
+#
+# What can be asked is the artifact. A commit that only adds tests rebuilds
+# byte for byte, which is how the one on 2026-11-02 was caught: `./build-web
+# arcade` moved the manifest and changed nothing else, and the push it had
+# refused was a push of a spec and a test.
+#
+# Only while the engine itself is level, because an engine commit puts all
+# eighteen behind at once and rebuilding eighteen on a push is not a check,
+# it is a wait.
+if [ -n "$behind" ] && ! printf '%s\n' "$behind" | grep -q "engine commit"; then
+  names=$(printf '%s\n' "$behind" | sed 's/^ *//; s/,.*//' | tr '\n' ' ' | sed 's/ *$//')
+
+  echo "pre-push: $names is behind its own repo. Rebuilding to see whether"
+  echo "          that changed any bytes."
+
+  # shellcheck disable=SC2086
+  if ./build-web $names >/dev/null 2>&1 &&
+    git -C blitzkit diff --quiet -- web ':(exclude)web/MADE'; then
+    echo "          It did not, so nothing published is stale and this goes"
+    echo "          through. The manifest moved and wants committing, which"
+    echo "          is what stops this happening on the next push."
+    exit 0
+  fi
+
+  echo "          It did. Refusing, and the rebuilt files are in the tree."
+  echo
+fi
+
 if [ -n "$behind" ]; then
   echo "pre-push: the browser builds are behind the engine, and pushing this"
   echo "          repo publishes them."
