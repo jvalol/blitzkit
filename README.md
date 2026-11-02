@@ -1,8 +1,8 @@
 # blitzkit
 
-In which I develop a wrapper around wgpu-rs to create a graphics development engine in rust.
+In which I write a small game engine over wgpu, in rust, and build interesting things.
 
-2d _and_ 3d. I've got a few games built on it so far.
+2d _and_ 3d. There are examples in this repo.
 
 I hand built this engine, and I built my versions of pong and snake using it. After those
 two I started working with AI to take it further. Most of the 3d mechanics were already there. (Thanks past me)
@@ -10,6 +10,25 @@ two I started working with AI to take it further. Most of the 3d mechanics were 
 Feel free to follow along!
 
 There's a guide at [blitzkit.jva.lol](https://blitzkit.jva.lol).
+
+## How to use it
+
+One call, handed the renderer, giving back what to draw and where from.
+
+```rust
+blitzkit::picture::drawn_looks_right(&reference, picture::SIZE, |renderer| {
+    let mut game = MyGame::new();
+    let mut scene = Scene::new();
+    let mut camera = Camera::new();
+
+    game.load(renderer);
+    game.draw(&mut scene, &mut camera);
+
+    (scene, camera)
+});
+```
+
+The arcade demonstrates it, like with cascada and poolhall.
 
 ## Games built on it
 
