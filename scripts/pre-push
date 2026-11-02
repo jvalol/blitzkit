@@ -46,6 +46,36 @@ if [ -x blitzkit/scripts/ship-check ]; then
   fi
 fi
 
+# **And what the tree holds that the commit does not.**
+#
+# Everything below reads `web/MADE`, and `web/MADE` is a file the rebuild
+# writes. So the refusal at the bottom of this leaves the rebuilt build
+# in the tree *and* a manifest saying the build is level, and the push
+# you try straight after goes through: `behind` comes back empty,
+# neither branch below runs, and what goes out is the commit with the
+# old build still published. That happened on 2026-11-02. The clip of a
+# room went out and the wasm of that room did not, which is the exact
+# thing this file exists to stop, arrived at through the file itself.
+#
+# A commit is what gets pushed, so the question is whether `web` in the
+# tree is the `web` in the commit, and it is asked of the tree rather
+# than of anything a build writes. The manifest is left out for the same
+# reason the rebuild below leaves it out: it is a record of when, not a
+# thing anybody plays.
+loose=$(git -C blitzkit status --porcelain -- web | grep -v '^.. web/MADE$' || true)
+
+if [ -n "$loose" ]; then
+  echo "pre-push: blitzkit/web holds files the commit does not, and what"
+  echo "          gets published is the commit."
+  echo
+  echo "$loose"
+  echo
+  echo "  git -C blitzkit add web && git -C blitzkit commit"
+  echo
+  echo "then push again. git push --no-verify skips this."
+  exit 1
+fi
+
 [ -x ./check-fresh ] || exit 0
 
 behind=$(./check-fresh 2>/dev/null |
