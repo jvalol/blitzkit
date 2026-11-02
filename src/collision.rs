@@ -278,6 +278,25 @@ pub fn sweep_sphere(sphere: &Sphere, movement: Vec3, box_: &Aabb) -> Option<Hit>
             nearest_face(&grown, sphere.center)
         };
 
+        // **Nothing you are standing on top of is in your way.** With your
+        // feet at or above its top there is no part of you beside it to
+        // block, so the only answers it has are the ground you are already
+        // on and, at its edge, a normal leaning up and aside that reads as
+        // a surface to be turned along. A body on the seam between two
+        // slabs of one floor gets that from the slab it is leaving, and a
+        // stride a tenth of a degree into it comes round to the same
+        // contact four times and the frame ends where it began: from the
+        // inside, a line across the floor you cannot walk over except
+        // square on. The arcade's imaginarium has one, where its floor is
+        // cut round the stair, and the camera stood on it for the last
+        // hundred seconds of a take.
+        //
+        // Upward and along only. Falling, this is the ground, and the sweep
+        // down is how you land on it.
+        if movement.y >= 0.0 && sphere.center.y - sphere.radius >= box_.max.y - SKIN {
+            return None;
+        }
+
         return if movement.dot(away) >= 0.0 {
             None
         } else {
@@ -1473,6 +1492,55 @@ mod tests {
             (end - vec3(0.5, 1.0, 1.5)).length() < 1e-5,
             "ended at {:?}",
             end
+        );
+    }
+
+    /// A floor cut into two slabs is still a floor to walk on.
+    ///
+    /// **Along the seam, which is the heading that jammed.** Straight
+    /// across it the sweep reads the slab ahead as ground and lets the
+    /// ball by. Along it, with a hair of the movement into the slab
+    /// behind, the contact answers at no distance on a normal that is
+    /// almost straight up, the movement is turned along that normal, and
+    /// four passes later the ball is where it started. A game's floor is
+    /// slabs whenever there is a hole in it, so this is every such floor.
+    ///
+    /// Twenty-one lanes across the seam by seventeen headings along it.
+    /// Without the rule in `sweep_sphere`, seventeen of the three hundred
+    /// and fifty-seven stand still.
+    #[test]
+    fn a_ball_on_the_seam_of_two_slabs_still_moves() {
+        let west = Aabb::new(vec3(-10.0, -1.0, -10.0), vec3(0.0, 0.0, 10.0));
+        let east = Aabb::new(vec3(0.0, -1.0, -10.0), vec3(10.0, 0.0, 10.0));
+        let radius = 0.45;
+        let mut stuck = Vec::new();
+
+        for lane in 0..=20 {
+            let x = -0.1 + 0.2 * lane as f32 / 20.0;
+
+            for off in -8..=8 {
+                // nought is straight along the seam, and the sign is
+                // which slab the step leans into
+                let way = (off as f32 * 4.0f32).to_radians();
+                let wish = vec3(-way.sin(), 0.0, -way.cos()) * 4.2;
+                let from = vec3(x, radius, 0.0);
+                let mut at = from;
+
+                for _ in 0..60 {
+                    at = move_and_slide(Sphere::new(at, radius), wish, 1.0 / 60.0, &[west, east]);
+                }
+
+                if at.distance(from) < 1.0 {
+                    stuck.push((x, way.to_degrees(), at));
+                }
+            }
+        }
+
+        assert!(
+            stuck.is_empty(),
+            "{} of 357 ways along the seam stand still, first {:?}",
+            stuck.len(),
+            stuck.first()
         );
     }
 }
