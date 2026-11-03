@@ -138,18 +138,16 @@ pub const SIZE: (u32, u32) = (320, 240);
 /// caller it cannot be changed anywhere; written here it can. So this says
 /// on stderr which reference went unchecked, and hands back the fact so a
 /// suite that wants to count can.
+///
+/// `PICTURES_REQUIRED` turns that skip into a panic, for a suite that would
+/// rather not count. Spec 0077.
 pub fn drawn_looks_right(
     reference: &Path,
     (wide, tall): (u32, u32),
     build: impl FnOnce(&mut Renderer) -> (Scene, Camera),
 ) -> bool {
     let Some(mut renderer) = pollster::block_on(Renderer::offscreen(wide, tall)) else {
-        eprintln!(
-            "no adapter here, so {} was not checked",
-            reference.display()
-        );
-
-        return false;
+        return no_adapter(reference, std::env::var("PICTURES_REQUIRED").is_ok());
     };
 
     let (scene, camera) = build(&mut renderer);
@@ -226,6 +224,33 @@ fn apart(was: &image::RgbaImage, now: &Picture) -> (usize, image::RgbaImage) {
     (count, diff)
 }
 
+/// What a machine with no adapter gets. Taken out of `drawn_looks_right` so
+/// it can be tested on a machine that has one, which every machine that runs
+/// this project's gate does.
+///
+/// **`required` is the caller's, not the engine's.** A missing device
+/// disables a feature here, so the engine's own answer is to skip and say
+/// so. A suite is a different question: one that drew nothing at all drew no
+/// conclusion either, and the only thing that knows whether that matters is
+/// whatever ran it. `./check-all` sets it, because this machine has an
+/// adapter and a run of it that found none has gone wrong somewhere else.
+fn no_adapter(reference: &Path, required: bool) -> bool {
+    if required {
+        panic!(
+            "no adapter here, so {} was not checked, and PICTURES_REQUIRED \
+             says a run that checked nothing is a failed run",
+            reference.display()
+        );
+    }
+
+    eprintln!(
+        "no adapter here, so {} was not checked",
+        reference.display()
+    );
+
+    false
+}
+
 /// The same path with something added before the extension.
 fn beside(reference: &Path, what: &str) -> PathBuf {
     let stem = reference
@@ -245,4 +270,25 @@ fn write(path: &Path, picture: &Picture) -> Result<(), String> {
         image::ColorType::Rgba8,
     )
     .map_err(|why| format!("{} could not be written: {}", path.display(), why))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Both of these are the no-adapter arm, which is the one arm in this file
+    // that a machine with an adapter can never reach. Spec 0076 left it to a
+    // reading of the source and spec 0077 gave it an argument instead, so it
+    // can be reached from here.
+
+    #[test]
+    fn a_skip_is_not_a_failure() {
+        assert!(!no_adapter(Path::new("nowhere/at-all.png"), false));
+    }
+
+    #[test]
+    #[should_panic(expected = "a run that checked nothing is a failed run")]
+    fn a_skip_is_a_failure_when_pictures_are_required() {
+        no_adapter(Path::new("nowhere/at-all.png"), true);
+    }
 }

@@ -49,9 +49,14 @@ a match.
 ## On a machine with no adapter
 
 Nothing is drawn, nothing is compared, and the call says so: it writes which
-reference went unchecked and hands back `false`. It does not fail. If a run
-with no pictures in it should fail, that is for whatever runs your tests to
-decide, with the `false` it gave you.
+reference went unchecked and hands back `false`. It does not fail.
+
+`PICTURES_REQUIRED=1` makes it fail instead, and that belongs in whatever
+runs your tests rather than in the test. Set it there and a run that could
+not draw panics naming the reference it could not check. Without it the call
+writes a line, and that line is one cargo captures from a test that passed,
+so there is nothing for a script to watch for. The `false` is still handed
+back for a suite that would rather count.
 
 ## Where this is used
 

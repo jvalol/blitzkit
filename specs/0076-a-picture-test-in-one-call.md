@@ -90,5 +90,9 @@ with the rest of spec 0062's, and not beside the code.
 with no pictures in it is a failed run is the caller's, and for this project
 is a question about what runs the gate rather than about the engine.
 
+Spec 0077 revisits that. The division holds, but a caller with nothing to
+pull cannot act on a decision, and the line this writes turns out to be one
+cargo hides.
+
 **The 2D overlay in a reference.** `Renderer::picture` already takes a
 `Geometry` and a `TextRenderer` for a caller that wants one.
