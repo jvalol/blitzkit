@@ -25,6 +25,8 @@ cargo add blitzkit
 
 - [Getting started]({{< relref "docs/getting-started" >}})
   smallest steps to "Hello world" in a window
+- [Build a game]({{< relref "docs/tutorial" >}}) a cube on a floor, from an
+  empty crate to a picture test
 - [Testing a game]({{< relref "docs/testing" >}}) holding a frame against a
   picture of what it should be
 - [Examples]({{< relref "docs/examples" >}}) single-file demonstrations

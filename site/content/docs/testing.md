@@ -1,6 +1,6 @@
 ---
 title: Testing a game
-weight: 2
+weight: 3
 ---
 
 # Testing a game
