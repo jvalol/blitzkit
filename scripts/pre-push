@@ -46,6 +46,18 @@ if [ -x blitzkit/scripts/ship-check ]; then
   fi
 fi
 
+# and whether the copy going out is copy he signed, which is the same
+# question ship-check asks and a stronger form of it: a marker he struck
+# months ago guards nothing written into that page since. See
+# ~/.claude/voice/check-voice. Skipped where it is not installed.
+if [ -x "$HOME/.claude/voice/check-voice" ]; then
+  if ! (cd blitzkit && "$HOME/.claude/voice/check-voice"); then
+    echo
+    echo "pre-push: stopped by check-voice above."
+    exit 1
+  fi
+fi
+
 # **And what the tree holds that the commit does not.**
 #
 # Everything below reads `web/MADE`, and `web/MADE` is a file the rebuild

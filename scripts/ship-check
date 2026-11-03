@@ -31,9 +31,19 @@
 #
 # Plain grep and awk, no ripgrep, so it runs anywhere.
 #
-# Usage: scripts/ship-check   (run from the crate root)
+# Usage: scripts/ship-check, from anywhere.
 
 set -uo pipefail
+
+# **The crate this lives in, not the directory it was called from.** It used
+# to trust the caller, and blitzkit/scripts/pre-push calls it from the project
+# root a directory above here, where README.md is the project's rather than
+# the crate's and site/ does not exist at all. So the push gate scanned one
+# readme, found nothing, and said "no unclaimed copy markers" while a marker
+# sat on a page of the site. Found 2026-11-03 by running it both ways on the
+# same tree and getting different answers.
+here=$(cd "$(dirname "$0")/.." && pwd) || exit 1
+cd "$here" || exit 1
 
 MARKER='[COPY - Jake]'
 
