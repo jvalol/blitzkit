@@ -647,6 +647,138 @@ mod pictures {
             );
         }
 
+        /// Spec 0078: the overlay call puts the 2D in shot, and the
+        /// 3D call still leaves it out.
+        ///
+        /// **Both halves, because either one alone proves nothing.** A
+        /// call that drew the overlay for everybody would pass the first
+        /// check and quietly change every reference the project has.
+        ///
+        /// No committed file is touched. The frame with the quad writes
+        /// itself a reference in the temp directory, and the frames after
+        /// it are held against that.
+        #[test]
+        fn an_overlay_is_in_shot_only_when_it_is_asked_for() {
+            let shots = shots();
+            let shot = shots
+                .iter()
+                .find(|shot| shot.name == "a-sphere-has-a-highlight")
+                .expect("the sphere");
+
+            let kept = std::env::temp_dir().join("blitzkit-0078-control.png");
+            let litter = ["", "-drawn", "-diff"].map(|what| {
+                std::env::temp_dir().join(format!("blitzkit-0078-control{}.png", what))
+            });
+            for path in &litter {
+                let _ = std::fs::remove_file(path);
+            }
+
+            // a band across the middle, far too big for any share to
+            // forgive and nowhere near an edge
+            let bar = |geometry: &mut Geometry| {
+                geometry.push_quad(&blitzkit::geometry::quad::Quad::colored(
+                    glam::vec2(0.0, (TALL / 3) as f32),
+                    glam::vec2(WIDE as f32, (TALL / 3) as f32),
+                    glam::vec4(1.0, 0.0, 1.0, 1.0),
+                ));
+            };
+
+            let drew = blitzkit::picture::drawn_with_overlay_looks_right(
+                &kept,
+                (WIDE, TALL),
+                |renderer, geometry, _text| {
+                    bar(geometry);
+
+                    standing(shot)(renderer)
+                },
+            );
+
+            if !drew {
+                eprintln!("no adapter here, so the overlay was not exercised");
+
+                return;
+            }
+
+            // the same shot through the same call with nothing in the
+            // overlay is a different picture, so the quad was in the first
+            let without = std::panic::catch_unwind(|| {
+                blitzkit::picture::drawn_with_overlay_looks_right(
+                    &kept,
+                    (WIDE, TALL),
+                    |renderer, _geometry, _text| standing(shot)(renderer),
+                )
+            });
+            assert!(
+                without.is_err(),
+                "the overlay call drew the same frame with and without a quad in it"
+            );
+
+            // and the 3D call, which leaves the overlay out, draws that
+            // same quadless frame however much is pushed into the geometry
+            let litter_again = litter.clone();
+            for path in &litter_again {
+                let _ = std::fs::remove_file(path);
+            }
+            blitzkit::picture::drawn_looks_right(&kept, (WIDE, TALL), standing(shot));
+
+            let with_a_quad_it_ignores =
+                blitzkit::picture::drawn_looks_right(&kept, (WIDE, TALL), standing(shot));
+            assert!(
+                with_a_quad_it_ignores,
+                "the 3D call did not draw at all the second time"
+            );
+
+            for path in &litter {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+
+        /// Spec 0078: `looks_right_within` compares to the share it is
+        /// handed and not to the engine's own.
+        ///
+        /// Two plainly different frames, which a share of one forgives and
+        /// a share of nothing does not. The boundary itself is not worth a
+        /// test: what is worth one is that the number arrives at all, which
+        /// is what a defaulted argument quietly stops doing.
+        #[test]
+        fn the_share_is_the_callers() {
+            let shots = shots();
+            let one = shots
+                .iter()
+                .find(|shot| shot.name == "a-sphere-has-a-highlight")
+                .expect("the sphere");
+            let other = shots
+                .iter()
+                .find(|shot| shot.name == "a-lamp-throws-a-shadow")
+                .expect("the lamp");
+
+            let (Some(sphere), Some(lamp)) = (drawn(one), drawn(other)) else {
+                eprintln!("no adapter here, so the share was not exercised");
+
+                return;
+            };
+
+            let kept = std::env::temp_dir().join("blitzkit-0078-share.png");
+            let _ = std::fs::remove_file(&kept);
+            // the first write is a bless, so this leaves the sphere on disk
+            assert!(blitzkit::picture::looks_right(&sphere, &kept).is_ok());
+
+            assert!(
+                blitzkit::picture::looks_right_within(&lamp, &kept, 1.0).is_ok(),
+                "a share of one refused two frames, so nothing may differ at all"
+            );
+            assert!(
+                blitzkit::picture::looks_right_within(&lamp, &kept, 0.0).is_err(),
+                "a share of nothing allowed two different frames through"
+            );
+
+            for what in ["", "-drawn", "-diff"] {
+                let _ = std::fs::remove_file(
+                    std::env::temp_dir().join(format!("blitzkit-0078-share{}.png", what)),
+                );
+            }
+        }
+
         /// Spec 0076: the harness draws and compares, and does not only
         /// skip.
         ///

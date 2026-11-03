@@ -30,6 +30,23 @@ use std::path::{Path, PathBuf};
 pub const CHANNEL: i32 = 8;
 pub const SHARE: f32 = 0.002;
 
+/// The same question for a game drawn flat, which needs a much smaller
+/// answer.
+///
+/// **Two thousandths of a 2D game is most of what it draws.** The number
+/// above was measured against a 3D scene, where turning off the sun moved
+/// 0.96% of the frame, so a shadow is hundreds of pixels and a share that
+/// catches one is loose. snake at this size is four white shapes on black:
+/// its whole body is a few hundred pixels, and dropping two segments off
+/// it moved less than two thousandths, so the comparison called a visibly
+/// shorter snake a match. Four segments were needed before it failed, at
+/// 0.3%.
+///
+/// A segment is about 0.075% of the frame, so this is set below that and
+/// well above what the same binary varies by, which is nothing: two runs
+/// of snake's picture came back identical byte for byte. Spec 0078.
+pub const SPARSE: f32 = 0.0005;
+
 /// Holds a drawn frame against the file at `reference`.
 ///
 /// `Ok` when they match, when `BLESS` is set, or when there is no reference
@@ -41,6 +58,11 @@ pub const SHARE: f32 = 0.002;
 /// A blessed picture is looked at before it is committed. That is a rule
 /// this code cannot enforce and the reason these files are small.
 pub fn looks_right(drawn: &Picture, reference: &Path) -> Result<(), String> {
+    looks_right_within(drawn, reference, SHARE)
+}
+
+/// The same, to a share the caller names. See `SHARE` and `SPARSE`.
+pub fn looks_right_within(drawn: &Picture, reference: &Path, allowed: f32) -> Result<(), String> {
     if drawn.pixels.is_empty() {
         return Err(format!(
             "{} came back with no pixels at all",
@@ -73,7 +95,7 @@ pub fn looks_right(drawn: &Picture, reference: &Path) -> Result<(), String> {
     let (count, diff) = apart(&was, drawn);
     let share = count as f32 / (drawn.width * drawn.height) as f32;
 
-    if share <= SHARE {
+    if share <= allowed {
         return Ok(());
     }
 
@@ -143,20 +165,61 @@ pub const SIZE: (u32, u32) = (320, 240);
 /// rather not count. Spec 0077.
 pub fn drawn_looks_right(
     reference: &Path,
-    (wide, tall): (u32, u32),
+    size: (u32, u32),
     build: impl FnOnce(&mut Renderer) -> (Scene, Camera),
+) -> bool {
+    drawn_within(reference, size, SHARE, |renderer, _geometry, _text| {
+        build(renderer)
+    })
+}
+
+/// The same, with the 2D half in shot.
+///
+/// **For a game that is 2D, the overlay is not an overlay.** pong, snake and
+/// tessera push every quad they have into `Geometry` and never touch
+/// `Scene`, so the call above photographs a blank frame of them: a picture
+/// that passes every check there is and says nothing at all. Spec 0076 left
+/// `Renderer::picture` public for exactly this and nobody took it up, which
+/// put eight lines of offscreen renderer back in front of the three games
+/// that needed them most.
+///
+/// The reason the other call leaves the overlay out still holds where there
+/// is something behind it: a reference that carries the help text changes
+/// when a line of help does. A game whose whole picture is quads has no
+/// such thing to protect. Spec 0078.
+pub fn drawn_with_overlay_looks_right(
+    reference: &Path,
+    size: (u32, u32),
+    build: impl FnOnce(&mut Renderer, &mut Geometry, &mut TextRenderer) -> (Scene, Camera),
+) -> bool {
+    drawn_within(reference, size, SPARSE, build)
+}
+
+/// What both of the calls above are, with the share they differ by named.
+///
+/// **They differ by it and nothing else, which is why this exists.** The
+/// first version had the 3D call delegate to the overlay one, so moving the
+/// overlay call to the tighter share moved every 3D game with it, silently,
+/// to a tolerance measured for something else.
+fn drawn_within(
+    reference: &Path,
+    (wide, tall): (u32, u32),
+    allowed: f32,
+    build: impl FnOnce(&mut Renderer, &mut Geometry, &mut TextRenderer) -> (Scene, Camera),
 ) -> bool {
     let Some(mut renderer) = pollster::block_on(Renderer::offscreen(wide, tall)) else {
         return no_adapter(reference, std::env::var("PICTURES_REQUIRED").is_ok());
     };
 
-    let (scene, camera) = build(&mut renderer);
+    let mut geometry = Geometry::new();
+    let mut text = TextRenderer::new();
+    let (scene, camera) = build(&mut renderer, &mut geometry, &mut text);
 
     renderer.set_camera(camera);
 
-    let drawn = renderer.picture(&scene, &Geometry::new(), &TextRenderer::new());
+    let drawn = renderer.picture(&scene, &geometry, &text);
 
-    if let Err(why) = looks_right(&drawn, reference) {
+    if let Err(why) = looks_right_within(&drawn, reference, allowed) {
         panic!("{}", why);
     }
 
