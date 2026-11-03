@@ -37,8 +37,8 @@ sierpinski.js	4bc6ba1	-	2026-11-03T07:36
 sierpinski_bg.wasm	4bc6ba1	-	2026-11-03T07:36
 slider.js	4bc6ba1	slider@a339216	2026-11-03T07:36
 slider_bg.wasm	4bc6ba1	slider@a339216	2026-11-03T07:36
-snake.js	4bc6ba1	snake@405b64c	2026-11-03T07:36
-snake_bg.wasm	4bc6ba1	snake@405b64c	2026-11-03T07:36
+snake.js	3dd490d	snake@3e6a5f3	2026-11-03T11:13
+snake_bg.wasm	3dd490d	snake@3e6a5f3	2026-11-03T11:13
 stacking.js	4bc6ba1	-	2026-11-03T07:36
 stacking_bg.wasm	4bc6ba1	-	2026-11-03T07:36
 starry.js	e0a94a0	starry@fd6ca9c	2026-11-03T08:28
