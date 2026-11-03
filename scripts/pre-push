@@ -58,6 +58,23 @@ if [ -x "$HOME/.claude/voice/check-voice" ]; then
   fi
 fi
 
+# and whether the site promises an engine anybody can install. Pushing
+# deploys it, and a reader of it runs cargo add blitzkit and gets the
+# newest tag: on 2026-11-03 the testing page documented PICTURES_REQUIRED
+# while 0.14.0 was the published crate, and nothing in the repo could see
+# it. See scripts/check-site for what it does and does not ask.
+# named from the project root, which is where this hook stands: it cd's up
+# one so it can reach ./check-fresh, and a path relative to this crate
+# silently finds nothing there. ship-check was wrong the same way until
+# 2026-11-03.
+if [ -x blitzkit/scripts/check-site ]; then
+  if ! blitzkit/scripts/check-site; then
+    echo
+    echo "pre-push: stopped by check-site above."
+    exit 1
+  fi
+fi
+
 # **And what the tree holds that the commit does not.**
 #
 # Everything below reads `web/MADE`, and `web/MADE` is a file the rebuild

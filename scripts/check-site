@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+#
+# check-site — the site may not promise an engine nobody can install.
+#
+# Pushing this repo deploys blitzkit.jva.lol, and a reader of that site runs
+# `cargo add blitzkit` and gets the published crate. On 2026-11-03 the
+# testing page documented `PICTURES_REQUIRED` while the newest release was
+# 0.14.0, which had never heard of it. Nothing could see that: check-listings
+# asks whether things are written about, check-fresh asks whether derived
+# files are current, and neither asks whether the prose describes the crate a
+# stranger gets. It was found by hand and the release that followed is the
+# only reason this is not still true.
+#
+# **What it checks, which is less than it sounds.** Every name the site uses
+# in a `blitzkit::` path or in backticks, against the source at the newest
+# tag, asking only whether that name appears anywhere in it. Not whether it
+# is public, not whether the path is right, not whether the prose around it
+# is true. A name the published crate has never heard of is the one failure
+# worth catching automatically and it is the one this catches.
+#
+# **The tag and not crates.io**, because ./release tags after it publishes,
+# so a tag is a version that exists, and reading one costs no network.
+#
+# Usage: scripts/check-site, from anywhere.
+
+set -uo pipefail
+
+here=$(cd "$(dirname "$0")/.." && pwd) || exit 1
+cd "$here" || exit 1
+
+tag=$(git tag --sort=-v:refname | head -1)
+if [ -z "$tag" ]; then
+  echo "check-site: nothing is tagged, so nothing was checked."
+  exit 0
+fi
+
+pages=(site/content/*.md site/content/docs/*.md)
+
+# in a fenced block it is a path, so the name is its last segment; out of one
+# it is a backticked word, and `NAME=1` is an environment variable whose name
+# is the part in front of the `=`
+names=$(
+  {
+    awk 'FNR == 1 { fence = 0 } /^(```|~~~)/ { fence = !fence; next } fence' "${pages[@]}" |
+      grep -oE 'blitzkit::[A-Za-z_0-9:]+' | sed 's/.*:://'
+    awk 'FNR == 1 { fence = 0 } /^(```|~~~)/ { fence = !fence; next } !fence' "${pages[@]}" |
+      grep -oE '`[A-Za-z_][A-Za-z_0-9]*(=[A-Za-z_0-9]*)?`' | tr -d '`' | sed 's/=.*//'
+  } | grep -vE '^$' | sort -u
+)
+
+missing=""
+for name in $names; do
+  git grep -q -w -- "$name" "$tag" -- src || missing="$missing $name"
+done
+
+if [ -z "$missing" ]; then
+  echo "check-site: everything the site names is in $tag."
+  exit 0
+fi
+
+echo "check-site: the site names things $tag has never heard of:" >&2
+for name in $missing; do
+  echo "  $name" >&2
+  grep -nE "(\`$name|blitzkit::[A-Za-z_0-9:]*$name)" "${pages[@]}" | head -2 | sed 's/^/      /' >&2
+done
+echo >&2
+echo "A reader runs cargo add blitzkit and gets $tag. Either cut a release" >&2
+echo "or take it off the page." >&2
+exit 1
