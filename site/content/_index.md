@@ -8,6 +8,8 @@ A small 2D and 3D game engine in Rust, over wgpu.
 
 Implement one trait and call `start()`.
 
+See [testing a game]({{< relref "docs/testing" >}}).
+
 {{< play name="tunnel" src="/media/tunnel.mp4" poster="/media/tunnel.png"
     alt="Looking down a tunnel of dark and light checks receding to a vanishing point, with a gold ring hanging off centre" >}}
 
@@ -23,6 +25,8 @@ cargo add blitzkit
 
 - [Getting started]({{< relref "docs/getting-started" >}})
   smallest steps to "Hello world" in a window
+- [Testing a game]({{< relref "docs/testing" >}}) holding a frame against a
+  picture of what it should be
 - [Examples]({{< relref "docs/examples" >}}) single-file demonstrations
 - [Games]({{< relref "docs/games" >}}) fully fledged and open-source implementations
   using the engine
