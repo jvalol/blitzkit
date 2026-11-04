@@ -11,39 +11,39 @@
 # and replaced the first time anything is remade.
 #
 # file	engine	made
-arcade.js	16c1b64	arcade@8e77e64	2026-11-03T13:17	57ca8e9c
-arcade_bg.wasm	16c1b64	arcade@8e77e64	2026-11-03T13:17	57ca8e9c
-chain.js	07122e0	-	2026-11-03T12:34
-chain_bg.wasm	07122e0	-	2026-11-03T12:34
-cubes.js	07122e0	-	2026-11-03T12:34
-cubes_bg.wasm	07122e0	-	2026-11-03T12:34
-hilbert.js	07122e0	-	2026-11-03T12:34
-hilbert_bg.wasm	07122e0	-	2026-11-03T12:34
-klein.js	07122e0	-	2026-11-03T12:34
-klein_bg.wasm	07122e0	-	2026-11-03T12:34
-knot.js	07122e0	-	2026-11-03T12:34
-knot_bg.wasm	07122e0	-	2026-11-03T12:34
-load.js	07122e0	-	2026-11-03T12:34
-load_bg.wasm	07122e0	-	2026-11-03T12:34
-menger.js	07122e0	-	2026-11-03T12:34
-menger_bg.wasm	07122e0	-	2026-11-03T12:34
-poolhall.js	07122e0	poolhall@b3273f2	2026-11-03T12:34
-poolhall_bg.wasm	07122e0	poolhall@b3273f2	2026-11-03T12:34
-ripple.js	07122e0	-	2026-11-03T12:34
-ripple_bg.wasm	07122e0	-	2026-11-03T12:34
-rolling.js	07122e0	-	2026-11-03T12:34
-rolling_bg.wasm	07122e0	-	2026-11-03T12:34
-sierpinski.js	07122e0	-	2026-11-03T12:34
-sierpinski_bg.wasm	07122e0	-	2026-11-03T12:34
-slider.js	07122e0	slider@0e09857	2026-11-03T12:34
-slider_bg.wasm	07122e0	slider@0e09857	2026-11-03T12:34
-snake.js	07122e0	snake@7f8282c	2026-11-03T12:34
-snake_bg.wasm	07122e0	snake@7f8282c	2026-11-03T12:34
-stacking.js	07122e0	-	2026-11-03T12:34
-stacking_bg.wasm	07122e0	-	2026-11-03T12:34
-starry.js	07122e0	starry@ed2cbdb	2026-11-03T12:34
-starry_bg.wasm	07122e0	starry@ed2cbdb	2026-11-03T12:34
-teapot.js	07122e0	-	2026-11-03T12:34
-teapot_bg.wasm	07122e0	-	2026-11-03T12:34
-tunnel.js	07122e0	-	2026-11-03T12:34
-tunnel_bg.wasm	07122e0	-	2026-11-03T12:34
+arcade.js	96ad51a	arcade@7624422	2026-11-03T17:22	2f8fb7b6
+arcade_bg.wasm	96ad51a	arcade@7624422	2026-11-03T17:22	2f8fb7b6
+chain.js	96ad51a	-	2026-11-03T17:22	-
+chain_bg.wasm	96ad51a	-	2026-11-03T17:22	-
+cubes.js	96ad51a	-	2026-11-03T17:22	-
+cubes_bg.wasm	96ad51a	-	2026-11-03T17:22	-
+hilbert.js	96ad51a	-	2026-11-03T17:22	-
+hilbert_bg.wasm	96ad51a	-	2026-11-03T17:22	-
+klein.js	96ad51a	-	2026-11-03T17:22	-
+klein_bg.wasm	96ad51a	-	2026-11-03T17:22	-
+knot.js	96ad51a	-	2026-11-03T17:22	-
+knot_bg.wasm	96ad51a	-	2026-11-03T17:22	-
+load.js	96ad51a	-	2026-11-03T17:22	-
+load_bg.wasm	96ad51a	-	2026-11-03T17:22	-
+menger.js	96ad51a	-	2026-11-03T17:22	-
+menger_bg.wasm	96ad51a	-	2026-11-03T17:22	-
+poolhall.js	96ad51a	poolhall@e8e29c4	2026-11-03T17:22	-
+poolhall_bg.wasm	96ad51a	poolhall@e8e29c4	2026-11-03T17:22	-
+ripple.js	96ad51a	-	2026-11-03T17:22	-
+ripple_bg.wasm	96ad51a	-	2026-11-03T17:22	-
+rolling.js	96ad51a	-	2026-11-03T17:22	-
+rolling_bg.wasm	96ad51a	-	2026-11-03T17:22	-
+sierpinski.js	96ad51a	-	2026-11-03T17:22	-
+sierpinski_bg.wasm	96ad51a	-	2026-11-03T17:22	-
+slider.js	96ad51a	slider@52f0bf5	2026-11-03T17:22	-
+slider_bg.wasm	96ad51a	slider@52f0bf5	2026-11-03T17:22	-
+snake.js	96ad51a	snake@17da72f	2026-11-03T17:22	-
+snake_bg.wasm	96ad51a	snake@17da72f	2026-11-03T17:22	-
+stacking.js	96ad51a	-	2026-11-03T17:22	-
+stacking_bg.wasm	96ad51a	-	2026-11-03T17:22	-
+starry.js	96ad51a	starry@bf2f2d0	2026-11-03T17:22	-
+starry_bg.wasm	96ad51a	starry@bf2f2d0	2026-11-03T17:22	-
+teapot.js	96ad51a	-	2026-11-03T17:22	-
+teapot_bg.wasm	96ad51a	-	2026-11-03T17:22	-
+tunnel.js	96ad51a	-	2026-11-03T17:22	-
+tunnel_bg.wasm	96ad51a	-	2026-11-03T17:22	-
