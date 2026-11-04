@@ -62,9 +62,7 @@ rest have no spelling until something wants to write one down.
 
 ## Out of scope
 
-**The mouse.** `shove` in `refresh-examples` is a press, a drag and a
-release, and nothing here speaks it. stacking is the one clip that needs
-it.
+**The mouse**, which is spec 0082.
 
 **The examples' posters, which is what this was built for.** Each is cut
 from a filmed take at a second chosen by eye, and those seconds are

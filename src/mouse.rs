@@ -23,6 +23,35 @@ pub enum MouseButton {
     Other(u16),
 }
 
+impl MouseButton {
+    /// The button a script calls `left`, or `other:9`.
+    ///
+    /// Spec 0082. The mirror of `KeyboardKey::named`, and here for the same
+    /// reason: a recording is read back by people as well as by this.
+    pub fn named(name: &str) -> Option<Self> {
+        Some(match name.to_ascii_lowercase().as_str() {
+            "left" => Self::Left,
+            "right" => Self::Right,
+            "middle" => Self::Middle,
+            "back" => Self::Back,
+            "forward" => Self::Forward,
+            other => Self::Other(other.strip_prefix("other:")?.parse().ok()?),
+        })
+    }
+
+    /// What `named` reads, so the two cannot come apart.
+    pub fn name(&self) -> String {
+        match self {
+            Self::Left => "left".to_string(),
+            Self::Right => "right".to_string(),
+            Self::Middle => "middle".to_string(),
+            Self::Back => "back".to_string(),
+            Self::Forward => "forward".to_string(),
+            Self::Other(which) => format!("other:{}", which),
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ButtonState {
     Pressed,

@@ -260,10 +260,28 @@ fn one_argument(name: &str) -> Option<String> {
 /// is what that grammar compiles to, which is also what a recording of
 /// somebody playing would be. Spec 0080.
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, PartialEq)]
+enum Did {
+    Key {
+        key: keyboard::KeyboardKey,
+        down: bool,
+    },
+    Button {
+        button: mouse::MouseButton,
+        down: bool,
+    },
+    /// Where the cursor is, in the pixels quads and text use.
+    Cursor(Vec2),
+    /// How far the mouse moved, which keeps arriving while the cursor is
+    /// locked and is what a camera reads.
+    Moved(Vec2),
+    Wheel(Vec2),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 struct Pressed {
     at: f32,
-    key: keyboard::KeyboardKey,
-    down: bool,
+    did: Did,
 }
 
 /// Reads a script: one event a line, `<seconds> <down|up> <key>`.
@@ -294,20 +312,34 @@ fn played_from(script: Option<std::path::PathBuf>) -> Vec<Pressed> {
 
         let mut word = line.split_whitespace();
         let at = word.next().and_then(|said| said.parse::<f32>().ok());
-        let way = word.next();
-        let key = word.next().and_then(keyboard::KeyboardKey::named);
+        let way = word.next().unwrap_or("");
+        let what = word.next().unwrap_or("");
+        let and = word.next().unwrap_or("");
 
-        match (at, way, key) {
-            (Some(at), Some("down"), Some(key)) => out.push(Pressed {
-                at,
-                key,
-                down: true,
-            }),
-            (Some(at), Some("up"), Some(key)) => out.push(Pressed {
-                at,
-                key,
+        // a pair of numbers, for the three that are a place or a distance
+        let both = || match (what.parse::<f32>(), and.parse::<f32>()) {
+            (Ok(x), Ok(y)) => Some(vec2(x, y)),
+            _ => None,
+        };
+
+        let did = match way {
+            "down" => keyboard::KeyboardKey::named(what).map(|key| Did::Key { key, down: true }),
+            "up" => keyboard::KeyboardKey::named(what).map(|key| Did::Key { key, down: false }),
+            "press" => {
+                mouse::MouseButton::named(what).map(|button| Did::Button { button, down: true })
+            }
+            "release" => mouse::MouseButton::named(what).map(|button| Did::Button {
+                button,
                 down: false,
             }),
+            "cursor" => both().map(Did::Cursor),
+            "moved" => both().map(Did::Moved),
+            "wheel" => both().map(Did::Wheel),
+            _ => None,
+        };
+
+        match (at, did) {
+            (Some(at), Some(did)) => out.push(Pressed { at, did }),
             _ => eprintln!("{}:{}: {} is not an event", path.display(), n + 1, line),
         }
     }
@@ -366,15 +398,32 @@ fn picture_of(mut game: Box<dyn Game>, to: &std::path::Path, seconds: f32, playe
                 break;
             }
 
-            game.process_keyboard(keyboard::KeyboardInput::new(
-                pressed.key,
-                if pressed.down {
-                    keyboard::KeyboardKeyState::Pressed
-                } else {
-                    keyboard::KeyboardKeyState::Released
-                },
-                false,
-            ));
+            match &pressed.did {
+                Did::Key { key, down } => {
+                    game.process_keyboard(keyboard::KeyboardInput::new(
+                        *key,
+                        if *down {
+                            keyboard::KeyboardKeyState::Pressed
+                        } else {
+                            keyboard::KeyboardKeyState::Released
+                        },
+                        false,
+                    ));
+                }
+                Did::Button { button, down } => {
+                    game.process_mouse(mouse::MouseInput::new(
+                        *button,
+                        if *down {
+                            mouse::ButtonState::Pressed
+                        } else {
+                            mouse::ButtonState::Released
+                        },
+                    ));
+                }
+                Did::Cursor(at) => game.cursor_moved(*at),
+                Did::Moved(by) => game.mouse_motion(*by),
+                Did::Wheel(by) => game.mouse_wheel(*by),
+            }
             next += 1;
         }
 
@@ -608,8 +657,38 @@ impl Recording {
             keyboard::KeyboardKeyState::Released => "up",
         };
         let _ = writeln!(self.to, "{:.3} {} {:?}", self.at, way, input.key);
+        self.flush();
+    }
 
-        // **Flushed on every key, not left to the buffer.** A `BufWriter`
+    fn clicked(&mut self, input: &mouse::MouseInput) {
+        use std::io::Write;
+
+        let way = match input.state {
+            mouse::ButtonState::Pressed => "press",
+            mouse::ButtonState::Released => "release",
+        };
+        let _ = writeln!(self.to, "{:.3} {} {}", self.at, way, input.button.name());
+        self.flush();
+    }
+
+    /// The cursor, the raw motion and the wheel, which all say two numbers.
+    ///
+    /// **These are a frame's worth of lines, not a person's.** A key is
+    /// pressed a few times a second and a moving mouse reports every frame,
+    /// so a minute of play with the cursor down is thousands of lines where
+    /// the keys are tens. That is what fidelity costs and the file is still
+    /// a file. Spec 0082.
+    fn moved(&mut self, way: &str, by: Vec2) {
+        use std::io::Write;
+
+        let _ = writeln!(self.to, "{:.3} {} {} {}", self.at, way, by.x, by.y);
+        self.flush();
+    }
+
+    fn flush(&mut self) {
+        use std::io::Write;
+
+        // **Flushed on every event, not left to the buffer.** A `BufWriter`
         // dropped on a clean exit writes what it holds, and a game killed
         // or crashed never drops it: the first live try at this recorded
         // nothing at all, because the process was killed and the buffer
@@ -763,14 +842,33 @@ impl ApplicationHandler for App {
             }
             WindowEvent::MouseInput { button, state, .. } => {
                 let input = mouse::MouseInput::new((&button).into(), (&state).into());
+
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(recording) = self.recording.as_mut() {
+                    recording.clicked(&input);
+                }
+
                 self.game.process_mouse(input);
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.game
-                    .cursor_moved(vec2(position.x as f32, position.y as f32));
+                let at = vec2(position.x as f32, position.y as f32);
+
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(recording) = self.recording.as_mut() {
+                    recording.moved("cursor", at);
+                }
+
+                self.game.cursor_moved(at);
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                self.game.mouse_wheel(mouse::scroll_pixels(&delta));
+                let by = mouse::scroll_pixels(&delta);
+
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(recording) = self.recording.as_mut() {
+                    recording.moved("wheel", by);
+                }
+
+                self.game.mouse_wheel(by);
             }
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(physical_size) => {
@@ -800,7 +898,14 @@ impl ApplicationHandler for App {
         event: DeviceEvent,
     ) {
         if let DeviceEvent::MouseMotion { delta } = event {
-            self.game.mouse_motion(vec2(delta.0 as f32, delta.1 as f32));
+            let by = vec2(delta.0 as f32, delta.1 as f32);
+
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(recording) = self.recording.as_mut() {
+                recording.moved("moved", by);
+            }
+
+            self.game.mouse_motion(by);
         }
     }
 
@@ -921,6 +1026,78 @@ mod tests {
     /// It also checks the repeat, because holding a key sends a stream of
     /// them and `--play` has no word for one. A recording that wrote them
     /// down would replay a held key as somebody hammering it.
+    /// Spec 0082: and the mouse goes round the same loop.
+    ///
+    /// **Eight of the thirteen games here are steered by it**, so a
+    /// recording without it is a file that replays as nobody doing
+    /// anything. Each of the four kinds goes out and comes back: a button,
+    /// where the cursor is, how far the mouse moved, and the wheel.
+    ///
+    /// `press right` and `down right` are different lines on purpose. The
+    /// mouse has a right button and the keyboard has a right arrow, and one
+    /// verb for both would have made a recording of either into a recording
+    /// of the wrong one.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn a_recording_of_the_mouse_can_be_played_back() {
+        use crate::mouse::{ButtonState, MouseButton, MouseInput};
+
+        let path = std::env::temp_dir().join("blitzkit-0082-round-trip.play");
+        let _ = std::fs::remove_file(&path);
+
+        let mut recording = super::Recording::new(&path).expect("a file to write");
+        recording.clicked(&MouseInput::new(MouseButton::Left, ButtonState::Pressed));
+        recording.at = 1.5;
+        recording.moved("cursor", vec2(120.0, 48.5));
+        recording.moved("moved", vec2(-3.0, 2.0));
+        recording.moved("wheel", vec2(0.0, -120.0));
+        recording.at = 2.0;
+        recording.clicked(&MouseInput::new(MouseButton::Left, ButtonState::Released));
+        recording.clicked(&MouseInput::new(
+            MouseButton::Other(9),
+            ButtonState::Pressed,
+        ));
+        drop(recording);
+
+        let played = super::played_from(Some(path.clone()));
+
+        assert_eq!(
+            played.len(),
+            6,
+            "six events went in and {} came out",
+            played.len()
+        );
+        assert_eq!(
+            played[0].did,
+            super::Did::Button {
+                button: MouseButton::Left,
+                down: true
+            }
+        );
+        assert_eq!(played[1].did, super::Did::Cursor(vec2(120.0, 48.5)));
+        assert_eq!(played[2].did, super::Did::Moved(vec2(-3.0, 2.0)));
+        assert_eq!(played[3].did, super::Did::Wheel(vec2(0.0, -120.0)));
+        assert_eq!(
+            played[5].did,
+            super::Did::Button {
+                button: MouseButton::Other(9),
+                down: true
+            },
+            "a button the platform only knows by number did not survive"
+        );
+
+        // and the two rights are not each other
+        assert_ne!(
+            super::played_from(Some(path.clone()))[0].did,
+            super::Did::Key {
+                key: crate::keyboard::KeyboardKey::Right,
+                down: true
+            }
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn a_recording_can_be_played_back() {
@@ -962,12 +1139,22 @@ mod tests {
             "three presses went in and {} came out, so the repeat was kept or a line was dropped",
             played.len()
         );
-        assert_eq!(played[0].key, KeyboardKey::Right);
-        assert!(played[0].down);
+        assert_eq!(
+            played[0].did,
+            super::Did::Key {
+                key: KeyboardKey::Right,
+                down: true
+            }
+        );
         assert_eq!(played[0].at, 0.0);
         assert_eq!(played[1].at, 2.5);
-        assert!(!played[1].down);
-        assert_eq!(played[2].key, KeyboardKey::Space);
+        assert_eq!(
+            played[1].did,
+            super::Did::Key {
+                key: KeyboardKey::Right,
+                down: false
+            }
+        );
         assert_eq!(played[2].at, 4.0);
 
         let _ = std::fs::remove_file(&path);

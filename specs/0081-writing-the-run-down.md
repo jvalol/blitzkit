@@ -61,8 +61,7 @@ varies and a replay's does not.
 
 ## Out of scope
 
-**The mouse**, as in spec 0080. A game steered by dragging records nothing
-of it.
+**The mouse**, which is spec 0082.
 
 **Exactness.** Replaying at a fixed step is not the varying `dt` the
 recording was made under. Writing each frame's `dt` down beside the keys
