@@ -199,7 +199,7 @@ cargo run --release --example knot
 cargo run --release --example load
 ```
 
-![Seventeen hundred white cubes standing in a grid against black, their rows running away from the middle of the picture, with a readout over them giving the work in milliseconds, the time between frames, and the draw and triangle counts](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/load.png)
+![Thousands of white cubes standing in a grid against black, their rows running away from the middle of the picture, with a readout over them counting the cubes, the draws and the triangles, and what the frame cost on the card](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/load.png)
 
 **hilbert**, I didn't know what this was until I got into this space of weird 3d geometries. I just think it's neat.
 

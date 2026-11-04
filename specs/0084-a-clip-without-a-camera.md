@@ -105,7 +105,36 @@ agree with. Both come out as a byte count, which is what the check reads.
 
 - **All sixteen**, rendered and encoded with no window open, no permission
   asked for, and nothing on screen to disturb.
-- **Twice**, byte for byte.
+- **All sixteen, twice each.** Fourteen match to the byte. See below.
+
+## Two of the sixteen do not come out the same twice
+
+menger and load do not. Every other example does, measured over two runs each
+of all sixteen on 2026-11-04, the arcade's 46 seconds and 90 metres of walking
+included. Three runs of menger gave three different streams.
+
+**This spec claimed otherwise first.** The claim was written off one example,
+`rolling`, which does match, and then stated as a property of all of them.
+That is the mistake spec 0079 made one day earlier, with `snake` standing in
+for fourteen, and which that spec now carries a correction for. Verifying one
+and writing down all is apparently not a thing being told once fixes.
+
+**What it is not.** Not length and not scene size: the arcade is the longest
+and heaviest and is stable, and menger diverges at 8000 cubes as well as at
+160000. Not occlusion or the retained-instance path: menger's source asks for
+neither. Not the engine adapting to a measured frame time: `worked` and
+`waited` are reported and never read back into what gets drawn. Not the
+encoder: these hashes are of the raw frames before ffmpeg sees them.
+
+**What is known.** The first three frames of menger are identical across four
+runs; by thirty frames one run in four has diverged. So it is something that
+accumulates rather than something wrong in the first frame, and a picture of
+the same run is unaffected, because `--picture-to` does not read a frame back
+until the last one. Three `--picture-to` renders of menger at the same second
+are byte-identical.
+
+**What it costs.** `stamp` still cannot become a real check, for these two.
+A clip that was refilmed and a clip that changed look the same in a diff.
 
 ## A run with no clock cannot say what a frame took
 
