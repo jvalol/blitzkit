@@ -1,6 +1,6 @@
 ---
 title: arcade
-weight: 6
+weight: 7
 ---
 
 # arcade

@@ -29,6 +29,8 @@ cargo add blitzkit
   empty crate to a picture test
 - [Testing a game]({{< relref "docs/testing" >}}) holding a frame against a
   picture of what it should be
+- [Repeating a run]({{< relref "docs/repeating-a-run" >}}) drawing a frame
+  with no window, and recording what you pressed so it happens again
 - [Examples]({{< relref "docs/examples" >}}) single-file demonstrations
 - [Games]({{< relref "docs/games" >}}) fully fledged and open-source implementations
   using the engine
