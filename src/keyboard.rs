@@ -12,6 +12,88 @@ pub enum KeyboardKeyState {
     Released,
 }
 
+impl KeyboardKey {
+    /// The key a script calls `right`, or `w`, or `space`.
+    ///
+    /// **The keys a script can name, and not all 196.** A replay says what
+    /// somebody pressed, and what anybody presses is letters, digits, the
+    /// arrows and a handful of named ones. The rest exist and have no
+    /// spelling here until something wants to write one down. Spec 0080.
+    ///
+    /// Case does not matter, since a script is typed by a person.
+    pub fn named(name: &str) -> Option<Self> {
+        let name = name.to_ascii_lowercase();
+
+        if name.len() == 1 {
+            let only = name.as_bytes()[0];
+
+            if only.is_ascii_lowercase() {
+                return Some(LETTERS[(only - b'a') as usize]);
+            }
+            if only.is_ascii_digit() {
+                return Some(DIGITS[(only - b'0') as usize]);
+            }
+        }
+
+        Some(match name.as_str() {
+            "space" => Self::Space,
+            "up" => Self::Up,
+            "down" => Self::Down,
+            "left" => Self::Left,
+            "right" => Self::Right,
+            "escape" => Self::Escape,
+            "enter" | "return" => Self::Return,
+            "tab" => Self::Tab,
+            "shift" => Self::LShift,
+            _ => return None,
+        })
+    }
+}
+
+/// `a` to `z`, in order, for `KeyboardKey::named`.
+const LETTERS: [KeyboardKey; 26] = [
+    KeyboardKey::A,
+    KeyboardKey::B,
+    KeyboardKey::C,
+    KeyboardKey::D,
+    KeyboardKey::E,
+    KeyboardKey::F,
+    KeyboardKey::G,
+    KeyboardKey::H,
+    KeyboardKey::I,
+    KeyboardKey::J,
+    KeyboardKey::K,
+    KeyboardKey::L,
+    KeyboardKey::M,
+    KeyboardKey::N,
+    KeyboardKey::O,
+    KeyboardKey::P,
+    KeyboardKey::Q,
+    KeyboardKey::R,
+    KeyboardKey::S,
+    KeyboardKey::T,
+    KeyboardKey::U,
+    KeyboardKey::V,
+    KeyboardKey::W,
+    KeyboardKey::X,
+    KeyboardKey::Y,
+    KeyboardKey::Z,
+];
+
+/// `0` to `9`, in order.
+const DIGITS: [KeyboardKey; 10] = [
+    KeyboardKey::Key0,
+    KeyboardKey::Key1,
+    KeyboardKey::Key2,
+    KeyboardKey::Key3,
+    KeyboardKey::Key4,
+    KeyboardKey::Key5,
+    KeyboardKey::Key6,
+    KeyboardKey::Key7,
+    KeyboardKey::Key8,
+    KeyboardKey::Key9,
+];
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum KeyboardKey {
     Key1,
@@ -439,6 +521,38 @@ impl KeyboardInput {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Spec 0080: a script says `right` and means a key.
+    ///
+    /// **Both halves.** A lookup that answered `Some` for everything would
+    /// pass a test that only asked about keys that exist, and a script full
+    /// of typos would play as a script full of keys.
+    #[test]
+    fn a_key_can_be_named() {
+        assert_eq!(KeyboardKey::named("right"), Some(KeyboardKey::Right));
+        assert_eq!(KeyboardKey::named("space"), Some(KeyboardKey::Space));
+        assert_eq!(KeyboardKey::named("q"), Some(KeyboardKey::Q));
+        assert_eq!(KeyboardKey::named("Q"), Some(KeyboardKey::Q));
+        assert_eq!(KeyboardKey::named("7"), Some(KeyboardKey::Key7));
+        assert_eq!(KeyboardKey::named("return"), KeyboardKey::named("enter"));
+
+        // every letter, because an off-by-one in the table would only show
+        // at one end of it
+        for (n, letter) in ("abcdefghijklmnopqrstuvwxyz").chars().enumerate() {
+            assert_eq!(
+                KeyboardKey::named(&letter.to_string()),
+                Some(LETTERS[n]),
+                "{} came back as something else",
+                letter
+            );
+        }
+        assert_eq!(KeyboardKey::named("a"), Some(KeyboardKey::A));
+        assert_eq!(KeyboardKey::named("z"), Some(KeyboardKey::Z));
+
+        assert_eq!(KeyboardKey::named("nonsense"), None);
+        assert_eq!(KeyboardKey::named(""), None);
+        assert_eq!(KeyboardKey::named("ctrl+c"), None);
+    }
 
     #[test]
     fn maps_letter_keys() {

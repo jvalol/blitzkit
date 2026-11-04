@@ -154,7 +154,7 @@ pub fn start(title: &str, game: Box<dyn Game>) {
 
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(to) = asked_for_a_picture() {
-        picture_of(game, &to);
+        picture_of(game, &to, asked_how_long(), played_from(asked_to_play()));
 
         return;
     }
@@ -166,6 +166,9 @@ pub fn start(title: &str, game: Box<dyn Game>) {
         title: title.to_string(),
         game,
         running: None,
+        #[cfg(not(target_arch = "wasm32"))]
+        recording: one_argument("--record")
+            .and_then(|to| Recording::new(std::path::Path::new(&to))),
         arriving: Rc::new(RefCell::new(None)),
         asked: false,
     };
@@ -211,6 +214,109 @@ fn asked_for_a_picture() -> Option<std::path::PathBuf> {
     None
 }
 
+/// How long `--picture-for` says to run, in seconds.
+///
+/// Five, which is how long `refresh-screenshots` left a window up for while
+/// a game staged itself. Named rather than assumed because a poster is not
+/// always five seconds in: the engine's own examples each have a second
+/// where the thing they are about has happened, and chain's is 7.4.
+#[cfg(not(target_arch = "wasm32"))]
+fn asked_how_long() -> f32 {
+    one_argument("--picture-for")
+        .and_then(|said| said.parse().ok())
+        .unwrap_or(5.0)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn asked_to_play() -> Option<std::path::PathBuf> {
+    one_argument("--play").map(std::path::PathBuf::from)
+}
+
+/// `--name value` or `--name=value`, whichever was written.
+#[cfg(not(target_arch = "wasm32"))]
+fn one_argument(name: &str) -> Option<String> {
+    let mut args = std::env::args();
+    let joined = format!("{}=", name);
+
+    while let Some(arg) = args.next() {
+        if let Some(value) = arg.strip_prefix(&joined) {
+            return Some(value.to_string());
+        }
+        if arg == name {
+            return args.next();
+        }
+    }
+
+    None
+}
+
+/// A key going down or coming up, at a time.
+///
+/// **A log and not a language.** `./refresh-examples` already has a grammar
+/// for this, with `hold:right:1.4` and `tap:right:20:0.035` in it, and that
+/// grammar is where it belongs: it is how somebody writes down what to film.
+/// Teaching the engine to read it too would be two readers of one grammar,
+/// which is the fault this project keeps finding. So what the engine reads
+/// is what that grammar compiles to, which is also what a recording of
+/// somebody playing would be. Spec 0080.
+#[cfg(not(target_arch = "wasm32"))]
+struct Pressed {
+    at: f32,
+    key: keyboard::KeyboardKey,
+    down: bool,
+}
+
+/// Reads a script: one event a line, `<seconds> <down|up> <key>`.
+///
+/// Blank lines and anything after a `#` are ignored, and a line this cannot
+/// read is said on stderr and skipped rather than taken as silence: a replay
+/// that quietly drops half its input is a replay of something else.
+#[cfg(not(target_arch = "wasm32"))]
+fn played_from(script: Option<std::path::PathBuf>) -> Vec<Pressed> {
+    let Some(path) = script else {
+        return Vec::new();
+    };
+    let said = match std::fs::read_to_string(&path) {
+        Ok(said) => said,
+        Err(why) => {
+            eprintln!("{} could not be read: {}", path.display(), why);
+
+            return Vec::new();
+        }
+    };
+
+    let mut out = Vec::new();
+    for (n, line) in said.lines().enumerate() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        let mut word = line.split_whitespace();
+        let at = word.next().and_then(|said| said.parse::<f32>().ok());
+        let way = word.next();
+        let key = word.next().and_then(keyboard::KeyboardKey::named);
+
+        match (at, way, key) {
+            (Some(at), Some("down"), Some(key)) => out.push(Pressed {
+                at,
+                key,
+                down: true,
+            }),
+            (Some(at), Some("up"), Some(key)) => out.push(Pressed {
+                at,
+                key,
+                down: false,
+            }),
+            _ => eprintln!("{}:{}: {} is not an event", path.display(), n + 1, line),
+        }
+    }
+
+    out.sort_by(|one, other| one.at.total_cmp(&other.at));
+
+    out
+}
+
 /// Runs a game with no window and writes one frame of it to a file.
 ///
 /// **The same frame a window would have shown, arrived at the same way.**
@@ -226,7 +332,7 @@ fn asked_for_a_picture() -> Option<std::path::PathBuf> {
 /// the 0.15.0 release died outright because the shell it was started in had
 /// no grant. Spec 0079.
 #[cfg(not(target_arch = "wasm32"))]
-fn picture_of(mut game: Box<dyn Game>, to: &std::path::Path) {
+fn picture_of(mut game: Box<dyn Game>, to: &std::path::Path, seconds: f32, played: Vec<Pressed>) {
     let (wide, tall) = PICTURE_SIZE;
     let Some(mut renderer) = pollster::block_on(renderer::Renderer::offscreen(wide, tall)) else {
         eprintln!("no adapter here, so {} was not drawn", to.display());
@@ -247,7 +353,31 @@ fn picture_of(mut game: Box<dyn Game>, to: &std::path::Path) {
         (wide as f32, tall as f32),
     );
 
-    for _ in 0..PICTURE_FRAMES {
+    let frames = (seconds / PICTURE_STEP).round().max(1.0) as u32;
+    let mut next = 0;
+
+    for frame in 0..frames {
+        // **Before the frame they belong to, not after it.** A key pressed
+        // at 1.4 is a key the frame at 1.4 already has down, which is what
+        // a window does: the event arrives and the next redraw reads it.
+        let now = frame as f32 * PICTURE_STEP;
+        while let Some(pressed) = played.get(next) {
+            if pressed.at > now {
+                break;
+            }
+
+            game.process_keyboard(keyboard::KeyboardInput::new(
+                pressed.key,
+                if pressed.down {
+                    keyboard::KeyboardKeyState::Pressed
+                } else {
+                    keyboard::KeyboardKeyState::Released
+                },
+                false,
+            ));
+            next += 1;
+        }
+
         game.before_frame(&mut renderer);
         between_frames(&mut scene, &mut geometry, &mut text_renderer);
         game.update(
@@ -428,10 +558,75 @@ where
 /// calls rather than anything that can reach the app.
 type Arriving = Rc<RefCell<Option<(Arc<Window>, Renderer)>>>;
 
+/// Writes down what somebody pressed, so the run can be handed over.
+///
+/// **In the game's own time, not the clock's.** The seconds written are the
+/// `dt` the game has been given, added up, because that is what a replay
+/// plays against. A wall clock would be the time the machine took, which is
+/// a different number on a different machine and not one the game ever saw.
+///
+/// What this gives you is the same input at the same points in the game's
+/// time. Whether that gives the same frames is the game's own business: one
+/// that steps its world on a fixed step gets its run back, and one that
+/// multiplies by `dt` gets a run that starts the same and drifts. Spec
+/// 0081.
+#[cfg(not(target_arch = "wasm32"))]
+struct Recording {
+    to: std::io::BufWriter<std::fs::File>,
+    at: f32,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Recording {
+    fn new(path: &std::path::Path) -> Option<Self> {
+        match std::fs::File::create(path) {
+            Ok(file) => Some(Self {
+                to: std::io::BufWriter::new(file),
+                at: 0.0,
+            }),
+            Err(why) => {
+                eprintln!("{} could not be written: {}", path.display(), why);
+
+                None
+            }
+        }
+    }
+
+    /// **A repeat is not a press.** Holding a key sends one down and then a
+    /// stream of repeats from the operating system, and `--play` sends a
+    /// down and an up. Writing the repeats down would make a replay of a
+    /// held key into a replay of somebody hammering it.
+    fn pressed(&mut self, input: &keyboard::KeyboardInput) {
+        use std::io::Write;
+
+        if input.repeat {
+            return;
+        }
+
+        let way = match input.state {
+            keyboard::KeyboardKeyState::Pressed => "down",
+            keyboard::KeyboardKeyState::Released => "up",
+        };
+        let _ = writeln!(self.to, "{:.3} {} {:?}", self.at, way, input.key);
+
+        // **Flushed on every key, not left to the buffer.** A `BufWriter`
+        // dropped on a clean exit writes what it holds, and a game killed
+        // or crashed never drops it: the first live try at this recorded
+        // nothing at all, because the process was killed and the buffer
+        // went with it. The run worth handing somebody is most often the
+        // one that ended badly, and a key is pressed at the rate a person
+        // presses keys, so there is nothing to save by waiting.
+        let _ = self.to.flush();
+    }
+}
+
 struct App {
     title: String,
     game: Box<dyn Game>,
     running: Option<Running>,
+    /// Where `--record` is writing what was pressed, if it was asked for.
+    #[cfg(not(target_arch = "wasm32"))]
+    recording: Option<Recording>,
     /// The window and its renderer, once there is one.
     ///
     /// A browser cannot be made to wait for a graphics device, so `resumed`
@@ -503,6 +698,11 @@ impl ApplicationHandler for App {
                 let dt = clamp_delta_time(since);
                 running.last_update = now;
 
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(recording) = self.recording.as_mut() {
+                    recording.at += dt;
+                }
+
                 // the uncapped one as well, for anything measuring rather
                 // than simulating. Spec 0056: `dt` stops at
                 // `MAX_DELTA_TIME`, so a frame of a fifth of a second
@@ -552,6 +752,12 @@ impl ApplicationHandler for App {
                         keyboard::KeyboardKeyState::from(&state),
                         repeat,
                     );
+
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if let Some(recording) = self.recording.as_mut() {
+                        recording.pressed(&keyboard_input);
+                    }
+
                     self.game.process_keyboard(keyboard_input);
                 }
             }
@@ -703,6 +909,70 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    /// Spec 0081: what a recording writes is what a replay reads.
+    ///
+    /// **The two halves are written apart and have to agree.**
+    /// `Recording::pressed` formats a line and `played_from` parses one,
+    /// and nothing but this holds them to the same shape: a recording that
+    /// cannot be played back is the one failure that makes the whole idea
+    /// worthless, and it would show up as a file full of lines the player
+    /// says are not events.
+    ///
+    /// It also checks the repeat, because holding a key sends a stream of
+    /// them and `--play` has no word for one. A recording that wrote them
+    /// down would replay a held key as somebody hammering it.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn a_recording_can_be_played_back() {
+        use crate::keyboard::{KeyboardInput, KeyboardKey, KeyboardKeyState};
+
+        let path = std::env::temp_dir().join("blitzkit-0081-round-trip.play");
+        let _ = std::fs::remove_file(&path);
+
+        let mut recording = super::Recording::new(&path).expect("a file to write");
+        recording.pressed(&KeyboardInput::new(
+            KeyboardKey::Right,
+            KeyboardKeyState::Pressed,
+            false,
+        ));
+        recording.at = 2.5;
+        recording.pressed(&KeyboardInput::new(
+            KeyboardKey::Right,
+            KeyboardKeyState::Pressed,
+            true,
+        ));
+        recording.pressed(&KeyboardInput::new(
+            KeyboardKey::Right,
+            KeyboardKeyState::Released,
+            false,
+        ));
+        recording.at = 4.0;
+        recording.pressed(&KeyboardInput::new(
+            KeyboardKey::Space,
+            KeyboardKeyState::Pressed,
+            false,
+        ));
+        drop(recording);
+
+        let played = super::played_from(Some(path.clone()));
+
+        assert_eq!(
+            played.len(),
+            3,
+            "three presses went in and {} came out, so the repeat was kept or a line was dropped",
+            played.len()
+        );
+        assert_eq!(played[0].key, KeyboardKey::Right);
+        assert!(played[0].down);
+        assert_eq!(played[0].at, 0.0);
+        assert_eq!(played[1].at, 2.5);
+        assert!(!played[1].down);
+        assert_eq!(played[2].key, KeyboardKey::Space);
+        assert_eq!(played[2].at, 4.0);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
     use super::*;
 
     /// wgpu's clip space runs depth from 0 at the near plane to 1 at the far
