@@ -324,6 +324,18 @@ fn beside(reference: &Path, what: &str) -> PathBuf {
     reference.with_file_name(format!("{}{}.png", stem, what))
 }
 
+/// Saves a drawn frame, for anything that wants the picture rather than a
+/// comparison.
+///
+/// **`refresh-screenshots` is why this is public.** It photographed a real
+/// window with `screencapture`, which is macOS only, needs Screen Recording
+/// permission the shell it runs in may not have, and never comes back with
+/// the same bytes twice. Every picture test in this project had been
+/// rendering frames to files all along. Spec 0079.
+pub fn save(picture: &Picture, path: &Path) -> Result<(), String> {
+    write(path, picture)
+}
+
 fn write(path: &Path, picture: &Picture) -> Result<(), String> {
     image::save_buffer(
         path,

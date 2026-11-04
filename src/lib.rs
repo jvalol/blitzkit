@@ -152,6 +152,13 @@ pub const LOG: &str = "warn,blitzkit=info";
 pub fn start(title: &str, game: Box<dyn Game>) {
     talk();
 
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(to) = asked_for_a_picture() {
+        picture_of(game, &to);
+
+        return;
+    }
+
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
 
@@ -164,6 +171,101 @@ pub fn start(title: &str, game: Box<dyn Game>) {
     };
 
     run(event_loop, app);
+}
+
+/// How big a picture `--picture-to` draws, and how long it runs first.
+///
+/// **1200 across, because that is what the site wants of a screenshot**, and
+/// 948 down because that is the shape the window had when the thirteen that
+/// exist were photographed.
+///
+/// Three hundred frames of a sixtieth, which is the five seconds
+/// `refresh-screenshots` used to leave a window up for while a game staged
+/// itself. A count of fixed steps rather than five seconds of a real clock,
+/// which is the whole difference: the same count draws the same frame on any
+/// machine, and a photograph of a window never did.
+#[cfg(not(target_arch = "wasm32"))]
+pub const PICTURE_SIZE: (u32, u32) = (1200, 948);
+#[cfg(not(target_arch = "wasm32"))]
+pub const PICTURE_FRAMES: u32 = 300;
+#[cfg(not(target_arch = "wasm32"))]
+const PICTURE_STEP: f32 = 1.0 / 60.0;
+
+/// Where a run was asked to put a picture of itself, if it was.
+///
+/// `--picture-to <path>`, read here rather than by each game, so every game
+/// built on this engine has it without writing a line.
+#[cfg(not(target_arch = "wasm32"))]
+fn asked_for_a_picture() -> Option<std::path::PathBuf> {
+    let mut args = std::env::args();
+
+    while let Some(arg) = args.next() {
+        if let Some(to) = arg.strip_prefix("--picture-to=") {
+            return Some(std::path::PathBuf::from(to));
+        }
+        if arg == "--picture-to" {
+            return args.next().map(std::path::PathBuf::from);
+        }
+    }
+
+    None
+}
+
+/// Runs a game with no window and writes one frame of it to a file.
+///
+/// **The same frame a window would have shown, arrived at the same way.**
+/// Every step the event loop takes for a redraw is taken here in the same
+/// order: `before_frame`, the clearing, `update`, `draw`, the camera back.
+/// What is missing is a surface to present to and a clock to read, and
+/// neither is part of what a game draws.
+///
+/// `refresh-screenshots` photographed a real window for this. That is macOS
+/// only, needs a Screen Recording permission the shell it runs in may not
+/// have, and never comes back with the same bytes twice: four of the
+/// thirteen screenshots churn on every release from capture noise alone, and
+/// the 0.15.0 release died outright because the shell it was started in had
+/// no grant. Spec 0079.
+#[cfg(not(target_arch = "wasm32"))]
+fn picture_of(mut game: Box<dyn Game>, to: &std::path::Path) {
+    let (wide, tall) = PICTURE_SIZE;
+    let Some(mut renderer) = pollster::block_on(renderer::Renderer::offscreen(wide, tall)) else {
+        eprintln!("no adapter here, so {} was not drawn", to.display());
+
+        return;
+    };
+
+    let mut scene = renderer::scene::Scene::new();
+    let mut geometry = geometry::Geometry::new();
+    let mut text_renderer = renderer::render_text::TextRenderer::new();
+    let sound_system = sound::SoundSystem::new();
+
+    game.load(&mut renderer);
+    game.initialize(
+        &mut geometry,
+        &mut text_renderer,
+        &sound_system,
+        (wide as f32, tall as f32),
+    );
+
+    for _ in 0..PICTURE_FRAMES {
+        game.before_frame(&mut renderer);
+        between_frames(&mut scene, &mut geometry, &mut text_renderer);
+        game.update(
+            PICTURE_STEP,
+            &mut geometry,
+            &mut text_renderer,
+            &sound_system,
+        );
+
+        let mut camera = *renderer.camera();
+        game.draw(&mut scene, &mut camera);
+        renderer.set_camera(camera);
+    }
+
+    let drawn = renderer.picture(&scene, &geometry, &text_renderer);
+    if let Err(why) = picture::save(&drawn, to) {
+        eprintln!("{}", why);
+    }
 }
 
 /// Where the log goes.
