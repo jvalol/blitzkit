@@ -505,9 +505,15 @@ fn frames_of(mut game: Box<dyn Game>, wanted: Wanted, seconds: f32, played: Vec<
         game.draw(&mut scene, &mut camera);
         renderer.set_camera(camera);
 
-        // **A film reads every frame back; a picture reads one.** Which is
-        // the whole difference between the two, and the reason they share
-        // this loop rather than having one each.
+        // **Both draw every frame; only a film reads every frame back.**
+        // Which is the whole difference between the two, and the reason
+        // they share this loop rather than having one each.
+        //
+        // A picture used to draw once, at the end. That is right for the
+        // pixels and wrong for everything a frame leaves behind: the
+        // `load` example puts up what the last frame cost, and every
+        // picture of it read nought draws and nought triangles because no
+        // frame had been drawn to count. Spec 0085.
         if let Some(out) = out.as_mut() {
             let drawn = renderer.picture(&scene, &geometry, &text_renderer);
 
@@ -516,11 +522,14 @@ fn frames_of(mut game: Box<dyn Game>, wanted: Wanted, seconds: f32, played: Vec<
             if out.write_all(&drawn.pixels).is_err() {
                 return;
             }
+        } else {
+            renderer.drew(&scene, &geometry, &text_renderer);
         }
     }
 
+    // The last frame is already drawn, so this only fetches it.
     if let Wanted::Picture(to) = wanted {
-        let drawn = renderer.picture(&scene, &geometry, &text_renderer);
+        let drawn = renderer.read_back();
         if let Err(why) = picture::save(&drawn, &to) {
             eprintln!("{}", why);
         }

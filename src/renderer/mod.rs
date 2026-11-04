@@ -74,6 +74,9 @@ pub struct Renderer {
     /// What everything is drawn through, which is `config.format` with sRGB
     /// on it. See where it is worked out, in `new`.
     drawn: wgpu::TextureFormat,
+    /// Where a picture is drawn and read back through, kept between
+    /// frames rather than made per call. Spec 0085.
+    picture_into: Option<PictureInto>,
     /// What the last frame's drawing came to. Spec 0056.
     counted: Counted,
     /// And what the GPU said it took, where the device will say. Spec 0056.
@@ -951,6 +954,7 @@ impl Renderer {
             queue,
             config,
             drawn,
+            picture_into: None,
             counted: Counted::default(),
             timing,
             worked: 0.0,
@@ -1771,13 +1775,132 @@ impl Renderer {
         self.queue.write_buffer(&self.standing_buffer, 0, &table);
     }
 
+    /// Draws one frame of a run into the picture texture and leaves it
+    /// there. Spec 0085.
+    ///
+    /// **A run has to draw every frame, not only the one it keeps.** A
+    /// picture used to take all its steps and draw once at the end, which
+    /// is right for the pixels and wrong for everything a frame leaves
+    /// behind: the `load` example puts up what the last frame cost and
+    /// every picture of it read nought draws and nought triangles, because
+    /// no frame had been drawn to count.
+    pub fn drew(&mut self, scene: &Scene, geometry: &Geometry, text_renderer: &TextRenderer) {
+        self.ready_to_picture();
+
+        // Taken out and put back, so the view can be borrowed while
+        // `draw_into` has the renderer.
+        let Some(into) = self.picture_into.take() else {
+            return;
+        };
+        self.draw_into(&into.view, scene, geometry, text_renderer);
+        self.picture_into = Some(into);
+    }
+
+    /// Hands back what `drew` last drew, as pixels.
+    ///
+    /// Nothing drawn yet is a picture with no pixels, which is what
+    /// `looks_right_within` already refuses by name.
+    pub fn read_back(&mut self) -> Picture {
+        let Some(into) = self.picture_into.take() else {
+            return Picture {
+                width: self.config.width,
+                height: self.config.height,
+                pixels: Vec::new(),
+            };
+        };
+
+        let (width, height) = into.size;
+        let row = width * 4;
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Picture Encoder"),
+            });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &into.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &into.read,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(into.padded),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        let landed = Arc::new(AtomicBool::new(false));
+        let told = landed.clone();
+
+        into.read
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |got| {
+                told.store(got.is_ok(), Ordering::Release);
+            });
+
+        // waited for rather than polled around: a picture test has nothing
+        // else to do, and a frame that never lands is a test that hangs
+        // rather than a test that passes
+        let _ = self.device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
+
+        let mut pixels = Vec::with_capacity((row * height) as usize);
+
+        if landed.load(Ordering::Acquire) {
+            if let Ok(got) = into.read.slice(..).get_mapped_range() {
+                for line in 0..height {
+                    let from = (line * into.padded) as usize;
+
+                    pixels.extend_from_slice(&got[from..from + row as usize]);
+                }
+            }
+        }
+
+        into.read.unmap();
+        self.picture_into = Some(into);
+
+        Picture {
+            width,
+            height,
+            pixels,
+        }
+    }
+
+    /// Draws one frame and hands it back, which is what a picture test
+    /// wants and what a film wants of every frame.
     pub fn picture(
         &mut self,
         scene: &Scene,
         geometry: &Geometry,
         text_renderer: &TextRenderer,
     ) -> Picture {
+        self.drew(scene, geometry, text_renderer);
+
+        self.read_back()
+    }
+
+    /// Makes the texture and the buffer a picture goes through, when there
+    /// is not already a pair the right size.
+    fn ready_to_picture(&mut self) {
         let (width, height) = (self.config.width, self.config.height);
+
+        if matches!(&self.picture_into, Some(into) if into.size == (width, height)) {
+            return;
+        }
+
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Picture"),
             size: wgpu::Extent3d {
@@ -1797,82 +1920,24 @@ impl Renderer {
             ..Default::default()
         });
 
-        self.draw_into(&view, scene, geometry, text_renderer);
-
         // a copy to a buffer wants its rows on 256 bytes, which is not what
         // a picture is, so the padding comes off on the way out
-        let row = width * 4;
-        let padded =
-            row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let padded = (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+            * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
         let read = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Picture Read"),
             size: (padded * height) as u64,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Picture Encoder"),
-            });
 
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &read,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(padded),
-                    rows_per_image: Some(height),
-                },
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
-        self.queue.submit(std::iter::once(encoder.finish()));
-
-        let landed = Arc::new(AtomicBool::new(false));
-        let told = landed.clone();
-
-        read.slice(..).map_async(wgpu::MapMode::Read, move |got| {
-            told.store(got.is_ok(), Ordering::Release);
+        self.picture_into = Some(PictureInto {
+            size: (width, height),
+            texture,
+            view,
+            read,
+            padded,
         });
-
-        // waited for rather than polled around: a picture test has nothing
-        // else to do, and a frame that never lands is a test that hangs
-        // rather than a test that passes
-        let _ = self.device.poll(wgpu::PollType::Wait {
-            submission_index: None,
-            timeout: None,
-        });
-
-        let mut pixels = Vec::with_capacity((row * height) as usize);
-
-        if landed.load(Ordering::Acquire) {
-            if let Ok(got) = read.slice(..).get_mapped_range() {
-                for line in 0..height {
-                    let from = (line * padded) as usize;
-
-                    pixels.extend_from_slice(&got[from..from + row as usize]);
-                }
-            }
-        }
-
-        read.unmap();
-
-        Picture {
-            width,
-            height,
-            pixels,
-        }
     }
 
     /// Draws one frame into a view, which is a surface's texture for a game
@@ -4329,6 +4394,24 @@ impl Presenting {
             .find(|mode| offered.contains(mode))
             .unwrap_or(wgpu::PresentMode::Fifo)
     }
+}
+
+/// What a picture is drawn into and read back through. Spec 0085.
+///
+/// **Made once and kept.** A texture and a buffer per call was nothing
+/// while a picture was one frame of a run. A picture draws every frame now
+/// and a film reads back every frame, so the arcade's 46 seconds would be
+/// 2760 textures of four and a half megabytes made and dropped, and the
+/// same again in buffers.
+struct PictureInto {
+    /// What it was made for. A surface that changed shape gets a new one.
+    size: (u32, u32),
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    read: wgpu::Buffer,
+    /// The row stride the copy wants, which is the picture's rounded up to
+    /// `COPY_BYTES_PER_ROW_ALIGNMENT`.
+    padded: u32,
 }
 
 /// A frame, as pixels. Spec 0062.

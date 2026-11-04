@@ -163,13 +163,10 @@ draws and triangles and a time per frame, and every picture of it reads nought
 across the board, at every second tried; the film of the same run has the
 numbers, because a film draws each frame on its way past.
 
-Left alone here. The fix is for the renderer to keep one texture and one
-readback buffer instead of making a pair per call, and then to draw every
-frame for a picture too and read back only the last, which is a change to
-`Renderer::picture` rather than to this. Until then `refresh-examples` takes
-its posters out of the clip, which is where they came from before spec 0079,
-and the stills in `refresh-screenshots` are unaffected unless a game starts
-drawing its own frame cost.
+Left alone here and fixed by spec 0085 the same day, which does what this
+paragraph said it would: keeps one texture and one readback buffer instead of
+making a pair per call, and draws every frame for a picture too. The posters
+went out of the clip and back to being drawn when it landed.
 
 ## Out of scope
 
