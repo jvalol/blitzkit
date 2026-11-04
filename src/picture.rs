@@ -332,8 +332,37 @@ fn beside(reference: &Path, what: &str) -> PathBuf {
 /// permission the shell it runs in may not have, and never comes back with
 /// the same bytes twice. Every picture test in this project had been
 /// rendering frames to files all along. Spec 0079.
+///
+/// **It leaves a file alone that already holds this picture**, to the
+/// tolerance a picture test uses, so a release does not commit a frame
+/// nobody can tell from the one already there. Spec 0083.
 pub fn save(picture: &Picture, path: &Path) -> Result<(), String> {
+    if already_there(picture, path) {
+        return Ok(());
+    }
+
     write(path, picture)
+}
+
+/// Whether `path` already holds this picture, by the one tolerance in this
+/// file rather than by its bytes.
+///
+/// A file that is not there, cannot be read, or holds a frame of another
+/// size is not it, and in each of those cases the caller writes.
+fn already_there(picture: &Picture, path: &Path) -> bool {
+    let Ok(was) = image::open(path) else {
+        return false;
+    };
+
+    let was = was.to_rgba8();
+
+    if (was.width(), was.height()) != (picture.width, picture.height) {
+        return false;
+    }
+
+    let (count, _) = apart(&was, picture);
+
+    count as f32 / (picture.width * picture.height) as f32 <= SHARE
 }
 
 fn write(path: &Path, picture: &Picture) -> Result<(), String> {
@@ -365,5 +394,79 @@ mod tests {
     #[should_panic(expected = "a run that checked nothing is a failed run")]
     fn a_skip_is_a_failure_when_pictures_are_required() {
         no_adapter(Path::new("nowhere/at-all.png"), true);
+    }
+
+    // Spec 0083. Both of these write real files, which is the whole claim,
+    // and neither needs an adapter: a picture is pixels and `save` is the
+    // only thing under test.
+
+    /// A flat grey frame, 100 by 100, so a tenth of a percent is ten pixels.
+    fn grey() -> Picture {
+        Picture {
+            width: 100,
+            height: 100,
+            pixels: vec![128; 100 * 100 * 4],
+        }
+    }
+
+    /// `how_many` pixels of it turned white, which is well past `CHANNEL`.
+    fn marked(how_many: usize) -> Picture {
+        let mut picture = grey();
+
+        for at in 0..how_many {
+            for channel in 0..3 {
+                picture.pixels[at * 4 + channel] = 255;
+            }
+        }
+
+        picture
+    }
+
+    #[test]
+    fn a_picture_already_there_is_not_written_again() {
+        let path = std::env::temp_dir().join("blitzkit-0083-still.png");
+        let _ = std::fs::remove_file(&path);
+
+        save(&grey(), &path).unwrap();
+        let was = std::fs::read(&path).unwrap();
+
+        // five pixels of ten thousand is 0.0005, inside SHARE's 0.002
+        save(&marked(5), &path).unwrap();
+
+        assert_eq!(was, std::fs::read(&path).unwrap());
+    }
+
+    /// The control. Without it the test above passes for a `save` that never
+    /// writes anything at all.
+    #[test]
+    fn a_picture_that_moved_is_written() {
+        let path = std::env::temp_dir().join("blitzkit-0083-moved.png");
+        let _ = std::fs::remove_file(&path);
+
+        save(&grey(), &path).unwrap();
+        let was = std::fs::read(&path).unwrap();
+
+        // five hundred of ten thousand is 5%, which SHARE is nowhere near
+        save(&marked(500), &path).unwrap();
+
+        assert_ne!(was, std::fs::read(&path).unwrap());
+    }
+
+    #[test]
+    fn a_frame_of_another_size_is_written() {
+        let path = std::env::temp_dir().join("blitzkit-0083-resized.png");
+        let _ = std::fs::remove_file(&path);
+
+        save(&grey(), &path).unwrap();
+
+        let wider = Picture {
+            width: 200,
+            height: 100,
+            pixels: vec![128; 200 * 100 * 4],
+        };
+        save(&wider, &path).unwrap();
+
+        let back = image::open(&path).unwrap().to_rgba8();
+        assert_eq!((back.width(), back.height()), (200, 100));
     }
 }

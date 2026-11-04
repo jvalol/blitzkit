@@ -68,6 +68,12 @@ had when the thirteen that exist were photographed.
 - **snake, twice.** Two runs of `--picture-to` gave byte-identical files,
   and so did two runs of `refresh-screenshots` over it. That is the thing
   `stamp` says cannot be done until the clock is pinned.
+
+  **Two was not enough runs and snake was not enough games.** Six runs each
+  of all fourteen, after 0.16.0, held for thirteen of them and not for
+  tessera, which comes out two ways. Spec 0083 has the measurement and what
+  was done about it. The goal at the top of this spec overstates what this
+  one delivered.
 - **poolhall, against the photograph it replaces.** Same ball positions,
   same readout, same cue: the staging survived the move from five real
   seconds to three hundred fixed steps.
