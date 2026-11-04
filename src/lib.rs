@@ -152,9 +152,20 @@ pub const LOG: &str = "warn,blitzkit=info";
 pub fn start(title: &str, game: Box<dyn Game>) {
     talk();
 
+    // **Asked rather than agreed.** Raw frames carry no size with them, so
+    // whatever encodes them has to be told one, and a second place saying
+    // 1200 by 948 is a second place to get it wrong: the two have to agree
+    // or the film comes out as diagonal mush. Spec 0084.
     #[cfg(not(target_arch = "wasm32"))]
-    if let Some(to) = asked_for_a_picture() {
-        picture_of(game, &to, asked_how_long(), played_from(asked_to_play()));
+    if std::env::args().any(|arg| arg == "--film-size") {
+        println!("{} {}", PICTURE_SIZE.0, PICTURE_SIZE.1);
+
+        return;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some((wanted, seconds)) = asked_for_frames() {
+        frames_of(game, wanted, seconds, played_from(asked_to_play()));
 
         return;
     }
@@ -194,24 +205,52 @@ pub const PICTURE_FRAMES: u32 = 300;
 #[cfg(not(target_arch = "wasm32"))]
 const PICTURE_STEP: f32 = 1.0 / 60.0;
 
-/// Where a run was asked to put a picture of itself, if it was.
-///
-/// `--picture-to <path>`, read here rather than by each game, so every game
-/// built on this engine has it without writing a line.
+/// What a run with no window does with the frames it draws. Spec 0084.
 #[cfg(not(target_arch = "wasm32"))]
-fn asked_for_a_picture() -> Option<std::path::PathBuf> {
-    let mut args = std::env::args();
+enum Wanted {
+    /// The last one, written here. `--picture-to <path>`.
+    Picture(std::path::PathBuf),
+    /// Every one, as raw rgba written here. `--film-to <path>`, with
+    /// `--film-for <seconds>` saying how many.
+    ///
+    /// **A path and not stdout**, which is where this started and lasted
+    /// one run. The `load` example writes a line of comma separated costs
+    /// per frame to stdout, so its film came out with a row of column
+    /// headings in the middle of a frame and ffmpeg gave up on it. A game
+    /// is allowed to print; what it is not allowed to do is share a
+    /// stream with its own pixels.
+    ///
+    /// **Which means a fifo rather than a file.** The arcade's clip is 46
+    /// seconds, which at this size and this step is 12.5 gigabytes.
+    /// Whatever is reading takes the frames as fast as they are drawn and
+    /// nothing lands on the disc. The engine does not care which it was
+    /// handed.
+    Film(std::path::PathBuf),
+}
 
-    while let Some(arg) = args.next() {
-        if let Some(to) = arg.strip_prefix("--picture-to=") {
-            return Some(std::path::PathBuf::from(to));
-        }
-        if arg == "--picture-to" {
-            return args.next().map(std::path::PathBuf::from);
-        }
+/// What a run was asked to draw, and for how long, if it was asked at all.
+///
+/// Read here rather than by each game, so every game built on this engine
+/// has both without writing a line. A run that asks for a picture and a
+/// film gets the picture: they want the same frames and the picture is the
+/// cheaper thing to have asked for by accident.
+#[cfg(not(target_arch = "wasm32"))]
+fn asked_for_frames() -> Option<(Wanted, f32)> {
+    if let Some(to) = one_argument("--picture-to") {
+        return Some((
+            Wanted::Picture(std::path::PathBuf::from(to)),
+            asked_how_long(),
+        ));
     }
 
-    None
+    let to = one_argument("--film-to")?;
+    let Some(seconds) = one_argument("--film-for").and_then(|said| said.parse().ok()) else {
+        eprintln!("--film-to needs a --film-for <seconds> to go with it");
+
+        return None;
+    };
+
+    Some((Wanted::Film(std::path::PathBuf::from(to)), seconds))
 }
 
 /// How long `--picture-for` says to run, in seconds.
@@ -349,7 +388,8 @@ fn played_from(script: Option<std::path::PathBuf>) -> Vec<Pressed> {
     out
 }
 
-/// Runs a game with no window and writes one frame of it to a file.
+/// Runs a game with no window and hands over the frames it draws: the last
+/// one as a file, or every one as raw pixels on stdout.
 ///
 /// **The same frame a window would have shown, arrived at the same way.**
 /// Every step the event loop takes for a redraw is taken here in the same
@@ -363,13 +403,38 @@ fn played_from(script: Option<std::path::PathBuf>) -> Vec<Pressed> {
 /// thirteen screenshots churn on every release from capture noise alone, and
 /// the 0.15.0 release died outright because the shell it was started in had
 /// no grant. Spec 0079.
+///
+/// `refresh-examples` filmed the whole screen with ffmpeg and cropped the
+/// window out of it, which cost all three of those and two more: the window
+/// had to be frontmost, so the keys and the camera both went wherever the
+/// machine's attention did, and the display had to stay awake, which four
+/// takes across two days did not manage. Spec 0084.
 #[cfg(not(target_arch = "wasm32"))]
-fn picture_of(mut game: Box<dyn Game>, to: &std::path::Path, seconds: f32, played: Vec<Pressed>) {
+fn frames_of(mut game: Box<dyn Game>, wanted: Wanted, seconds: f32, played: Vec<Pressed>) {
+    use std::io::Write;
+
     let (wide, tall) = PICTURE_SIZE;
     let Some(mut renderer) = pollster::block_on(renderer::Renderer::offscreen(wide, tall)) else {
-        eprintln!("no adapter here, so {} was not drawn", to.display());
+        eprintln!("no adapter here, so nothing was drawn");
 
         return;
+    };
+
+    // Opened before a frame is drawn, because opening a fifo blocks until
+    // the other end is there and the caller should not be left wondering
+    // which part is slow. Written whole frames at a time: a BufWriter
+    // would cut each 4.5 megabyte frame into its own buffer's worth of
+    // writes for no gain.
+    let mut out = match &wanted {
+        Wanted::Film(to) => match std::fs::File::create(to) {
+            Ok(file) => Some(file),
+            Err(why) => {
+                eprintln!("{} could not be opened: {}", to.display(), why);
+
+                return;
+            }
+        },
+        Wanted::Picture(_) => None,
     };
 
     let mut scene = renderer::scene::Scene::new();
@@ -439,11 +504,26 @@ fn picture_of(mut game: Box<dyn Game>, to: &std::path::Path, seconds: f32, playe
         let mut camera = *renderer.camera();
         game.draw(&mut scene, &mut camera);
         renderer.set_camera(camera);
+
+        // **A film reads every frame back; a picture reads one.** Which is
+        // the whole difference between the two, and the reason they share
+        // this loop rather than having one each.
+        if let Some(out) = out.as_mut() {
+            let drawn = renderer.picture(&scene, &geometry, &text_renderer);
+
+            // A closed pipe is whatever is reading saying it has enough,
+            // which is not a failure. ffmpeg given -t does exactly that.
+            if out.write_all(&drawn.pixels).is_err() {
+                return;
+            }
+        }
     }
 
-    let drawn = renderer.picture(&scene, &geometry, &text_renderer);
-    if let Err(why) = picture::save(&drawn, to) {
-        eprintln!("{}", why);
+    if let Wanted::Picture(to) = wanted {
+        let drawn = renderer.picture(&scene, &geometry, &text_renderer);
+        if let Err(why) = picture::save(&drawn, &to) {
+            eprintln!("{}", why);
+        }
     }
 }
 
