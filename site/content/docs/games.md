@@ -9,6 +9,8 @@ I built these on it. Each one is its own repo and each takes
 blitzkit from crates.io rather than a local checkout, so I'm using the engine
 the same way you would.
 
+![Thirteen frames in a grid: a tower of wooden blocks, balls on green cloth, dominoes in a spiral, one candle in a dim room, a marble on a tilted slab, three doors with a lit prize, pong, pool table and cue, lit panels down a dark hall, the checked tunnel, snake, a Van Gogh cut into sliding tiles, and a tetromino well](/media/games.png)
+
 ## starry
 
 In which one slides fifteen tiles of Van Gogh's Starry Night back into one picture.

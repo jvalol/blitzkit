@@ -4,6 +4,8 @@ In which I write a small game engine over wgpu, in rust, and build interesting t
 
 2d _and_ 3d. There are examples in this repo.
 
+![Sixteen frames in a grid: the arcade's hall, a wrecking ball through brick, lit cubes on a checked floor, one Hilbert curve, two Klein bottles, a trefoil knot, white cubes in a block, the Menger sponge, balls dropped in water, rolling's walled room, one Sierpinski pyramid, blocks stacked in a column, two teapots, and a checked tunnel receding](https://raw.githubusercontent.com/jvalol/blitzkit/main/media/examples.png)
+
 I hand built this engine, and I built my versions of pong and snake using it. After those
 two I started working with AI to take it further. Most of the 3d mechanics were already there. (Thanks past me)
 

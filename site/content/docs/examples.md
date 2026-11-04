@@ -7,6 +7,8 @@ weight: 4
 
 Examples live in the engine to demonstrate improvements as they land.
 
+![Sixteen frames in a grid: the arcade's hall, a wrecking ball through brick, lit cubes on a checked floor, one Hilbert curve, two Klein bottles, a trefoil knot, white cubes in a block, the Menger sponge, balls dropped in water, rolling's walled room, one Sierpinski pyramid, blocks stacked in a column, two teapots, and a checked tunnel receding](/media/examples.png)
+
 ## cubes
 
 In which the lighting is shown off. There's a sun, two spotlights moving
