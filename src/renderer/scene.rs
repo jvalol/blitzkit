@@ -153,6 +153,32 @@ impl Instance {
     }
 }
 
+/// What stands behind everything, round the eye. Spec 0086.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Backdrop {
+    pub(crate) mesh: MeshId,
+    pub(crate) texture: TextureId,
+    pub(crate) color: Vec4,
+    pub(crate) shininess: f32,
+}
+
+/// How much of the way out to the far plane a backdrop sits.
+///
+/// Inside it rather than on it, because a vertex exactly on the far plane
+/// is one the clipper is entitled to drop.
+pub const BEHIND_IT_ALL: f32 = 0.9;
+
+/// How far off a backdrop will be drawn, for a view that reaches `far`.
+///
+/// **Public because a game cannot otherwise check its own sky.** The
+/// arcade has two tests that matter, one that the sky never ends inside
+/// the ground and one that it clears every wall round the garden, and both
+/// measured the scale that file used to choose. Once the renderer chose it
+/// instead, both went on passing and neither was testing the sky any more.
+pub fn backdrop_reach(far: f32) -> f32 {
+    far * BEHIND_IT_ALL
+}
+
 /// One instanced draw: a mesh, its texture, the run of instances that
 /// belongs to it, and which buffer that run lies in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -187,6 +213,8 @@ pub struct Scene {
     /// Batched by mesh and texture together, since a draw call can only have
     /// one of each.
     instances: HashMap<(MeshId, TextureId), Vec<Instance>>,
+    /// The sky, or whatever stands behind everything. Spec 0086.
+    backdrop: Option<Backdrop>,
     /// What a game handed over once rather than every frame, per spec 0058.
     ///
     /// A slot that was dropped is left as `None` rather than taken out, so
@@ -289,6 +317,7 @@ impl Scene {
         self.point_lights.clear();
         self.spot_lights.clear();
         self.outlines.clear();
+        self.backdrop = None;
         self.turned = Turned::default();
     }
 
@@ -458,6 +487,34 @@ impl Scene {
         shininess: f32,
     ) {
         self.push_textured(mesh, TextureId::WHITE, transform, color, shininess);
+    }
+
+    /// Puts `mesh` behind everything else, round the eye, at whatever size
+    /// fits the view. Spec 0086.
+    ///
+    /// **The game does not say how big.** A sky is only ever as far away as
+    /// the furthest thing you can see, and what knows that is the renderer:
+    /// the far plane lives there. The arcade sized its own dome at 22,
+    /// which with the mesh's own 9.5 made a sphere 209 metres across
+    /// against a far plane of 100, so every vertex of it was clipped and
+    /// the sky over the garden was black from indoors. Nobody could have
+    /// read that off either file.
+    ///
+    /// There is one. Pushing a second replaces the first, because two
+    /// things behind everything is two skies, which spec 0040 already had
+    /// once and spent a day on.
+    pub fn backdrop(&mut self, mesh: MeshId, texture: TextureId, color: Vec4, shininess: f32) {
+        self.backdrop = Some(Backdrop {
+            mesh,
+            texture,
+            color,
+            shininess,
+        });
+    }
+
+    /// What stands behind everything this frame, if anything does.
+    pub(crate) fn behind_it_all(&self) -> Option<Backdrop> {
+        self.backdrop
     }
 
     /// Draws `mesh` wearing `texture`. The color multiplies what is sampled, so

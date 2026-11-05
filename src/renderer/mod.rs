@@ -2783,6 +2783,43 @@ impl Renderer {
             });
         }
 
+        // and whatever stands behind all of it, placed here because here is
+        // what knows the far plane. Spec 0086.
+        let behind = scene.behind_it_all().and_then(|behind| {
+            if behind.mesh.0 >= self.meshes.len() || behind.texture.0 >= self.textures.len() {
+                log::warn!("a scene asked for a backdrop that was never added");
+
+                return None;
+            }
+
+            let bounds = self.meshes[behind.mesh.0].bounds;
+            let by = backdrop_scale(&bounds, self.camera.far);
+
+            Some((
+                behind,
+                bounds,
+                vec![Instance::new(
+                    &crate::mesh::Transform::at(self.camera.position)
+                        .with_scale(glam::Vec3::splat(by)),
+                    behind.color,
+                    behind.shininess,
+                )],
+            ))
+        });
+
+        if let Some((behind, bounds, held)) = &behind {
+            pushed.push(culling::Pushed {
+                mesh: behind.mesh,
+                texture: behind.texture,
+                bounds: *bounds,
+                instances: held,
+                quarters: None,
+                hidden: false,
+                round: None,
+                home: None,
+            });
+        }
+
         // and what the game handed over once rather than this frame, per
         // spec 0058: laid out in the buffer first, so a run that nothing has
         // touched is already where it needs to be and this frame writes
@@ -4414,6 +4451,42 @@ struct PictureInto {
     padded: u32,
 }
 
+/// How big a backdrop has to be to sit just inside the far plane.
+///
+/// **The mesh's own size is half the sum.** A sky mesh is not a unit
+/// sphere: the arcade's is 19 across, so a scale of 22 is a 209 metre
+/// dome, and against a far plane of 100 every vertex of it is clipped and
+/// the sky is simply absent. The arcade had both numbers and neither file
+/// could see the other. Spec 0086.
+///
+/// Nought when the mesh has no size at all, which would otherwise be a
+/// division by nought and a backdrop scaled to infinity.
+pub fn backdrop_scale(bounds: &crate::collision::Aabb, far: f32) -> f32 {
+    // **From the mesh's own origin and not from the middle of its box.**
+    // A backdrop is placed with its origin at the eye, so what has to fit
+    // inside the far plane is the furthest point of it from that origin.
+    // Half the box's diagonal is the right answer only for a mesh built
+    // round its middle, and the arcade's sky is a dome sprung from its
+    // rim: that reads 14.7 where the true reach is 18, which scaled the
+    // sky a fifth too big and put its four corners through the far plane.
+    // `field::tests::you_can_see_as_far_as_the_sky` caught it.
+    let mut reach = 0.0f32;
+
+    for x in [bounds.min.x, bounds.max.x] {
+        for y in [bounds.min.y, bounds.max.y] {
+            for z in [bounds.min.z, bounds.max.z] {
+                reach = reach.max(glam::vec3(x, y, z).length());
+            }
+        }
+    }
+
+    if reach <= f32::EPSILON {
+        return 0.0;
+    }
+
+    crate::renderer::scene::backdrop_reach(far) / reach
+}
+
 /// A frame, as pixels. Spec 0062.
 ///
 /// Rgba8 with no padding, top row first, which is what a picture test
@@ -4440,6 +4513,65 @@ pub struct Counted {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Spec 0086. The rule the engine owns, which is pure arithmetic and
+    /// wants no card.
+    #[test]
+    fn a_backdrop_is_scaled_to_sit_inside_the_far_plane() {
+        // a mesh built round its own middle, reaching 1 from the origin
+        let unit = crate::collision::Aabb::new(glam::Vec3::splat(-1.0), glam::Vec3::splat(1.0));
+        let by = backdrop_scale(&unit, 100.0);
+
+        assert!(
+            (by * 3.0f32.sqrt() - 90.0).abs() < 0.01,
+            "its furthest corner should land on nine tenths of the far plane"
+        );
+    }
+
+    /// **The one that was wrong.** Half the bounding box's diagonal is the
+    /// reach only for a mesh built round its middle. The arcade's sky is a
+    /// dome sprung from its rim, so its origin is on its underside: the
+    /// box diagonal reads a fifth short and the sky went a fifth too big,
+    /// which put its four corners back through the far plane.
+    #[test]
+    fn a_dome_is_measured_from_its_rim_and_not_from_the_middle_of_its_box() {
+        // 19 across and 12 tall, springing from y nought, which is the
+        // arcade's own sky
+        let dome =
+            crate::collision::Aabb::new(glam::vec3(-9.5, 0.0, -9.5), glam::vec3(9.5, 12.0, 9.5));
+        let half_a_diagonal = (dome.max - dome.min).length() * 0.5;
+        let from_the_origin = dome.max.length();
+
+        assert!(
+            from_the_origin > half_a_diagonal * 1.15,
+            "the two readings have to differ or this test proves nothing: \
+             {} against {}",
+            from_the_origin,
+            half_a_diagonal
+        );
+
+        let by = backdrop_scale(&dome, 100.0);
+
+        assert!(
+            (by * from_the_origin - 90.0).abs() < 0.01,
+            "scaled {} it reaches {} and the far plane is 100",
+            by,
+            by * from_the_origin
+        );
+        assert!(
+            by * from_the_origin < 100.0,
+            "and that has to be inside it, which is the whole point"
+        );
+    }
+
+    /// A mesh with no size at all is a division by nought and a backdrop
+    /// scaled to infinity.
+    #[test]
+    fn a_backdrop_with_no_size_is_scaled_to_nothing() {
+        let nothing = crate::collision::Aabb::new(glam::Vec3::ZERO, glam::Vec3::ZERO);
+
+        assert_eq!(backdrop_scale(&nothing, 100.0), 0.0);
+    }
 
     /// Spec 0056: a game that waits for the display always gets Fifo, and one
     /// that does not gets the best the surface will give it.
