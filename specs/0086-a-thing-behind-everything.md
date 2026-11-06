@@ -81,6 +81,19 @@ there.
   passes, and getting there turned up that `behind::inside` is a half space
   the garden satisfies as readily as that room does.
 
+  **That was not enough and this entry said it was.** Gating the backdrop on
+  `behind::in_the_room` covers the hidden room and nothing past its
+  footprint, and the orrery runs a hundred and fifty nine metres past it.
+  Every staged shot of a planet came back under a cloudy daylight sky on
+  2026-11-06, which is what the arcade's `media/screenshot.png` would have
+  become the next time anybody refreshed it. The picture on disk was still
+  the right one, taken before the drift, so nothing wrong was ever served.
+  The one camera this entry checked is inside the footprint, so it saw
+  none of it. The arcade draws the backdrop on `sees_outdoors` now, which is
+  the question its field and its outside were already drawn by, and holds
+  it with a reference picture of its own, `the_solar_system_is_drawn`,
+  named here as prose for the reason given above.
+
 ## Out of scope
 
 **Depth.** A backdrop is drawn like anything else and takes its turn in the
