@@ -50,12 +50,30 @@ fi
 # question ship-check asks and a stronger form of it: a marker he struck
 # months ago guards nothing written into that page since. See
 # ~/.claude/voice/check-voice. Skipped where it is not installed.
+#
+# **Every repo this publishes, and not only this one.** It asked only
+# blitzkit's ten copy files, and the ./build-web below compiles each
+# game's working tree into the wasm this push serves. So a game carrying
+# words Jake had not read could be published by a push of the engine and
+# nothing anywhere would have said so. On 2026-11-06 the arcade sat with
+# seven unsigned lines in `src/says.rs` while this hook was the last gate
+# before the site, and the only reason they did not go out is that
+# somebody thought about it.
+#
+# Read off ./list-repos rather than a list here, for the reason
+# check-all's own note gives: securitysweep was in one list and not the
+# other and went unchecked for months.
 if [ -x "$HOME/.claude/voice/check-voice" ]; then
-  if ! (cd blitzkit && "$HOME/.claude/voice/check-voice"); then
-    echo
-    echo "pre-push: stopped by check-voice above."
-    exit 1
-  fi
+  for repo in $(./list-repos 2>/dev/null); do
+    [ -d "$repo" ] || continue
+
+    if ! (cd "$repo" && "$HOME/.claude/voice/check-voice"); then
+      echo
+      echo "pre-push: stopped by check-voice in $repo above."
+      echo "          pushing this repo publishes that one's browser build."
+      exit 1
+    fi
+  done
 fi
 
 # and whether the site promises an engine anybody can install. Pushing
