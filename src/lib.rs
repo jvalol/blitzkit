@@ -75,6 +75,27 @@ pub trait Game {
     #[allow(unused_variables)]
     fn draw(&mut self, scene: &mut Scene, camera: &mut Camera) {}
     fn process_keyboard(&mut self, input: keyboard::KeyboardInput);
+    /// What a key press means as text, when it means any: the characters
+    /// the window system says that key produced, after the layout, the
+    /// modifiers and any dead keys have had their say.
+    ///
+    /// **A separate question from which key went down**, because they are
+    /// separate questions. `process_keyboard` is for keys you hold and
+    /// keys you bind, where what matters is the place on the keyboard; a
+    /// game that reads a name somebody types wants the letter, and
+    /// deriving one from the other is a table of layouts this engine is
+    /// never going to get right. Shift and a number is a different
+    /// character on three keyboards in this room.
+    ///
+    /// Arrives with the press and not with the release, and arrives for
+    /// repeats, because holding a letter down is how anybody deletes or
+    /// types a run of one.
+    ///
+    /// Control characters are not sent. Backspace, Return, Tab and Escape
+    /// are keys and come through `process_keyboard`, which is also where
+    /// a field has to look for them anyway.
+    #[allow(unused_variables)]
+    fn typed(&mut self, text: &str) {}
     /// A mouse button went down or came up. See `specs/0013-mouse-input.md`.
     #[allow(unused_variables)]
     fn process_mouse(&mut self, input: mouse::MouseInput) {}
@@ -309,6 +330,9 @@ enum Did {
         button: mouse::MouseButton,
         down: bool,
     },
+    /// What somebody typed, as the characters a press came to rather
+    /// than the key it was. Spec 0087.
+    Typed(String),
     /// Where the cursor is, in the pixels quads and text use.
     Cursor(Vec2),
     /// How far the mouse moved, which keeps arriving while the cursor is
@@ -328,6 +352,37 @@ struct Pressed {
 /// Blank lines and anything after a `#` are ignored, and a line this cannot
 /// read is said on stderr and skipped rather than taken as silence: a replay
 /// that quietly drops half its input is a replay of something else.
+/// A script line with its comment taken off.
+///
+/// **A hash inside quotes is not a comment.** This split on the first one
+/// anywhere, which was right while every line was numbers and names and
+/// wrong the moment one could carry what somebody typed: a recording of
+/// the character `#` played back as a line with nothing after the time.
+/// The round trip test caught it. Spec 0087.
+fn without_a_comment(line: &str) -> &str {
+    let mut quoted = false;
+
+    for (at, one) in line.char_indices() {
+        match one {
+            '"' => quoted = !quoted,
+            '#' if !quoted => return line[..at].trim(),
+            _ => (),
+        }
+    }
+
+    line.trim()
+}
+
+/// The printable part of what a key press produced.
+///
+/// **Because winit sends Return, Tab and Escape as text too.** A field
+/// that took whatever arrived would answer the riddle with a carriage
+/// return in it, and every one of those is already a key with a name,
+/// which is where a field has to look for it anyway. Spec 0087.
+fn typed_of(said: &str) -> String {
+    said.chars().filter(|one| !one.is_control()).collect()
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn played_from(script: Option<std::path::PathBuf>) -> Vec<Pressed> {
     let Some(path) = script else {
@@ -344,7 +399,7 @@ fn played_from(script: Option<std::path::PathBuf>) -> Vec<Pressed> {
 
     let mut out = Vec::new();
     for (n, line) in said.lines().enumerate() {
-        let line = line.split('#').next().unwrap_or("").trim();
+        let line = without_a_comment(line);
         if line.is_empty() {
             continue;
         }
@@ -371,6 +426,13 @@ fn played_from(script: Option<std::path::PathBuf>) -> Vec<Pressed> {
                 button,
                 down: false,
             }),
+            // **What is between the quotes, off the raw line.** The
+            // words were split on whitespace, so a typed space is not in
+            // `what` and never could be.
+            "typed" => line
+                .split_once('"')
+                .and_then(|(_, rest)| rest.rsplit_once('"'))
+                .map(|(said, _)| Did::Typed(said.to_owned())),
             "cursor" => both().map(Did::Cursor),
             "moved" => both().map(Did::Moved),
             "wheel" => both().map(Did::Wheel),
@@ -485,6 +547,7 @@ fn frames_of(mut game: Box<dyn Game>, wanted: Wanted, seconds: f32, played: Vec<
                         },
                     ));
                 }
+                Did::Typed(said) => game.typed(said),
                 Did::Cursor(at) => game.cursor_moved(*at),
                 Did::Moved(by) => game.mouse_motion(*by),
                 Did::Wheel(by) => game.mouse_wheel(*by),
@@ -749,6 +812,25 @@ impl Recording {
         self.flush();
     }
 
+    /// What a press came to as text, written down beside the key that
+    /// produced it so a replay types what somebody typed.
+    ///
+    /// **In quotes, because a space is text.** Every other line here is
+    /// whitespace-separated words and a typed space would vanish into the
+    /// separator. Quoted, the parser takes what is between the quotes and
+    /// a line is still a line.
+    fn typed(&mut self, said: &str) {
+        use std::io::Write;
+
+        let _ = writeln!(
+            self.to,
+            "{:.3} typed \"{}\"",
+            self.at,
+            said.replace('"', "")
+        );
+        self.flush();
+    }
+
     fn clicked(&mut self, input: &mouse::MouseInput) {
         use std::io::Write;
 
@@ -910,10 +992,30 @@ impl ApplicationHandler for App {
                         physical_key: PhysicalKey::Code(key_code),
                         state,
                         repeat,
+                        ref text,
                         ..
                     },
                 ..
             } => {
+                // **The text first, and only on the way down.** winit
+                // hands the characters a press produced alongside the key
+                // that produced them, so this is the one place both are
+                // known. A release produces no text and a game asking for
+                // typing wants the repeats, which is how anybody holds
+                // backspace down.
+                if state == winit::event::ElementState::Pressed {
+                    if let Some(said) = text.as_ref().map(|said| typed_of(said)) {
+                        if !said.is_empty() {
+                            #[cfg(not(target_arch = "wasm32"))]
+                            if let Some(recording) = self.recording.as_mut() {
+                                recording.typed(&said);
+                            }
+
+                            self.game.typed(&said);
+                        }
+                    }
+                }
+
                 if let Some(key) = keyboard::KeyboardKey::from_key_code(key_code) {
                     let keyboard_input = keyboard::KeyboardInput::new(
                         key,
@@ -1126,6 +1228,61 @@ mod tests {
     /// mouse has a right button and the keyboard has a right arrow, and one
     /// verb for both would have made a recording of either into a recording
     /// of the wrong one.
+    /// Spec 0087: and what somebody typed goes round the same loop.
+    ///
+    /// **Because a replay that drops the typing is a replay of somebody
+    /// staring at a field.** Every other kind of input in here is written
+    /// down and read back, and text is the one that has a separator in
+    /// it: a space is a character somebody typed and the parser splits on
+    /// whitespace. So it is quoted, and this is what says the quoting
+    /// survives.
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn a_recording_of_typing_can_be_played_back() {
+        let path = std::env::temp_dir().join("blitzkit-0087-round-trip.play");
+        let _ = std::fs::remove_file(&path);
+
+        let mut recording = super::Recording::new(&path).expect("a file to write");
+        recording.typed("h");
+        recording.at = 0.5;
+        recording.typed("the far end");
+        recording.at = 1.0;
+        recording.typed("#");
+        drop(recording);
+
+        let played = super::played_from(Some(path.clone()));
+
+        assert_eq!(
+            played.len(),
+            3,
+            "three went in and {} came out",
+            played.len()
+        );
+        assert_eq!(played[0].did, super::Did::Typed(String::from("h")));
+        assert_eq!(
+            played[1].did,
+            super::Did::Typed(String::from("the far end")),
+            "a typed space did not survive the round trip"
+        );
+        // **A hash is a character somebody can type**, and the parser
+        // takes everything after one as a comment. Inside the quotes it
+        // is not a comment, which is what the quotes are for.
+        assert_eq!(played[2].did, super::Did::Typed(String::from("#")));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Spec 0087: a key that produces no printable text produces none.
+    #[test]
+    fn a_control_key_is_not_typing() {
+        assert_eq!(super::typed_of("a"), "a");
+        assert_eq!(super::typed_of(" "), " ");
+        assert_eq!(super::typed_of("\r"), "");
+        assert_eq!(super::typed_of("\u{1b}"), "");
+        assert_eq!(super::typed_of("\u{8}"), "");
+        assert_eq!(super::typed_of("ö"), "ö");
+    }
+
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
     fn a_recording_of_the_mouse_can_be_played_back() {
