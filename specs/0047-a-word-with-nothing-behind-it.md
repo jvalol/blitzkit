@@ -1,7 +1,7 @@
 # 0047 A word with nothing behind it
 
 **Status:** implemented
-**Date:** 2026-10-10, amended 2026-10-11
+**Date:** 2026-10-10, amended 2026-10-11 and 2026-11-06
 
 ## Goal
 
@@ -128,6 +128,27 @@ Both halves of the cut-out are now the same question asked twice of the same
 texel, in `fs_cutout` and in `fs_main`, so a fragment that survives one
 survives the other.
 
+**And it is asked only of a draw that is not blending.** Amended 2026-11-06.
+The reason for a cutout is the first line of this spec: blending has to be
+sorted, so a hole is cut instead and the thing stays in the opaque pass. A
+translucent draw has already paid that price. Spec 0018 gives it its own pass,
+far side then near, with the depth write turned off, so a discard there saves
+nothing at all and throws away every value of alpha between nothing and
+`CUTOUT`.
+
+The arcade's carved runes are what found it. That texture carries how much of
+each texel the chisel covered, and the face is drawn translucent, so the
+partial values are the whole point of it. Under the old rule they were cut at
+0.35: a stroke running at any angle came out a staircase, and the soft skirt
+meant to read as a glow came out as a hard collar at the radius where it
+crossed the threshold. Jake, 2026-11-06: it has little smoothness to it and
+does not land as a glowing stone.
+
+Nought is still nought either way, because a texel at nought alpha blends
+nothing, so this changes what a holed texture looks like only where it was
+already being blended. The prepass and both shadow passes are untouched: they
+draw opaque things, and a holed texture is kept out of them anyway.
+
 ## Acceptance criteria
 
 - A stencilled word's letters are opaque and its ground is not. — `text::tests::a_stencilled_word_has_nothing_behind_it`
@@ -139,6 +160,7 @@ survives the other.
 - `drawn` still has a black ground. — `text::tests::it_is_white_on_black`
 - The shader cuts out at the number this says, and it is under a half. — `text::tests::the_shader_cuts_out_at_the_same_number`
 - A stencilled texture is known to have holes, and a drawn one is not. — `texture::tests::a_stencilled_texture_has_holes`
+- The mesh pass cuts out only where the draw is not already blending. — `text::tests::only_an_opaque_draw_is_cut_out`
 
 ### Verified by hand
 

@@ -500,6 +500,30 @@ mod tests {
         }
     }
 
+    /// Spec 0047: and the mesh pass asks it only of a draw that is not
+    /// already blending.
+    ///
+    /// **Written because the guard looks like belt and braces.** A
+    /// discard inside a pass that blends reads as redundant, and taking
+    /// it out is a one-line tidy-up that costs the arcade's runestone
+    /// every value of coverage under the cutout: a staircase on every
+    /// stroke and a hard collar round the glow.
+    #[test]
+    fn only_an_opaque_draw_is_cut_out() {
+        let source = include_str!("../res/shaders/mesh.wgsl");
+        let guarded = source
+            .lines()
+            .filter(|line| line.contains("< CUTOUT"))
+            .filter(|line| line.contains("in.color.a >= 1.0"))
+            .count();
+
+        assert_eq!(
+            guarded, 1,
+            "the mesh pass cuts a fragment out without first asking whether \
+             the draw is opaque"
+        );
+    }
+
     /// colour them the way everything else in this engine is coloured.
     #[test]
     fn it_is_white_on_black() {

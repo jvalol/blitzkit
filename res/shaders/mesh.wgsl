@@ -760,7 +760,19 @@ fn lit_surface(in: VertexOutput) -> Lit {
     // Every texture this engine is given writes full alpha unless it was
     // built by `text::stencilled`, so nothing that did not ask for a cutout
     // comes near this.
-    if sampled.a < CUTOUT {
+    //
+    // **Asked of an opaque draw and no other.** The cutout is the answer to
+    // one objection, that blending has to be sorted, and a translucent draw
+    // has already answered it: spec 0018 draws it in its own pass, far side
+    // then near, with the depth write off. There is nothing left for a
+    // discard to save there, and what it costs is every value between
+    // nothing and `CUTOUT`. The arcade's carved runes are the case that
+    // found it. Their texture carries how much of each texel the chisel
+    // covered, and under the old rule every edge in it was cut at 0.35:
+    // the strokes came out a staircase and the soft skirt round them a
+    // hard collar. Nought is still nought, because a texel at nought
+    // blends nothing.
+    if in.color.a >= 1.0 && sampled.a < CUTOUT {
         discard;
     }
 
