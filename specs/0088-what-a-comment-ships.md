@@ -1,7 +1,7 @@
 # 0088 What a comment ships
 
 **Status:** implemented
-**Date:** 2026-11-07
+**Date:** 2026-11-07, amended the same day
 
 ## Goal
 
@@ -21,11 +21,25 @@ above `without_a_comment` changed six bytes in two megabytes, each one
 larger by seven, the file exactly as long as it was. Three lines instead of
 seven moved the same six offsets by three.
 
-**Which means there is no prose-only commit to `src`.** A comment is not
-cosmetic once it has been compiled. The published build really does differ,
-and no check comparing bytes can say otherwise, because there is nothing to
-tell apart. `check-fresh` is right to count it and the pre-push hook is
-right to refuse the push.
+**Which means a comment in `src` is usually not cosmetic.** Once it has
+been compiled the published build really does differ, and no check
+comparing bytes can say otherwise, because there is nothing to tell apart.
+`check-fresh` is right to count it and the pre-push hook is right to refuse
+the push.
+
+**Usually, and this said always for a day.** Amended 2026-11-07, the same
+day it was written. The cost falls on what is recorded below the edit, not
+on the file for being source: a doc comment corrected in the arcade's
+`says.rs` changed no byte of its browser build and no frame of its clip,
+because that file is five `pub const` strings and no code at all, so there
+is no location in it for a line number to be recorded against. Both
+manifests moved and nothing else did.
+
+So the rule to work by is narrower and more useful than the one this spec
+first gave. Prose costs nothing where nothing below it can panic, and a
+file of constants is the clearest case. It still belongs in a spec when it
+is long, for the reason below, and it still costs eighteen rebuilt files
+when it sits above live code.
 
 **So prose longer than a sentence belongs in a spec.** `behind_engine`
 counts commits touching `src` and the build's own example, and
