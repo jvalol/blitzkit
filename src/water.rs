@@ -92,6 +92,21 @@ const CHOPS: [(f32, f32, f32, f32); 6] = [
     (2.67, 59.4, 5.6, 0.11),
 ];
 
+/// How far a crest bends along its own length, and how quickly.
+///
+/// **Six straight waves are corduroy however they are aimed.** Summing
+/// plane waves gives crests that are lines, and the strongest of the six
+/// carries a third of the amplitude, so its lines are what the eye reads.
+/// Spreading the directions only turned the stripes from diagonal to
+/// square-on. What stops it being stripes is the crest not being straight.
+///
+/// `BENDS` is in radians of phase, so better than a radian is a crest that
+/// wanders by a sixth of its own spacing. `WANDERS` is against each wave's
+/// own wavenumber, so the bend is long against the ripple it bends and
+/// every scale is bent in proportion to itself.
+const BENDS: f32 = 1.7;
+const WANDERS: f32 = 0.37;
+
 /// How many substeps one `step` will take.
 ///
 /// A frame that arrives late makes the water slower to compute, up to here.
@@ -515,19 +530,37 @@ impl Water {
                     / (self.span(j, self.along) * self.step);
 
                 // the slope the grid knows about, roughened by the ripples it
-                // does not: four waves, each going its own way at its own
+                // does not: six waves, each going its own way at its own
                 // speed, so the detail neither tiles nor marches.
                 let slope = vec3(-along_x, 1.0, -along_z).normalize();
                 let mut fine = Vec3::ZERO;
 
                 for (angle, wavenumber, speed, steep) in CHOPS {
                     let (sin, cos) = angle.sin_cos();
-                    let phase = (x * cos + z * sin) * wavenumber + self.since * speed;
-                    // the slope of that wave is its own gradient, which points
-                    // along the way it travels
-                    let lean = steep * phase.cos();
+                    // across the crests and along them, which are the two
+                    // directions this wave has anything to say about
+                    let across = x * cos + z * sin;
+                    let along = z * cos - x * sin;
 
-                    fine += vec3(-cos * lean, 0.0, -sin * lean);
+                    // **The crest wanders along its own length.** Six straight
+                    // plane waves summed are corduroy whichever way they are
+                    // aimed, because the strongest one is a third of the
+                    // amplitude and its crests are lines. Bending each crest
+                    // by a slow wave along itself is what makes chop out of
+                    // them, and is what `garden::mottle` does to a rock.
+                    let wander = along * wavenumber * WANDERS;
+                    let phase = across * wavenumber + self.since * speed + BENDS * wander.sin();
+
+                    // the slope of that wave, which no longer points only the
+                    // way it travels: a bent crest leans along itself too.
+                    let lean = steep * phase.cos();
+                    let sideways = lean * BENDS * WANDERS * wander.cos();
+
+                    fine += vec3(
+                        -(cos * lean - sin * sideways),
+                        0.0,
+                        -(sin * lean + cos * sideways),
+                    );
                 }
 
                 let normal = (slope + fine * self.chop).normalize();
