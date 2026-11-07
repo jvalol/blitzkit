@@ -365,6 +365,13 @@ struct Pressed {
 /// called it: a dead-code warning in every browser build, and `./build-web`
 /// makes eighteen of those. Clippy in `check-all` never saw it, because on
 /// the host the function is used.
+///
+/// **It bought no bytes.** The linker had already dropped it: adding this
+/// attribute left every browser build exactly as long as it was. The six
+/// bytes that did move in `cubes_bg.wasm` were panic line numbers, each up
+/// by the seven lines the paragraph above added. Measured, by inserting
+/// three lines instead and watching the same six offsets move by three.
+/// Which is also why this paragraph puts all eighteen builds behind again.
 #[cfg(not(target_arch = "wasm32"))]
 fn without_a_comment(line: &str) -> &str {
     let mut quoted = false;
