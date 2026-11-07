@@ -501,8 +501,8 @@ impl Scene {
     /// read that off either file.
     ///
     /// There is one. Pushing a second replaces the first, because two
-    /// things behind everything is two skies, which spec 0040 already had
-    /// once and spent a day on.
+    /// things behind everything is two skies, which the arcade's spec 0040
+    /// already had once and spent a day on.
     pub fn backdrop(&mut self, mesh: MeshId, texture: TextureId, color: Vec4, shininess: f32) {
         self.backdrop = Some(Backdrop {
             mesh,
