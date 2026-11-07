@@ -79,7 +79,3 @@ read a texture back.
 once added is there for the run. This spec is about not needing to add one.
 
 **Resizing.** See above: a different size is a different texture.
-
----
-
-I asked AI to draft this for me. I've edited it. Any surviving AI smells are my oversight.

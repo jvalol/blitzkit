@@ -67,7 +67,3 @@ composition for Chinese or Japanese wants winit's IME events, which are
 not plumbed here and should not be until something asks.
 
 **Clipboard.** Nothing here pastes.
-
----
-
-I asked AI to draft this for me. I've edited it. Any surviving AI smells are my oversight.

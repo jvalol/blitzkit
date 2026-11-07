@@ -227,7 +227,3 @@ MIT or Apache-2.0, whichever suits you.
 
 The font, Press Start 2P, isn't mine. It's under the SIL Open Font License 1.1,
 and that license travels with it in `res/fonts/OFL.txt`.
-
----
-
-I asked AI to draft this for me. I've edited it. Any surviving AI smells are my oversight.

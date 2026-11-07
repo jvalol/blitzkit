@@ -72,7 +72,3 @@ build locatable. Whether a nightly flag can leave them out was not checked.
 **Not committing the builds at all.** `web/` holds the published wasm and a
 deploy serves what is committed. Building on the deploy instead is a
 different spec and a Rust toolchain in Netlify.
-
----
-
-I asked AI to draft this for me. I've edited it. Any surviving AI smells are my oversight.

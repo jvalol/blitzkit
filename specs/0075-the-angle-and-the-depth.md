@@ -163,7 +163,3 @@ texture projected from the heightfield's own normals when it is.
 **Eight bits.** The blown white of a real pool is a highlight that went past
 one and stayed there. This engine draws into an 8-bit sRGB surface with no
 tonemapping, so a highlight clips flat however good the rest gets.
-
----
-
-I asked AI to draft this for me. I've edited it. Any surviving AI smells are my oversight.
