@@ -359,6 +359,13 @@ struct Pressed {
 /// wrong the moment one could carry what somebody typed: a recording of
 /// the character `#` played back as a line with nothing after the time.
 /// The round trip test caught it. Spec 0087.
+///
+/// **Native only, because its one caller is.** `played_from` reads a script
+/// off the disc and is already gated, so on wasm this compiled and nothing
+/// called it: a dead-code warning in every browser build, and `./build-web`
+/// makes eighteen of those. Clippy in `check-all` never saw it, because on
+/// the host the function is used.
+#[cfg(not(target_arch = "wasm32"))]
 fn without_a_comment(line: &str) -> &str {
     let mut quoted = false;
 
