@@ -40,8 +40,12 @@ pub const PREPASS: usize = FIRST_LAMP_FACE + LAMP_FACES;
 pub const HIDDEN: usize = PREPASS + 1;
 pub const MESH: usize = HIDDEN + 1;
 pub const OVERLAY: usize = MESH + 1;
+/// The world drawn again into a texture something in it wears, per spec
+/// 0090. A slot of its own so a mirror's price is a column rather than a
+/// frame time that got worse.
+pub const TARGET: usize = OVERLAY + 1;
 /// How many slots there are, which is two queries each.
-pub const PASSES: usize = OVERLAY + 1;
+pub const PASSES: usize = TARGET + 1;
 
 /// What each pass is called, for a readout and for a sweep's columns.
 pub fn pass_name(slot: usize) -> &'static str {
@@ -51,6 +55,7 @@ pub fn pass_name(slot: usize) -> &'static str {
         PREPASS => "prepass",
         MESH => "mesh",
         OVERLAY => "overlay",
+        TARGET => "target",
         _ if slot >= FIRST_LAMP_FACE => "lamps",
         _ => "spots",
     }
@@ -413,5 +418,31 @@ mod tests {
 
         assert!((costs.at_ms(0.0).expect("five") - 1.0).abs() < 1e-4);
         assert!((costs.at_ms(1.0).expect("five") - 5.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn every_named_slot_answers_to_its_own_name() {
+        // **The guard underneath these swallows anything above
+        // `FIRST_LAMP_FACE`**, which every slot after the lamps is. So each
+        // one needs an arm of its own, and a new slot added without one is
+        // reported as a lamp: a column headed "lamps" holding a mirror's
+        // time, with nothing anywhere saying so.
+        for (slot, name) in [
+            (SUN, "sun"),
+            (PREPASS, "prepass"),
+            (HIDDEN, "hidden"),
+            (MESH, "mesh"),
+            (OVERLAY, "overlay"),
+            (TARGET, "target"),
+        ] {
+            assert_eq!(
+                pass_name(slot),
+                name,
+                "slot {} is reported as {} rather than {}",
+                slot,
+                pass_name(slot),
+                name
+            );
+        }
     }
 }

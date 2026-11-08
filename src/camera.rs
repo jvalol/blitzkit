@@ -4,7 +4,7 @@
 //! screen's coordinates. See `specs/0008-camera.md`.
 
 use crate::collision::Ray;
-use glam::{Mat4, Vec2, Vec3, Vec4};
+use glam::{Mat3, Mat4, Vec2, Vec3, Vec4};
 
 /// What a camera can see, as six planes facing inward.
 ///
@@ -181,6 +181,64 @@ impl Camera {
     /// The six planes of what this camera can see, per spec 0050.
     pub fn frustum(&self) -> Frustum {
         Frustum::of(self.view_projection())
+    }
+
+    /// The reflection of the world through a plane.
+    ///
+    /// `on_plane` is any point on the mirror and `normal` is which way it
+    /// faces; the length of the normal does not matter. A normal of nothing
+    /// is not a plane and gives back the identity.
+    ///
+    /// Private because no game wants it. What a game wants is [`behind`],
+    /// and this is here so that the mirror and the test that holds it are
+    /// not two accounts of one reflection.
+    ///
+    /// [`behind`]: Camera::behind
+    fn reflection_in(on_plane: Vec3, normal: Vec3) -> Mat4 {
+        let Some(n) = normal.try_normalize() else {
+            return Mat4::IDENTITY;
+        };
+
+        // p - 2((p - on) . n)n, written as a matrix: the linear part turns
+        // the direction and the last column carries the plane's offset.
+        let turned = Mat3::IDENTITY - 2.0 * Mat3::from_cols(n * n.x, n * n.y, n * n.z);
+
+        Mat4::from_translation(2.0 * on_plane.dot(n) * n) * Mat4::from_mat3(turned)
+    }
+
+    /// The same camera stood the other side of a plane, looking back at it.
+    /// Spec 0090.
+    ///
+    /// This is what a mirror draws with. `on_plane` is any point on the
+    /// glass and `normal` is which way it faces; the length of the normal
+    /// does not matter, and a normal of nothing leaves the camera where it
+    /// is rather than sending it to NaN.
+    ///
+    /// **What comes out is the reflection with left and right swapped, and
+    /// undoing that is the caller's.** Lay the target on the glass with `u`
+    /// running the other way. That is the whole of the correction, and
+    /// `a_camera_behind_the_glass_and_a_flip_is_a_true_mirror` is what says
+    /// so: the pair is identical to reflecting the world and drawing it from
+    /// where you already stand, which is the definition of a mirror.
+    ///
+    /// **Why the flip is not done here.** Negating x in the matrix would
+    /// make this a true reflection and give it a negative determinant, which
+    /// flips the winding of every triangle in the scene. The pipelines cull
+    /// by face, so the mirror would then need a back-culled twin of the
+    /// prepass, the hidden pass and the mesh pass. An ordinary camera and a
+    /// texture coordinate cost nothing instead.
+    pub fn behind(&self, on_plane: Vec3, normal: Vec3) -> Self {
+        let across = Self::reflection_in(on_plane, normal);
+
+        Self {
+            position: across.transform_point3(self.position),
+            target: across.transform_point3(self.target),
+            // a direction, so it turns without picking up the plane's
+            // offset. Moved as a point it would tilt the mirror image by
+            // however far the glass is from the origin.
+            up: across.transform_vector3(self.up),
+            ..*self
+        }
     }
 
     /// The ray a cursor points along, per spec 0025.
@@ -669,6 +727,174 @@ mod tests {
                 was,
                 is
             );
+        }
+    }
+
+    /// A mirror on the wall at x = 2, facing back down the room.
+    const GLASS_ON: Vec3 = Vec3::new(2.0, 1.5, 0.0);
+    const GLASS_FACES: Vec3 = Vec3::NEG_X;
+
+    fn standing_at(position: Vec3, target: Vec3) -> Camera {
+        let mut camera = Camera::new();
+        camera.position = position;
+        camera.target = target;
+        camera.set_viewport(800.0, 600.0);
+        camera
+    }
+
+    #[test]
+    fn a_camera_behind_the_glass_stands_the_same_distance_the_other_side() {
+        // half a metre short of the glass, looking straight at it
+        let camera = standing_at(Vec3::new(1.5, 1.5, 0.0), GLASS_ON);
+        let seen = camera.behind(GLASS_ON, GLASS_FACES);
+
+        assert!(
+            (seen.position.x - 2.5).abs() < 1e-5,
+            "stood at {} rather than half a metre past the glass",
+            seen.position
+        );
+        // nothing moved along the plane
+        assert!((seen.position.y - 1.5).abs() < 1e-5);
+        assert!(seen.position.z.abs() < 1e-5);
+        // and it looks back the way it came
+        assert!(
+            seen.target.x < seen.position.x,
+            "looking away from the glass: at {} from {}",
+            seen.target,
+            seen.position
+        );
+    }
+
+    #[test]
+    fn the_plane_itself_does_not_move() {
+        let across = Camera::reflection_in(GLASS_ON, GLASS_FACES);
+
+        for along in [
+            Vec3::ZERO,
+            Vec3::Y * 3.0,
+            Vec3::Z * -4.0,
+            Vec3::new(0.0, 1.0, 2.0),
+        ] {
+            let on = GLASS_ON + along;
+            let seen = across.transform_point3(on);
+            assert!(
+                seen.distance(on) < 1e-5,
+                "a point on the plane moved from {} to {}",
+                on,
+                seen
+            );
+        }
+    }
+
+    #[test]
+    fn standing_behind_the_glass_twice_is_standing_still() {
+        let camera = standing_at(Vec3::new(-3.0, 2.2, 4.5), Vec3::new(0.5, 1.0, -1.0));
+        let back = camera
+            .behind(GLASS_ON, GLASS_FACES)
+            .behind(GLASS_ON, GLASS_FACES);
+
+        assert!(back.position.distance(camera.position) < 1e-5);
+        assert!(back.target.distance(camera.target) < 1e-5);
+        assert!(back.up.distance(camera.up) < 1e-5);
+    }
+
+    #[test]
+    fn up_turns_without_picking_up_the_plane_s_offset() {
+        // the glass is two metres off the origin, so moving `up` as though
+        // it were a position would shift it by that two metres as well as
+        // turning it, and the mirror would show the room leaning.
+        let camera = standing_at(Vec3::new(1.0, 1.5, 0.0), GLASS_ON);
+        let seen = camera.behind(GLASS_ON, GLASS_FACES);
+
+        // this glass faces along x and up is along y, so up is untouched
+        assert!(
+            seen.up.distance(Vec3::Y) < 1e-5,
+            "up came out as {} rather than straight up",
+            seen.up
+        );
+    }
+
+    #[test]
+    fn a_plane_with_no_normal_leaves_the_camera_where_it_is() {
+        let camera = standing_at(Vec3::new(1.0, 1.5, 0.0), Vec3::ZERO);
+        let seen = camera.behind(GLASS_ON, Vec3::ZERO);
+
+        assert!(seen.position.is_finite(), "{}", seen.position);
+        assert!(seen.position.distance(camera.position) < 1e-5);
+        assert!(seen.target.distance(camera.target) < 1e-5);
+        assert!(seen.up.distance(camera.up) < 1e-5);
+    }
+
+    #[test]
+    fn a_camera_behind_the_glass_does_not_turn_the_picture_inside_out() {
+        // **Why the mirror pass needs no pipeline of its own.** A true
+        // reflection has a negative determinant and flips the winding of
+        // every triangle, which would mean a back-culled twin of the
+        // prepass, the hidden pass and the mesh pass. A camera cannot have a
+        // negative determinant, so this one draws with the pipelines that
+        // already exist.
+        let camera = standing_at(Vec3::new(1.0, 1.6, 0.5), Vec3::new(2.0, 1.4, -0.5));
+        let seen = camera.behind(GLASS_ON, GLASS_FACES);
+
+        let straight = camera.view_projection().determinant();
+        let mirrored = seen.view_projection().determinant();
+
+        assert!(
+            straight * mirrored > 0.0,
+            "the determinants disagree in sign, {} and {}, so this camera \
+             flips winding after all and the mirror needs its own cull",
+            straight,
+            mirrored
+        );
+    }
+
+    #[test]
+    fn a_camera_behind_the_glass_and_a_flip_is_a_true_mirror() {
+        // **The claim the whole design rests on.** A mirror is the world
+        // reflected through the glass and drawn from where you already
+        // stand. That is not a camera, because its determinant is negative.
+        //
+        // What is a camera is the view from behind the glass, and the two
+        // differ by one flip in x. So the renderer draws an ordinary frame
+        // and the glass wears it with `u` the other way round, and nothing
+        // anywhere needs a reflected pipeline.
+        //
+        // If this ever fails, the flip is not the correction and the mirror
+        // is showing the room with left and right swapped, which no picture
+        // of a room can tell you.
+        let flip_x = Mat4::from_scale(Vec3::new(-1.0, 1.0, 1.0));
+
+        for (at, looking) in [
+            (Vec3::new(1.0, 1.6, 0.5), Vec3::new(2.0, 1.4, -0.5)),
+            (Vec3::new(-6.0, 1.7, 3.0), Vec3::new(2.0, 1.5, 0.5)),
+            (Vec3::new(0.2, 0.9, -2.0), Vec3::new(2.0, 2.0, 1.0)),
+        ] {
+            let camera = standing_at(at, looking);
+
+            let truly = camera.view_projection() * Camera::reflection_in(GLASS_ON, GLASS_FACES);
+            let cheaply = flip_x * camera.behind(GLASS_ON, GLASS_FACES).view_projection();
+
+            for point in [
+                Vec3::ZERO,
+                Vec3::new(1.0, 0.5, 1.0),
+                Vec3::new(-4.0, 2.0, -2.0),
+                Vec3::new(1.9, 1.5, 0.2),
+                Vec3::new(-1.0, 3.0, -7.0),
+            ] {
+                let a = truly * point.extend(1.0);
+                let b = cheaply * point.extend(1.0);
+                let a = a.truncate() / a.w;
+                let b = b.truncate() / b.w;
+
+                assert!(
+                    a.distance(b) < 1e-4,
+                    "from {} the mirror puts {} at {} and the flipped camera at {}",
+                    at,
+                    point,
+                    a,
+                    b
+                );
+            }
         }
     }
 }

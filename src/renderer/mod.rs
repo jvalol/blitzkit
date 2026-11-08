@@ -183,6 +183,9 @@ pub struct Renderer {
     /// The body to fill out from the camera with, if the game said. See spec
     /// 0049.
     body: Option<crate::reach::Body>,
+    /// The ones of those whose pixels the renderer draws rather than a game
+    /// uploading them, by the index their `TextureId` holds. Spec 0090.
+    targets: std::collections::HashMap<usize, Target>,
     textures: Vec<wgpu::BindGroup>,
     /// The texture behind each of those, kept so it can be written again.
     /// Spec 0074: the bind group alone cannot be reached through, so a
@@ -613,7 +616,7 @@ impl Renderer {
             got
         };
         let depth = depth::DepthTexture::new(&device, config.width, config.height, samples);
-        let colour = multisampled(&device, &config, drawn, samples);
+        let colour = multisampled(&device, config.width, config.height, drawn, samples);
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Texture Bind Group Layout"),
@@ -1002,6 +1005,7 @@ impl Renderer {
             asked_fights: false,
             fights: coplanar::Fights::default(),
             body: None,
+            targets: std::collections::HashMap::new(),
             textures: Vec::new(),
             images: Vec::new(),
             shadow_pipeline,
@@ -1088,6 +1092,134 @@ impl Renderer {
         TextureId(self.textures.len() - 1)
     }
 
+    /// A texture the renderer draws into. Spec 0090.
+    ///
+    /// What comes back is a `TextureId` in every respect: `push_textured`
+    /// takes it, the mesh shader samples it like any other, and nothing
+    /// drawing it needs to know where the pixels came from. Only
+    /// [`write_texture`] tells the difference, and it refuses.
+    ///
+    /// The size is the game's. A mirror does not want the window's: half the
+    /// width is a quarter of the fragments, and nobody reads a reflection
+    /// the way they read the room.
+    ///
+    /// [`write_texture`]: Renderer::write_texture
+    pub fn add_target(&mut self, width: u32, height: u32) -> TextureId {
+        let (width, height) = (width.max(1), height.max(1));
+        // the same count the window's frame uses, because the pipelines are
+        // built for one number and a pass cannot disagree with them
+        let samples = self.depth.samples;
+
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            // one level, per spec 0090: a mirror is looked at from the room
+            // it is in rather than from across a field
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.config.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[self.drawn],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.drawn),
+            ..Default::default()
+        });
+
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Target Bind Group"),
+            layout: &self.texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        });
+
+        // nothing cut out of it, so it goes in the passes that write depth
+        // without a texture bound, per spec 0047
+        self.holed.push(false);
+        self.textures.push(bind_group);
+        self.images.push(texture);
+        let id = TextureId(self.textures.len() - 1);
+
+        self.targets.insert(
+            id.0,
+            Target {
+                size: (width, height),
+                view,
+                colour: multisampled(&self.device, width, height, self.drawn, samples),
+                depth: depth::DepthTexture::new(&self.device, width, height, samples),
+            },
+        );
+
+        id
+    }
+
+    /// Draws one frame of a scene into a target, from a camera of its own.
+    /// Spec 0090.
+    ///
+    /// Everything between this and a frame on the screen is the same code,
+    /// for the reason spec 0062 gives. What a target frame leaves out is the
+    /// interface painted over it, the occlusion queries, and nothing else;
+    /// the shadow maps are the light's view of the scene and moving the
+    /// camera does not move the light, so whatever the last screen frame
+    /// wrote is what this one lights by.
+    ///
+    /// For a mirror, hand it [`Camera::behind`] and lay the result on the
+    /// glass with `u` running backwards. The flip is what makes it a
+    /// reflection rather than the view from the other side.
+    pub fn draw_to(
+        &mut self,
+        target: TextureId,
+        camera: &Camera,
+        scene: &Scene,
+        geometry: &Geometry,
+    ) {
+        // Taken out and put back, so the target's own views can be borrowed
+        // while `draw_into` has the renderer. The same trick `drew` uses for
+        // the picture it draws into.
+        let Some(into) = self.targets.remove(&target.0) else {
+            log::warn!("texture {} is not a target to draw into", target.0);
+            return;
+        };
+
+        // the aspect is the target's and not the window's, or a mirror in a
+        // tall window shows a room squeezed sideways
+        let mut looking = *camera;
+        looking.set_viewport(into.size.0 as f32, into.size.1 as f32);
+
+        let colour = std::mem::replace(&mut self.colour, into.colour);
+        let depth = std::mem::replace(&mut self.depth, into.depth);
+        let was = std::mem::replace(&mut self.camera, looking);
+
+        self.draw_into(&into.view, scene, geometry, Frame::Target);
+
+        self.camera = was;
+        let depth = std::mem::replace(&mut self.depth, depth);
+        let colour = std::mem::replace(&mut self.colour, colour);
+
+        self.targets.insert(
+            target.0,
+            Target {
+                size: into.size,
+                view: into.view,
+                colour,
+                depth,
+            },
+        );
+    }
+
     /// Writes new pixels into a texture already uploaded, mip chain and
     /// all. Spec 0074.
     ///
@@ -1104,6 +1236,13 @@ impl Renderer {
     /// The first test of this asserted the size was unchanged, which is
     /// true whether the guard runs or not.
     pub fn write_texture(&mut self, id: TextureId, data: &TextureData) -> bool {
+        // a target's pixels are drawn, so a write to one is a write the next
+        // frame throws away. Refused rather than ignored, per spec 0090.
+        if self.targets.contains_key(&id.0) {
+            log::warn!("texture {} is a target, and a target is drawn", id.0);
+            return false;
+        }
+
         let Some(texture) = self.images.get(id.0) else {
             log::warn!("no texture {} to write", id.0);
             return false;
@@ -1540,7 +1679,13 @@ impl Renderer {
             self.config.height,
             self.depth.samples,
         );
-        self.colour = multisampled(&self.device, &self.config, self.drawn, self.depth.samples);
+        self.colour = multisampled(
+            &self.device,
+            self.config.width,
+            self.config.height,
+            self.drawn,
+            self.depth.samples,
+        );
         // the old view died with the old texture, and the march reads through
         // this one
         self.scene_depth_bind_group =
@@ -1614,7 +1759,7 @@ impl Renderer {
             ..Default::default()
         });
 
-        self.draw_into(&view, scene, geometry, text_renderer);
+        self.draw_into(&view, scene, geometry, Frame::Screen(text_renderer));
         self.queue.present(frame);
     }
 
@@ -1792,7 +1937,7 @@ impl Renderer {
         let Some(into) = self.picture_into.take() else {
             return;
         };
-        self.draw_into(&into.view, scene, geometry, text_renderer);
+        self.draw_into(&into.view, scene, geometry, Frame::Screen(text_renderer));
         self.picture_into = Some(into);
     }
 
@@ -1951,7 +2096,7 @@ impl Renderer {
         view: &wgpu::TextureView,
         scene: &Scene,
         geometry: &Geometry,
-        text_renderer: &TextRenderer,
+        frame: Frame,
     ) {
         let mut counted = Counted::default();
 
@@ -1974,13 +2119,15 @@ impl Renderer {
         );
         self.upload_geometry(geometry);
 
-        let sections: Vec<Section> = text_renderer
-            .render_texts
-            .iter()
-            .map(text_section)
-            .collect();
-        if let Err(e) = self.text_brush.queue(&self.device, &self.queue, sections) {
-            log::error!("Failed to queue text: {}", e);
+        if let Frame::Screen(text_renderer) = frame {
+            let sections: Vec<Section> = text_renderer
+                .render_texts
+                .iter()
+                .map(text_section)
+                .collect();
+            if let Err(e) = self.text_brush.queue(&self.device, &self.queue, sections) {
+                log::error!("Failed to queue text: {}", e);
+            }
         }
 
         let mut encoder = self
@@ -2254,7 +2401,11 @@ impl Renderer {
         // the kept runs: drawn tested and not written, each inside a query,
         // so the GPU can say which of them has nothing of itself in front
         // of what is already there. Spec 0061.
-        if self.asked_count > 0 {
+        // **A target does not ask what is hidden.** Spec 0090. The queries
+        // are about what the player can see, which a mirror's view is not,
+        // and the answers are filed against a frame number: asking twice in
+        // one frame would hand the screen's boxes a mirror's reply.
+        if self.asked_count > 0 && matches!(frame, Frame::Screen(_)) {
             let mut hiding = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("What Is Hidden"),
                 color_attachments: &[],
@@ -2321,7 +2472,7 @@ impl Renderer {
                     depth_ops: None,
                     stencil_ops: None,
                 }),
-                timestamp_writes: timing_writes(&mut self.timing, crate::cost::MESH),
+                timestamp_writes: timing_writes(&mut self.timing, frame.mesh_slot()),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -2411,7 +2562,11 @@ impl Renderer {
             }
         }
 
-        {
+        // **A target gets no interface painted over it.** Spec 0090: a
+        // mirror showing the help text backwards is a mirror of the
+        // screen rather than of the room. This is the only pass the two
+        // kinds of frame do not share.
+        if matches!(frame, Frame::Screen(_)) {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2448,7 +2603,7 @@ impl Renderer {
         // mapped. Both in this encoder, before it is submitted: a resolve
         // after the submit is a resolve of the next frame's answers. Spec
         // 0061.
-        if self.asked_count > 0 {
+        if self.asked_count > 0 && matches!(frame, Frame::Screen(_)) {
             if let Some(asking) = self.asking.as_mut() {
                 encoder.resolve_query_set(&asking.set, 0..self.asked_count, &asking.resolved, 0);
                 encoder.copy_buffer_to_buffer(
@@ -4016,9 +4171,53 @@ fn formats(offered: &[wgpu::TextureFormat]) -> (wgpu::TextureFormat, wgpu::Textu
 /// One of these and not several: the surface's own texture cannot be
 /// multisampled, because it is what gets presented, so the samples live here
 /// and are resolved onto it. Nothing samples this, so it needs no binding.
+/// A texture the renderer draws into rather than one a game loads.
+/// Spec 0090.
+///
+/// **Three things and not one, because a pass's attachments have to agree on
+/// how many samples they hold.** The world is drawn into a multisampled
+/// colour and resolved onto the single-sample one that something else wears,
+/// which is how the screen's own frame already works, per spec 0052. The
+/// depth is this size rather than the window's: one the window's size would
+/// test this pass's fragments against a different picture's shape.
+struct Target {
+    /// What the camera's aspect is set from. A target drawn with the
+    /// window's aspect is a reflection stretched by whatever shape the
+    /// window happens to be.
+    size: (u32, u32),
+    /// The view a `TextureId` names: resolved onto, and sampled.
+    view: wgpu::TextureView,
+    /// What the world is drawn into first, when there is multisampling.
+    colour: Option<wgpu::TextureView>,
+    depth: depth::DepthTexture,
+}
+
+/// Whether a frame is the one somebody is looking at, or a texture
+/// something in that frame will wear. Spec 0090.
+///
+/// The difference is three things: a target queues no text, paints no
+/// interface over what it drew, and reports its world pass under a slot of
+/// its own. Everything else about the two is the same code, for the reason
+/// spec 0062 gives.
+enum Frame<'a> {
+    Screen(&'a TextRenderer),
+    Target,
+}
+
+impl Frame<'_> {
+    /// Which slot the world's own pass reports under.
+    fn mesh_slot(&self) -> usize {
+        match self {
+            Frame::Screen(_) => crate::cost::MESH,
+            Frame::Target => crate::cost::TARGET,
+        }
+    }
+}
+
 fn multisampled(
     device: &wgpu::Device,
-    config: &wgpu::SurfaceConfiguration,
+    width: u32,
+    height: u32,
     format: wgpu::TextureFormat,
     samples: u32,
 ) -> Option<wgpu::TextureView> {
@@ -4029,8 +4228,8 @@ fn multisampled(
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("Multisampled Colour"),
         size: wgpu::Extent3d {
-            width: config.width.max(1),
-            height: config.height.max(1),
+            width: width.max(1),
+            height: height.max(1),
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -5354,5 +5553,144 @@ mod asked {
                 got
             );
         }
+    }
+
+    /// Spec 0090. A target is a texture in every respect the texture table
+    /// cares about, and adding one adds exactly one of each thing an
+    /// ordinary texture adds.
+    ///
+    /// **The leak this is really guarding.** Three parallel Vecs are indexed
+    /// by the same `TextureId`, so a target that pushed two bind groups and
+    /// one image, or forgot `holed`, would give every texture added after it
+    /// somebody else's pixels. Nothing about a wrongly coloured wall says
+    /// which.
+    #[test]
+    fn a_target_is_a_texture_like_any_other() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(16, 16)) else {
+            return;
+        };
+
+        let textures = renderer.textures.len();
+        let images = renderer.images.len();
+        let holed = renderer.holed.len();
+
+        let id = renderer.add_target(8, 8);
+
+        assert_eq!(renderer.textures.len(), textures + 1);
+        assert_eq!(renderer.images.len(), images + 1);
+        assert_eq!(renderer.holed.len(), holed + 1);
+        assert_eq!(id.0, textures, "the id does not index what was pushed");
+        assert!(!renderer.holed[id.0], "a target has nothing cut out of it");
+
+        // and an ordinary texture added after one still lines up
+        let flat = crate::texture::TextureData::from_pixels(2, 2, vec![40; 2 * 2 * 4]);
+        let after = renderer.add_texture(&flat);
+        assert_eq!(after.0, id.0 + 1);
+        assert_eq!(renderer.images.len(), renderer.textures.len());
+        assert_eq!(renderer.holed.len(), renderer.textures.len());
+    }
+
+    /// Spec 0090. A target's pixels are drawn, so a write to one is pixels
+    /// the next frame throws away. Refused, and nothing changed by asking.
+    #[test]
+    fn a_target_cannot_be_written_from_the_cpu() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(16, 16)) else {
+            return;
+        };
+
+        let id = renderer.add_target(4, 4);
+        let textures = renderer.textures.len();
+        let flat = crate::texture::TextureData::from_pixels(4, 4, vec![70; 4 * 4 * 4]);
+
+        assert!(
+            !renderer.write_texture(id, &flat),
+            "a target took a write from the CPU"
+        );
+        assert_eq!(
+            renderer.textures.len(),
+            textures,
+            "a refused write still added a texture"
+        );
+
+        // and the refusal is about being a target, not about the size: an
+        // ordinary texture of the same shape takes it
+        let ordinary = renderer.add_texture(&flat);
+        assert!(renderer.write_texture(ordinary, &flat));
+    }
+
+    /// Spec 0090. `draw_to` takes the target out of the map so its views can
+    /// be borrowed, and has to put it back.
+    ///
+    /// **Why this is worth a test of its own.** A target that is not put
+    /// back draws once and is silently a black rectangle for ever after,
+    /// with a warning in a log nobody is reading. Drawing twice is what says
+    /// the first draw did not consume it.
+    #[test]
+    fn drawing_to_a_target_leaves_it_there_to_draw_again() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(16, 16)) else {
+            return;
+        };
+
+        let id = renderer.add_target(8, 8);
+        let scene = Scene::new();
+        let geometry = Geometry::new();
+        let camera = Camera::new().behind(glam::Vec3::X, glam::Vec3::NEG_X);
+
+        for round in 0..3 {
+            renderer.draw_to(id, &camera, &scene, &geometry);
+            assert!(
+                renderer.targets.contains_key(&id.0),
+                "the target was gone after round {}",
+                round
+            );
+        }
+    }
+
+    /// Spec 0090. An ordinary texture is not a target, and asking to draw
+    /// into one is refused rather than drawn somewhere.
+    #[test]
+    fn an_ordinary_texture_is_not_a_target_to_draw_into() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(16, 16)) else {
+            return;
+        };
+
+        let flat = crate::texture::TextureData::from_pixels(4, 4, vec![90; 4 * 4 * 4]);
+        let ordinary = renderer.add_texture(&flat);
+        let targets = renderer.targets.len();
+
+        renderer.draw_to(ordinary, &Camera::new(), &Scene::new(), &Geometry::new());
+
+        assert_eq!(
+            renderer.targets.len(),
+            targets,
+            "drawing into an ordinary texture made it a target"
+        );
+    }
+
+    /// Spec 0090. A target keeps its own size, so the camera's aspect is the
+    /// target's rather than the window's.
+    ///
+    /// A reflection drawn with the window's aspect is a room squeezed
+    /// sideways by whatever shape the window happens to be, and it looks
+    /// like a modelling fault rather than a projection one.
+    #[test]
+    fn a_target_is_drawn_at_its_own_shape() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(64, 16)) else {
+            return;
+        };
+
+        // square, against a window four times as wide as it is tall
+        let id = renderer.add_target(32, 32);
+        assert_eq!(renderer.targets[&id.0].size, (32, 32));
+
+        let was = renderer.camera.aspect();
+        renderer.draw_to(id, &Camera::new(), &Scene::new(), &Geometry::new());
+
+        assert!(
+            (renderer.camera.aspect() - was).abs() < 1e-6,
+            "the window's camera came back with the target's aspect, {} not {}",
+            renderer.camera.aspect(),
+            was
+        );
     }
 }
