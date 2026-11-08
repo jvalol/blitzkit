@@ -130,9 +130,13 @@ behind=$(./check-fresh 2>/dev/null |
 
 # **A build behind only its own repo may be one nobody could tell from the
 # one in the tree.** Nothing here can read a test out of a source file. The
-# arcade keeps a `#[cfg(test)]` const at main.rs line 62 with fourteen
-# thousand lines of game after it, so there is no line to cut at and no path
-# to exclude, the way specs and markdown are excluded in `behind_source`.
+# capriccio keeps a `#[cfg(test)]` const near the top of main.rs,
+# `REACH_PAST`, with seventeen thousand lines of game after it, so there is
+# no line to cut at and no path to exclude, the way specs and markdown are
+# excluded in `behind_source`.
+#
+# Named rather than given a line, because the line was 62 when this was
+# written and is 74 now, and nothing was keeping it.
 #
 # What can be asked is the artifact. A commit that only adds tests rebuilds
 # byte for byte, which is how the one on 2026-11-02 was caught: `./build-web
@@ -167,8 +171,8 @@ if [ -n "$behind" ]; then
   echo
   echo "$behind"
   echo
-  echo "  ./build-web          to bring them all up"
-  echo "  ./build-web arcade   for one"
+  echo "  ./build-web             to bring them all up"
+  echo "  ./build-web capriccio   for one"
   echo
   echo "then commit web/ and push again. git push --no-verify skips this."
   exit 1
