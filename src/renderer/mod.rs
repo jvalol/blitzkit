@@ -1224,16 +1224,26 @@ impl Renderer {
             return;
         };
 
-        // the aspect is the target's and not the window's, or a mirror in a
-        // tall window shows a room squeezed sideways
+        // **The screen's aspect and not the target's.** Spec 0092's glass
+        // samples by screen position, so what the target holds has to be the
+        // picture the screen would show, stretched into whatever shape the
+        // texture happens to be. Normalised coordinates un-stretch it
+        // exactly on the way out.
+        //
+        // Set to the target's own size first, which is what a target drawn
+        // for anything else would want, and it meant a square image read
+        // with the screen's coordinates: the glass sampled mostly outside
+        // the picture and came back black. Found by hanging a target on a
+        // wall as an ordinary poster and seeing content in it, which is the
+        // measurement four guesses had been standing in for.
         let mut looking = *camera;
-        looking.set_viewport(into.size.0 as f32, into.size.1 as f32);
+        looking.set_viewport(self.config.width as f32, self.config.height as f32);
 
         let colour = std::mem::replace(&mut self.colour, into.colour);
         let depth = std::mem::replace(&mut self.depth, into.depth);
         let was = std::mem::replace(&mut self.camera, looking);
 
-        self.draw_into(&into.view, scene, geometry, Frame::Target);
+        self.draw_into(&into.view, scene, geometry, Frame::Target(target));
 
         self.camera = was;
         let depth = std::mem::replace(&mut self.depth, depth);
@@ -1797,10 +1807,7 @@ impl Renderer {
         // Before the screen pass, because the glass wears what came out.
         // A mirror facing a mirror therefore shows the other's target as it
         // was last frame, which spec 0090 leaves as it is.
-        for mirror in scene.mirrors().to_vec() {
-            let behind = self.camera.behind(mirror.on_plane, mirror.normal);
-            self.draw_to(mirror.target, &behind, scene, geometry);
-        }
+        self.fill_the_mirrors(scene, geometry);
 
         self.draw_into(&view, scene, geometry, Frame::Screen(text_renderer));
         self.queue.present(frame);
@@ -1980,8 +1987,34 @@ impl Renderer {
         let Some(into) = self.picture_into.take() else {
             return;
         };
+        self.fill_the_mirrors(scene, geometry);
         self.draw_into(&into.view, scene, geometry, Frame::Screen(text_renderer));
         self.picture_into = Some(into);
+    }
+
+    /// Draws every mirror this scene hung into the target it wears, before
+    /// the frame that will show them. Spec 0091.
+    ///
+    /// **Called by both `render` and `drew`, which is the whole reason it
+    /// is a function.** It lived inside `render` first, so a picture drew no
+    /// mirrors at all: capriccio's hall of mirrors came out as ten black
+    /// rectangles in a lit room, and the film and the clip would have
+    /// published that. The two paths are the same frame by spec 0062, and
+    /// this is part of the frame.
+    fn fill_the_mirrors(&mut self, scene: &Scene, geometry: &Geometry) {
+        for mirror in scene.mirrors().to_vec() {
+            // **Clipped at its own glass, per spec 0093.** Without it the
+            // reflection starts at the reflected eye, which is as far behind
+            // the glass as the viewer is in front, so everything standing
+            // back there is in the picture. That is what stopped capriccio's
+            // hall of mirrors being placed three times over.
+            let behind = self
+                .camera
+                .behind(mirror.on_plane, mirror.normal)
+                .clipped_at(mirror.on_plane, mirror.normal);
+
+            self.draw_to(mirror.target, &behind, scene, geometry);
+        }
     }
 
     /// Hands back what `drew` last drew, as pixels.
@@ -2614,11 +2647,29 @@ impl Renderer {
         // frame it is in the middle of drawing. The second bounce is the
         // other mirror's target as it stood last frame, which is what spec
         // 0090 settled.
-        let glass = if matches!(frame, Frame::Screen(_)) {
-            self.upload_glass(scene)
-        } else {
-            0
+        // **A target frame draws glass too, which is what makes a mirror
+        // facing a mirror recede.** It did not, and what that looked like
+        // was two walls of mirrors showing each other as nothing: Jake,
+        // 2026-11-08, the mirrors don't reflect each other. Spec 0090 says
+        // one bounce deep with the second bounce stale, and skipping the
+        // pass gave none at all.
+        //
+        // The hazard is one pane, not all of them: a mirror sampling the
+        // target it is being rendered into. That one is left out below.
+        // **A target frame draws glass too, which is what makes a mirror
+        // facing a mirror recede.** Spec 0094.
+        //
+        // In a target frame every mirror's glass shows its spare, which
+        // holds last frame's reflection and which nothing is writing now.
+        // That is the whole of why there is a spare: with one texture each,
+        // filling mirror A sampled B's target and then filling B wrote it,
+        // so both were read and written in one submission and both came out
+        // black.
+        let filling = match frame {
+            Frame::Screen(_) => None,
+            Frame::Target(id) => Some(id),
         };
+        let glass = self.upload_glass(scene, filling);
 
         if glass > 0 {
             let (into, onto) = match &self.colour {
@@ -2655,11 +2706,17 @@ impl Renderer {
             glass_pass.set_bind_group(2, &self.shadow_bind_group, &[]);
             glass_pass.set_bind_group(3, &self.scene_depth_bind_group, &[]);
 
-            for (which, pane) in scene.glass_surfaces().iter().enumerate() {
+            for (which, pane) in scene
+                .glass_surfaces()
+                .iter()
+                .filter(|pane| Some(pane.target) != filling)
+                .enumerate()
+            {
+                let worn = pane.target;
                 let Some(mesh) = self.meshes.get(pane.mesh.0) else {
                     continue;
                 };
-                let Some(texture) = self.textures.get(pane.target.0) else {
+                let Some(texture) = self.textures.get(worn.0) else {
                     continue;
                 };
                 if mesh.index_count == 0 {
@@ -3033,7 +3090,7 @@ impl Renderer {
     fn upload_instances(&mut self, scene: &Scene, frame: &Frame) -> Drawn {
         let views = self.views(scene);
         // a target frame also draws what spec 0091 keeps for reflections
-        let batches = scene.batches(matches!(frame, Frame::Target));
+        let batches = scene.batches(matches!(frame, Frame::Target(_)));
         let mut pushed: Vec<culling::Pushed> = Vec::with_capacity(batches.len());
 
         for (mesh, texture, instances) in batches {
@@ -3359,16 +3416,17 @@ impl Renderer {
 
     /// Where this frame's glass stands, written the way the outlines are.
     /// Spec 0092.
-    fn upload_glass(&mut self, scene: &Scene) -> u32 {
-        let panes = scene.glass_surfaces();
-        if panes.is_empty() {
-            return 0;
-        }
-
-        let instances: Vec<Instance> = panes
+    fn upload_glass(&mut self, scene: &Scene, filling: Option<TextureId>) -> u32 {
+        let instances: Vec<Instance> = scene
+            .glass_surfaces()
             .iter()
+            .filter(|pane| Some(pane.target) != filling)
             .map(|pane| pane.instance.from_the_eye(self.camera.position))
             .collect();
+
+        if instances.is_empty() {
+            return 0;
+        }
 
         let bytes: &[u8] = bytemuck::cast_slice(&instances);
         if bytes.len() as u64 > self.glass_buffer.size() {
@@ -3377,7 +3435,7 @@ impl Renderer {
             self.queue.write_buffer(&self.glass_buffer, 0, bytes);
         }
 
-        panes.len() as u32
+        instances.len() as u32
     }
 
     /// Writes this frame's quads into the vertex and index buffers, growing them when they are too small.
@@ -4347,7 +4405,10 @@ struct Target {
 /// spec 0062 gives.
 enum Frame<'a> {
     Screen(&'a TextRenderer),
-    Target,
+    /// Filling this target, which is the one pane of glass the pass must
+    /// leave out: sampling a texture that is a colour attachment of the same
+    /// pass is a validation error, not a dim reflection.
+    Target(TextureId),
 }
 
 impl Frame<'_> {
@@ -4355,7 +4416,7 @@ impl Frame<'_> {
     fn mesh_slot(&self) -> usize {
         match self {
             Frame::Screen(_) => crate::cost::MESH,
-            Frame::Target => crate::cost::TARGET,
+            Frame::Target(_) => crate::cost::TARGET,
         }
     }
 }

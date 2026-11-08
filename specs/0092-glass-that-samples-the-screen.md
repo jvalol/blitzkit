@@ -51,6 +51,19 @@ prepass settled the depth, and a pass that wrote it could not also sample it.
 So glass behind a wall is hidden by the wall, and glass does not hide what is
 drawn after it.
 
+**A target a mirror wears is rendered at the screen's aspect, not its own.**
+The sample is by screen position, so what the target has to hold is the
+picture the screen would show, stretched into whatever shape the texture is;
+normalised coordinates un-stretch it exactly on the way out.
+
+Set to the target's own size at first, which is what a target read back for
+anything else would want. With a square target and a wider screen the glass
+read normalised screen coordinates against a square picture, sampled mostly
+outside it, and came back black. That is what stopped capriccio's two walls
+reflecting each other through four wrong diagnoses, and what found it was
+hanging a target on a wall as an ordinary textured quad and seeing content in
+it: the measurement the guesses had been standing in for.
+
 **x is flipped and y is not.** Spec 0090's equivalence is exact: the view from
 behind the glass plus one flip in x is the true reflection. Flipping y as well
 is the mistake that looks almost right, and

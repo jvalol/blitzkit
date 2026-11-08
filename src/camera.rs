@@ -91,6 +91,61 @@ impl Frustum {
     }
 }
 
+/// Shears a projection's near plane onto a world-space plane. Spec 0093.
+///
+/// Lengyel's oblique frustum, adapted to the 0 at the near plane and 1 at the
+/// far that this engine's projection targets rather than the -1 to 1 the
+/// published version assumes.
+///
+/// **The algebra is not the part worth trusting, so the tests do not check
+/// it.** They check what it is for: a point on the plane lands at depth 0, a
+/// point behind it lands at less than 0 and is clipped, a point in front of
+/// it lands where it already did, and the far plane does not move. Any of
+/// those failing is this being wrong, whichever line of it.
+fn sheared(projection: Mat4, view: Mat4, plane: Vec4) -> Mat4 {
+    // the plane in the camera's own space, where the frustum lives. A plane
+    // transforms by the inverse transpose of what moves a point.
+    let in_view = view.inverse().transpose() * plane;
+
+    // the corner of the near plane furthest into the half-space being kept,
+    // found by unprojecting the sign of the plane's own x and y
+    let corner = Vec4::new(in_view.x.signum(), in_view.y.signum(), 1.0, 1.0);
+    let unprojected = projection.inverse() * corner;
+
+    let along = in_view.dot(unprojected);
+    if along.abs() < 1e-9 {
+        // the plane passes through the eye, so there is no near plane to put
+        // on it and nothing sensible to shear to
+        return projection;
+    }
+
+    // the third row carries depth, and replacing it with the plane scaled to
+    // meet that corner is what puts the near plane on it. glam is column
+    // major, so a row is one component taken across the four columns.
+    //
+    // **The scale is the fourth row dotted with that corner, not the fourth
+    // row's own z.** Taking the constant was the first version and it put
+    // the near plane on the glass correctly while sending everything else
+    // out of the depth range: a point a metre in front landed at 1.54 and
+    // the far plane at -1.03. Read off the matrix rather than assumed, so
+    // this holds for any projection and not only the one in use.
+    let fourth = Vec4::new(
+        projection.x_axis.w,
+        projection.y_axis.w,
+        projection.z_axis.w,
+        projection.w_axis.w,
+    );
+    let row = in_view * (fourth.dot(unprojected) / along);
+
+    let mut out = projection;
+    out.x_axis.z = row.x;
+    out.y_axis.z = row.y;
+    out.z_axis.z = row.z;
+    out.w_axis.z = row.w;
+
+    out
+}
+
 /// Where the scene is looked at from.
 ///
 /// World space is right-handed with y up, per `specs/0007-math-types.md`, and
@@ -106,6 +161,12 @@ pub struct Camera {
     pub fov_y: f32,
     pub near: f32,
     pub far: f32,
+    /// A plane this camera will not draw past, in world space, as
+    /// (normal, distance). Spec 0093.
+    ///
+    /// `None` for every camera but a mirror's, and a camera with none has
+    /// exactly the projection it had before this existed.
+    clip: Option<Vec4>,
     /// The window, in physical pixels, kept in step by the renderer.
     ///
     /// The size and not only its ratio: a cursor cannot be turned back into a
@@ -122,6 +183,7 @@ impl Camera {
             fov_y: 60f32.to_radians(),
             near: 0.1,
             far: 100.0,
+            clip: None,
             viewport: Vec2::ONE,
         }
     }
@@ -148,7 +210,46 @@ impl Camera {
     }
 
     pub fn projection(&self) -> Mat4 {
-        glam::camera::rh::proj::directx::perspective(self.fov_y, self.aspect(), self.near, self.far)
+        let plain = glam::camera::rh::proj::directx::perspective(
+            self.fov_y,
+            self.aspect(),
+            self.near,
+            self.far,
+        );
+
+        match self.clip {
+            None => plain,
+            Some(plane) => sheared(plain, self.view(), plane),
+        }
+    }
+
+    /// The same camera, with a plane it will not draw past. Spec 0093.
+    ///
+    /// `on_plane` is any point on it and `normal` is which way the kept side
+    /// faces; the length of the normal does not matter. A normal of nothing
+    /// is not a plane and leaves the camera as it was.
+    ///
+    /// **What this is for is a mirror in a dense building.** A reflection is
+    /// drawn from behind the glass, so standing two metres off a panel puts
+    /// the reflected eye two metres into whatever is back there, and
+    /// everything between it and the glass lands in the picture. No wall
+    /// thickness helps. Without this a mirror can only hang on the outside
+    /// of a building, which is what blocked three placements of capriccio's
+    /// own hall of mirrors.
+    pub fn clipped_at(&self, on_plane: Vec3, normal: Vec3) -> Self {
+        let Some(n) = normal.try_normalize() else {
+            return *self;
+        };
+
+        Self {
+            clip: Some(n.extend(-n.dot(on_plane))),
+            ..*self
+        }
+    }
+
+    /// Whether this camera has a plane it will not draw past.
+    pub fn clips(&self) -> bool {
+        self.clip.is_some()
     }
 
     /// One matrix taking a world position to clip space.
@@ -895,6 +996,164 @@ mod tests {
                     b
                 );
             }
+        }
+    }
+
+    /// A camera two metres west of the glass, looking at it.
+    fn at_the_glass() -> Camera {
+        // **A mirror's camera, which is the only arrangement this clip is
+        // for.** Putting the near plane on the glass keeps what is beyond
+        // the glass from where the camera stands, which for a mirror is the
+        // room, and clips what is between them, which is whatever stands
+        // behind the real panel. The first version of these tests had the
+        // camera in front and expected the near side kept, which is the
+        // other arrangement entirely.
+        standing_at(GLASS_ON - Vec3::X * 2.0 + Vec3::Y * 0.1, GLASS_ON)
+            .behind(GLASS_ON, GLASS_FACES)
+    }
+
+    /// Where a point lands in normalised device coordinates.
+    fn lands(camera: &Camera, at: Vec3) -> Vec3 {
+        let clip = camera.view_projection() * at.extend(1.0);
+        clip.truncate() / clip.w
+    }
+
+    #[test]
+    fn a_camera_with_no_clip_plane_is_unchanged() {
+        let camera = at_the_glass();
+
+        assert!(!camera.clips());
+        assert_eq!(
+            camera.projection(),
+            glam::camera::rh::proj::directx::perspective(
+                camera.fov_y,
+                camera.aspect(),
+                camera.near,
+                camera.far
+            ),
+            "a camera with no plane does not have the projection it had"
+        );
+
+        // and a normal of nothing is not a plane
+        let still = camera.clipped_at(GLASS_ON, Vec3::ZERO);
+        assert!(!still.clips(), "a normal of nothing made a clip plane");
+    }
+
+    #[test]
+    fn the_clip_plane_lands_on_the_near_plane() {
+        // the glass faces back down the room, and what is kept is the side
+        // the camera is on
+        let camera = at_the_glass().clipped_at(GLASS_ON, GLASS_FACES);
+        assert!(camera.clips());
+
+        // points on the plane, spread across it so this is not one lucky spot
+        for along in [
+            Vec3::ZERO,
+            Vec3::Y,
+            Vec3::Z * 1.5,
+            Vec3::new(0.0, -0.8, -1.0),
+        ] {
+            let on = GLASS_ON + along;
+            let depth = lands(&camera, on).z;
+
+            assert!(
+                depth.abs() < 1e-3,
+                "{} is on the glass and landed at depth {:.5}, where the near \
+                 plane is 0. A mirror whose own surface is clipped has a seam \
+                 down it",
+                on,
+                depth
+            );
+        }
+    }
+
+    #[test]
+    fn what_is_behind_the_glass_is_clipped() {
+        let camera = at_the_glass().clipped_at(GLASS_ON, GLASS_FACES);
+
+        // the nook's fitting that found this: 30 cm the far side of the glass
+        for past in [0.3f32, 1.0, 1.8] {
+            let behind = GLASS_ON - GLASS_FACES * past;
+            let depth = lands(&camera, behind).z;
+
+            assert!(
+                depth < 0.0,
+                "{:.1} m behind the glass landed at depth {:.4}, which is \
+                 inside the frustum, so it is drawn in the reflection",
+                past,
+                depth
+            );
+        }
+    }
+
+    #[test]
+    fn shearing_the_near_plane_moves_nothing_in_front_of_it() {
+        let plain = at_the_glass();
+        let clipped = plain.clipped_at(GLASS_ON, GLASS_FACES);
+
+        // **Across the picture and not in depth.** Shearing the near plane
+        // is a change to depth by construction; what must not change is
+        // where a thing sits on the screen, or the reflection would be a
+        // different picture of the room rather than the same one clipped.
+        for at in [
+            GLASS_ON + Vec3::new(-0.5, 0.4, 0.3),
+            GLASS_ON + Vec3::new(-2.5, -0.3, -0.6),
+            GLASS_ON + Vec3::new(-6.0, 0.0, 1.1),
+        ] {
+            let was = lands(&plain, at);
+            let is = lands(&clipped, at);
+
+            assert!(
+                (was.x - is.x).abs() < 1e-4 && (was.y - is.y).abs() < 1e-4,
+                "{} was at {:.4},{:.4} across the picture and is now at \
+                 {:.4},{:.4}",
+                at,
+                was.x,
+                was.y,
+                is.x,
+                is.y
+            );
+            assert!(
+                is.z > 0.0 && is.z < 1.0,
+                "{} is in front of the glass and landed at depth {:.4}, so it \
+                 is clipped",
+                at,
+                is.z
+            );
+        }
+    }
+
+    #[test]
+    fn shearing_the_near_plane_does_not_bring_the_far_one_closer() {
+        // **The far plane moves, and this is what it must not do.** An
+        // oblique frustum replaces the depth row, so the distance that lands
+        // at 1 is no longer `far`. The published method is clear about that
+        // and this spec was not, until the test that claimed the far plane
+        // stayed put failed. What would actually hurt is it coming *nearer*,
+        // because then a reflection is cut short in the middle of the room.
+        let plain = at_the_glass();
+        let clipped = plain.clipped_at(GLASS_ON, GLASS_FACES);
+
+        let away = (plain.target - plain.position).normalize();
+
+        for metres in [4.0f32, 10.0, 30.0, 60.0] {
+            let at = plain.position + away * metres;
+            let depth = lands(&clipped, at).z;
+
+            assert!(
+                depth < 1.0,
+                "{} metres down the room landed at depth {:.4}, so the far \
+                 plane is nearer than that and the reflection is cut short",
+                metres,
+                depth
+            );
+            assert!(
+                depth > 0.0,
+                "{} metres down the room landed at depth {:.4}, so it reads \
+                 as behind the glass, which it is not",
+                metres,
+                depth
+            );
         }
     }
 }
