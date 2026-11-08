@@ -1,5 +1,6 @@
 // How many lamps and spots fit. Matches lighting::MAX_POINT_LIGHTS and
-// MAX_SPOT_LIGHTS. Keep the three in step.
+// MAX_SPOT_LIGHTS, and lighting::tests::the_shaders_hold_the_same_caps reads
+// these two lines and fails if they stop matching.
 const MAX_POINT_LIGHTS: u32 = 64u;
 const MAX_SPOT_LIGHTS: u32 = 4u;
 
@@ -139,7 +140,8 @@ struct Standing {
 @group(3) @binding(0) var scene_depth: texture_depth_multisampled_2d;
 
 // Matches contact::CONTACT_STEPS, ::CONTACT_THICKNESS and ::CONTACT_START in
-// Rust. Keep the two in step.
+// Rust. All eight are checked against it by
+// contact::tests::the_shader_marches_on_these_numbers.
 const CONTACT_STEPS: i32 = 20;
 const CONTACT_THICKNESS: f32 = 0.35;
 const CONTACT_THICKNESS_PER_UNIT: f32 = 0.06;
@@ -239,18 +241,22 @@ fn contact_shadow(
     return 1.0;
 }
 
+// Matches shadow::MIN_BIAS, ::MAX_BIAS and ::NORMAL_STEP in Rust, checked by
+// shadow::tests::the_shader_forgives_by_the_same_numbers.
 const MIN_BIAS: f32 = 0.00005;
 const MAX_BIAS: f32 = 0.0002;
 const NORMAL_STEP: f32 = 2.0;
 
 // The spots keep the numbers the sun used to have. The sun can afford small
 // ones because it steps along the surface instead; a spot does not do that yet,
-// so it still needs the slack.
+// so it still needs the slack. Matches shadow::SPOT_MIN_BIAS and
+// ::SPOT_MAX_BIAS, checked by the same test as the three above.
 const SPOT_MIN_BIAS: f32 = 0.0005;
 const SPOT_MAX_BIAS: f32 = 0.004;
 
 // How much of a letter has to cover a texel for it to be drawn at all.
-// Matches text::CUTOUT in Rust. Keep the two in step. See spec 0047.
+// Matches text::CUTOUT in Rust, checked by
+// text::tests::the_shader_cuts_out_at_the_same_number. See spec 0047.
 const CUTOUT: f32 = 0.35;
 
 // Matches shadow::is_lit, shadow::bias and shadow::sample_at in Rust. Keep the
@@ -457,8 +463,10 @@ fn spot_light(
 }
 
 // How many lamps may cast, and how much a lamp's distance comparison forgives.
-// Matches lighting::MAX_SHADOWING_POINT_LIGHTS, shadow::POINT_MIN_BIAS,
-// shadow::POINT_BIAS_PER_UNIT and shadow::POINT_NORMAL_STEP. Keep them in step.
+// Matches lighting::MAX_SHADOWING_POINT_LIGHTS, checked by
+// lighting::tests::the_shaders_hold_the_same_caps, and shadow::POINT_MIN_BIAS,
+// ::POINT_BIAS_PER_UNIT and ::POINT_NORMAL_STEP, checked by
+// shadow::tests::the_shader_forgives_by_the_same_numbers.
 const MAX_SHADOWING_POINT_LIGHTS: u32 = 2u;
 const POINT_MIN_BIAS: f32 = 0.006;
 const POINT_BIAS_PER_UNIT: f32 = 0.002;

@@ -360,18 +360,7 @@ mod tests {
     /// not a thing that keeps two numbers in step.
     #[test]
     fn the_shader_cuts_out_at_the_same_number() {
-        let source = include_str!("../res/shaders/mesh.wgsl");
-        let at = source
-            .find("const CUTOUT: f32 = ")
-            .expect("the shader declares a cutout");
-        let line = &source[at..];
-        let line = &line[..line.find(';').expect("it ends")];
-        let theirs: f32 = line
-            .rsplit(' ')
-            .next()
-            .expect("a number")
-            .parse()
-            .expect("a number");
+        let theirs: f32 = crate::shaders::says(crate::shaders::MESH, "CUTOUT");
 
         assert_eq!(
             theirs, CUTOUT,
@@ -466,7 +455,7 @@ mod tests {
     /// it fails.
     #[test]
     fn the_cutout_is_one_number_in_three_places() {
-        let source = include_str!("../res/shaders/mesh.wgsl");
+        let source = crate::shaders::MESH;
 
         // the depth half exists at all. It is the whole of why a cut-out
         // surface hides anything, and nothing else in the shader needs it,
@@ -510,7 +499,7 @@ mod tests {
     /// stroke and a hard collar round the glow.
     #[test]
     fn only_an_opaque_draw_is_cut_out() {
-        let source = include_str!("../res/shaders/mesh.wgsl");
+        let source = crate::shaders::MESH;
         let guarded = source
             .lines()
             .filter(|line| line.contains("< CUTOUT"))

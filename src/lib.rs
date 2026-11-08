@@ -20,6 +20,10 @@ pub mod text;
 pub mod texture;
 pub mod water;
 
+/// The shaders as text, and the one parser that reads a constant out of one.
+#[cfg(test)]
+pub(crate) mod shaders;
+
 use camera::Camera;
 use geometry::Geometry;
 use renderer::render_text::*;

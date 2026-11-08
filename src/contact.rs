@@ -441,24 +441,7 @@ mod tests {
     /// with it, and nothing here could have caught it being wrong either.
     #[test]
     fn the_shader_marches_on_these_numbers() {
-        const SOURCE: &str = include_str!("../res/shaders/mesh.wgsl");
-
-        let said = |name: &str| -> f32 {
-            let at = SOURCE
-                .find(&format!("const {}:", name))
-                .unwrap_or_else(|| panic!("{} is not declared in mesh.wgsl", name));
-            let line = SOURCE[at..].lines().next().unwrap();
-            let value = line
-                .rsplit('=')
-                .next()
-                .unwrap()
-                .trim()
-                .trim_end_matches(';')
-                .trim();
-            value
-                .parse()
-                .unwrap_or_else(|_| panic!("{} reads {} in mesh.wgsl", name, value))
-        };
+        let said = |name: &str| -> f32 { crate::shaders::says(crate::shaders::MESH, name) };
 
         assert_eq!(said("CONTACT_STEPS"), CONTACT_STEPS as f32);
         assert_eq!(said("CONTACT_THICKNESS"), CONTACT_THICKNESS);
@@ -482,7 +465,7 @@ mod tests {
     /// in a step to sample, this is the test that should stop it.
     #[test]
     fn the_march_takes_its_phase_from_nothing_that_moves() {
-        const SOURCE: &str = include_str!("../res/shaders/mesh.wgsl");
+        const SOURCE: &str = crate::shaders::MESH;
 
         let from = SOURCE
             .find("fn contact_shadow(")

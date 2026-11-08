@@ -640,6 +640,35 @@ mod tests {
         assert!(broad.x >= tight.x);
     }
 
+    /// The caps, read out of the shaders rather than trusted to a comment.
+    ///
+    /// Three of these numbers are written twice, once in this file and once in
+    /// the mesh shader. The Rust constant sizes the buffer, since the
+    /// uniform's own array is `[GpuPointLight; MAX_POINT_LIGHTS]` in
+    /// `renderer/mod.rs`, and the shader constant sizes the block the shader
+    /// declares reading. Too small in the shader and the last lamps of a full
+    /// block light nothing, with no complaint from anywhere; too large and the
+    /// block no longer describes the buffer it is bound to.
+    ///
+    /// Found while measuring what a bigger `MAX_POINT_LIGHTS` would cost:
+    /// raising it is an edit to two files, and nothing failed when only one of
+    /// them was edited.
+    #[test]
+    fn the_shaders_hold_the_same_caps() {
+        use crate::shaders::{says, MESH, SHADOW};
+
+        assert_eq!(says::<usize>(MESH, "MAX_POINT_LIGHTS"), MAX_POINT_LIGHTS);
+        assert_eq!(says::<usize>(MESH, "MAX_SPOT_LIGHTS"), MAX_SPOT_LIGHTS);
+        assert_eq!(
+            says::<usize>(MESH, "MAX_SHADOWING_POINT_LIGHTS"),
+            MAX_SHADOWING_POINT_LIGHTS
+        );
+
+        // and the shadow pass fills the layers the mesh pass reads, so its own
+        // spot count is the same number a third time
+        assert_eq!(says::<usize>(SHADOW, "MAX_SPOT_LIGHTS"), MAX_SPOT_LIGHTS);
+    }
+
     #[test]
     fn a_lamp_does_not_cast_unless_it_asks() {
         // five games and every example built before spec 0022 make lamps this

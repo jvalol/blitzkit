@@ -941,13 +941,43 @@ mod tests {
         assert!(point_is_lit(0.1, 11.0, 10.0, 1.0));
         assert!(point_is_lit(0.1, 1.0, 0.0, 1.0));
     }
+    /// Every number this module forgives by, read out of the shader.
+    ///
+    /// **These eight are the arithmetic, not a description of it.** `bias`,
+    /// `spot_bias`, `point_bias` and `stepped_along` are here and tested here,
+    /// and the shader does the same sums over its own copies of the same
+    /// constants. So the tests above are a model of what a shadow does, and
+    /// they are only a model of the shader while these agree. Disagreeing
+    /// costs what bias always costs, a stripe on a lit surface or a shadow
+    /// lifted off its own wall, and it costs it while every test in this file
+    /// passes.
+    ///
+    /// Nothing checked them until 2026-11-07. Three comments in the shader
+    /// said to keep them in step, which is what spec 0022's face table was
+    /// told as well before the test under this one went in.
+    #[test]
+    fn the_shader_forgives_by_the_same_numbers() {
+        let said = |name: &str| -> f32 { crate::shaders::says(crate::shaders::MESH, name) };
+
+        assert_eq!(said("MIN_BIAS"), MIN_BIAS);
+        assert_eq!(said("MAX_BIAS"), MAX_BIAS);
+        assert_eq!(said("NORMAL_STEP"), NORMAL_STEP);
+
+        assert_eq!(said("SPOT_MIN_BIAS"), SPOT_MIN_BIAS);
+        assert_eq!(said("SPOT_MAX_BIAS"), SPOT_MAX_BIAS);
+
+        assert_eq!(said("POINT_MIN_BIAS"), POINT_MIN_BIAS);
+        assert_eq!(said("POINT_BIAS_PER_UNIT"), POINT_BIAS_PER_UNIT);
+        assert_eq!(said("POINT_NORMAL_STEP"), POINT_NORMAL_STEP);
+    }
+
     /// The shader's table of face directions, read out of the shader itself.
     ///
     /// Hand-transcribing six cross products into a switch statement got four of
     /// them wrong the first time, and a comment saying to keep the two in step
     /// did not help. This reads the shader and checks.
     fn shader_face_vector(function: &str, face: usize) -> Vec3 {
-        let source = include_str!("../res/shaders/mesh.wgsl");
+        let source = crate::shaders::MESH;
         let at = source
             .find(&format!("fn {}(face: u32)", function))
             .unwrap_or_else(|| panic!("{} is not in the shader", function));
