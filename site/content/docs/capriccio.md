@@ -15,4 +15,4 @@ them is a real game with a repo of its own. Each of them are built on this engin
 
 Everything else is for exploration. It goes a lot of different places. It also keeps growing. So, explore away.
 
-[github.com/jvalol/arcade](https://github.com/jvalol/arcade)
+[github.com/jvalol/capriccio](https://github.com/jvalol/capriccio)
