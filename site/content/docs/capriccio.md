@@ -7,7 +7,7 @@ weight: 7
 
 In which I build buildings arranged in ways that could not exist in the real world.
 
-{{< play name="arcade" src="/media/arcade.mp4" poster="/media/arcade.png"
+{{< play name="capriccio" src="/media/capriccio.mp4" poster="/media/capriccio.png"
     alt="Walking down the hall of the arcade, lit signs over the cabinets on both sides and the nook's doorway at the far end" >}}
 
 The starting hall is a collection of arcade cabinets under lit marquees, and every one of
