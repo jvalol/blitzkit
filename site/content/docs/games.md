@@ -21,12 +21,12 @@ One has three lifts to take a tile out and set it down anywhere. If that's not e
 {{< play name="starry" poster="https://raw.githubusercontent.com/jvalol/starry/main/media/screenshot.png"
     alt="Starry: the painting cut into sixteen thick tiles in a tray, one square empty, the cypress and the village broken across the wrong squares" >}}
 
-## arcade
+## capriccio
 
 An arcade with games built on this engine, and thirty three kilometres of
 solar system behind one of its walls.
 
-[Walk round it in a browser]({{< relref "arcade" >}}).
+[Walk round it in a browser]({{< relref "capriccio" >}}).
 
 [github.com/jvalol/arcade](https://github.com/jvalol/arcade)
 
