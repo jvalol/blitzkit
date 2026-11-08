@@ -79,8 +79,13 @@ reaches**. Two metres means two metres, not "mostly two metres".
 
 **Both copies of the maths, again.** As with spec 0012, the shading lives twice:
 once in `lighting.rs` where it can be tested without a GPU, and once in
-`mesh.wgsl` where it actually runs. They are kept in step by hand, and the hand
-checks are what cover the gap.
+`mesh.wgsl` where it actually runs. The sums are kept in step by hand, and the
+hand checks are what cover that gap. The numbers they work on are not: since
+2026-11-07 `lighting::tests::the_shaders_hold_the_same_caps` reads this cap out
+of both shaders and fails if either moves alone. Measuring spec 0089 is what
+turned that up, because every round of it edited both files.
+
+Whether sixty four is enough, and what a larger one would cost, is spec 0089.
 
 ## Acceptance criteria
 
