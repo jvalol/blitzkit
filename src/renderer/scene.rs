@@ -213,6 +213,17 @@ pub struct Scene {
     /// Batched by mesh and texture together, since a draw call can only have
     /// one of each.
     instances: HashMap<(MeshId, TextureId), Vec<Instance>>,
+    /// The ones that belong in a reflection and not on the screen, per spec
+    /// 0091. Kept apart rather than flagged, because `draw_into` uploads
+    /// per pass anyway, so two sets are two uploads and not two scenes.
+    reflected: HashMap<(MeshId, TextureId), Vec<Instance>>,
+    /// Which of those two the next push goes in. Spec 0091.
+    into_reflections: bool,
+    /// The mirrors this frame has. Spec 0091.
+    mirrors: Vec<Mirror>,
+    /// The glass this frame has, per spec 0092: surfaces that wear a target
+    /// sampled where the fragment is rather than where the mesh says.
+    glass: Vec<Glass>,
     /// The sky, or whatever stands behind everything. Spec 0086.
     backdrop: Option<Backdrop>,
     /// What a game handed over once rather than every frame, per spec 0058.
@@ -284,6 +295,8 @@ struct Turned {
     /// Instances a run wanted to keep that would not fit in what this
     /// build may hold. Spec 0071, and nought on anything but wasm32.
     kept: usize,
+    /// Mirrors past the cap, per spec 0091.
+    mirrors: usize,
 }
 
 impl Turned {
@@ -314,11 +327,21 @@ impl Scene {
         for instances in self.instances.values_mut() {
             instances.clear();
         }
+        for instances in self.reflected.values_mut() {
+            instances.clear();
+        }
         self.point_lights.clear();
         self.spot_lights.clear();
         self.outlines.clear();
+        self.mirrors.clear();
+        self.glass.clear();
         self.backdrop = None;
         self.turned = Turned::default();
+        // **Put back whatever the last frame left it as.** Spec 0091: a
+        // frame that forgets `and_everywhere` draws its room into mirrors
+        // and nowhere else, which is a frame of black walls. Forgetting it
+        // costs that one frame, and the next one starts level.
+        self.into_reflections = false;
     }
 
     /// Says what the caps refused in the frame just finished, once, and only
@@ -344,6 +367,7 @@ impl Scene {
             spots,
             outlines,
             kept,
+            mirrors,
         } = self.turned;
 
         self.spoke += 1;
@@ -356,6 +380,16 @@ impl Scene {
                  first; see spec 0071",
                 kept,
                 BUDGET
+            );
+        }
+
+        if mirrors > 0 {
+            log::warn!(
+                "a scene hung {} more mirrors than the {} a frame draws. Each one is a pass \
+                 over the whole scene, so this is a frame budget rather than a limit of the \
+                 maths; see spec 0091",
+                mirrors,
+                MAX_MIRRORS
             );
         }
 
@@ -527,10 +561,99 @@ impl Scene {
         color: Vec4,
         shininess: f32,
     ) {
-        self.instances
-            .entry((mesh, texture))
+        // whichever set the bracket has open, per spec 0091. Every other
+        // push funnels through here, so there is one place that decides.
+        let into = if self.into_reflections {
+            &mut self.reflected
+        } else {
+            &mut self.instances
+        };
+
+        into.entry((mesh, texture))
             .or_default()
             .push(Instance::new(transform, color, shininess));
+    }
+
+    /// Everything pushed from here until [`and_everywhere`] goes in
+    /// reflections and not on the screen. Spec 0091.
+    ///
+    /// **What this is for is the person looking into the mirror.** The
+    /// camera is at eye height, so a figure standing where the player
+    /// stands has its head around the camera, and the pipelines cull by
+    /// face, so the screen would show the inside of their own skull. The
+    /// head is 0.26 m tall against a near plane of 0.1, so it clips
+    /// raggedly rather than disappearing.
+    ///
+    /// Put back by `reset`, so a frame that forgets to close the bracket
+    /// costs that frame and not the next.
+    ///
+    /// [`and_everywhere`]: Scene::and_everywhere
+    pub fn only_in_reflections(&mut self) {
+        self.into_reflections = true;
+    }
+
+    /// Closes [`only_in_reflections`].
+    ///
+    /// [`only_in_reflections`]: Scene::only_in_reflections
+    pub fn and_everywhere(&mut self) {
+        self.into_reflections = false;
+    }
+
+    /// Says there is a mirror in that plane wearing that target, the way
+    /// [`push_light`] says there is a lamp. Spec 0091.
+    ///
+    /// `on_plane` is any point on the glass and `normal` is which way it
+    /// faces. The engine draws each one before the screen pass, from
+    /// [`Camera::behind`], and lays nothing on the glass: hanging the
+    /// target on it with `u` backwards is the game's, per spec 0090.
+    ///
+    /// **Capped at two, because each one is a whole pass over the scene.**
+    /// Two is what a hall of mirrors needs to read as one. A third is
+    /// turned away and counted, the way a lamp over the cap is.
+    ///
+    /// [`push_light`]: Scene::push_light
+    /// [`Camera::behind`]: crate::camera::Camera::behind
+    pub fn mirror(&mut self, target: TextureId, on_plane: Vec3, normal: Vec3) {
+        if self.mirrors.len() >= MAX_MIRRORS {
+            self.turned.mirrors += 1;
+            return;
+        }
+
+        self.mirrors.push(Mirror {
+            target,
+            on_plane,
+            normal,
+        });
+    }
+
+    pub fn mirrors(&self) -> &[Mirror] {
+        &self.mirrors
+    }
+
+    /// Says that mesh, placed there, wears that target, sampled where the
+    /// fragment is rather than where the mesh says. Spec 0092.
+    ///
+    /// **This is what makes a mirror a mirror.** The map from a point on the
+    /// glass to the point of the reflection that belongs there is projective
+    /// and depends on where the eye is, so no texture coordinate on the mesh
+    /// can carry it. Spec 0090 said it could and was wrong.
+    ///
+    /// `tint` multiplies what comes out, so white is a mirror and anything
+    /// past one glows, which is how every colour in this engine behaves.
+    ///
+    /// It is also what lets one target serve a whole wall of panels: the
+    /// sample is by position, so every panel in one plane reads the part of
+    /// that plane's reflection standing behind it.
+    pub fn glass(&mut self, mesh: MeshId, target: TextureId, transform: &Transform, tint: Vec4) {
+        self.glass.push(Glass {
+            mesh,
+            target,
+            instance: Instance::new(transform, tint, 0.0),
+        });
+    }
+
+    pub fn glass_surfaces(&self) -> &[Glass] {
+        &self.glass
     }
 
     /// Says once what pushing a large scene every frame is costing, and
@@ -867,10 +990,20 @@ impl Scene {
 
     /// Every mesh with something to draw, and its instances. Sorted, so a frame
     /// draws in the same order each time.
-    pub(crate) fn batches(&self) -> Vec<(MeshId, TextureId, &[Instance])> {
+    /// `reflections` adds the ones spec 0091 keeps for a target frame. A
+    /// key in both sets comes back as two batches rather than one, which is
+    /// one more draw call and no wrong pixels.
+    pub(crate) fn batches(&self, reflections: bool) -> Vec<(MeshId, TextureId, &[Instance])> {
+        let also = if reflections {
+            Some(self.reflected.iter())
+        } else {
+            None
+        };
+
         let mut batches: Vec<(MeshId, TextureId, &[Instance])> = self
             .instances
             .iter()
+            .chain(also.into_iter().flatten())
             .filter(|(_, instances)| !instances.is_empty())
             .map(|((mesh, texture), instances)| (*mesh, *texture, instances.as_slice()))
             .collect();
@@ -884,6 +1017,34 @@ impl Scene {
             .all(|instances| instances.is_empty())
             && self.kept.iter().all(|slot| slot.is_none())
     }
+}
+
+/// How many mirrors one frame may have. Spec 0091.
+///
+/// Each is a pass over the whole scene, so this is a frame budget rather
+/// than a limit of the maths. Two read as a hall; a third is a frame nobody
+/// wants.
+pub const MAX_MIRRORS: usize = 2;
+
+/// A mirror a game has hung. Spec 0091.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Mirror {
+    /// What it wears, from `Renderer::add_target`.
+    pub target: TextureId,
+    /// Any point on the glass.
+    pub on_plane: Vec3,
+    /// Which way the glass faces. Its length does not matter.
+    pub normal: Vec3,
+}
+
+/// A surface wearing a target, sampled in screen space. Spec 0092.
+#[derive(Debug, Clone, Copy)]
+pub struct Glass {
+    pub mesh: MeshId,
+    /// What it wears, from `Renderer::add_target`.
+    pub target: TextureId,
+    /// Where it stands, and its tint in the colour.
+    pub instance: Instance,
 }
 
 /// What a game calls one of its runs. Spec 0064.
@@ -1229,11 +1390,11 @@ mod tests {
         let kept = scene.keep(MeshId(0), TextureId::WHITE, instances.clone());
 
         scene.push(MeshId(0), &Transform::at(glam::Vec3::Y));
-        assert_eq!(scene.batches().len(), 1, "the push is not there");
+        assert_eq!(scene.batches(false).len(), 1, "the push is not there");
 
         scene.reset();
 
-        assert!(scene.batches().is_empty(), "a push outlived its frame");
+        assert!(scene.batches(false).is_empty(), "a push outlived its frame");
         assert_eq!(scene.kept_len(kept), Some(2), "the kept run did not");
         assert_eq!(scene.keepings().count(), 1);
         assert!(!scene.is_empty(), "a scene with a kept run is not empty");
@@ -1611,7 +1772,7 @@ mod tests {
         );
         assert_eq!(scene.standing_as(Name(0)), Some(0));
 
-        let batches = scene.batches();
+        let batches = scene.batches(false);
 
         assert_eq!(batches.len(), 1, "three small runs were not one batch");
         assert_eq!(batches[0].2.len(), 12);
@@ -1636,7 +1797,7 @@ mod tests {
             });
 
             assert_eq!(
-                scene.batches().first().map(|batch| batch.2.len()),
+                scene.batches(false).first().map(|batch| batch.2.len()),
                 Some(4),
                 "a small run stopped being drawn"
             );
@@ -1866,7 +2027,7 @@ mod tests {
         scene.push(cube, &Transform::at(Vec3::X));
         scene.push(plane, &Transform::new());
 
-        let batches = scene.batches();
+        let batches = scene.batches(false);
 
         // one draw per mesh, not one per thing drawn
         assert_eq!(batches.len(), 2);
@@ -1885,7 +2046,7 @@ mod tests {
         scene.push_textured(cube, bricks, &Transform::new(), Vec4::ONE, 32.0);
 
         // a draw call wears one texture, so the same mesh splits
-        assert_eq!(scene.batches().len(), 2);
+        assert_eq!(scene.batches(false).len(), 2);
     }
 
     #[test]
@@ -2076,7 +2237,7 @@ mod tests {
         scene.reset();
 
         assert!(scene.is_empty());
-        assert!(scene.batches().is_empty());
+        assert!(scene.batches(false).is_empty());
     }
 
     #[test]
@@ -2273,6 +2434,154 @@ mod tests {
             places(&instance.from_the_eye(at)),
             201,
             "every vertex across the marble should land somewhere of its own"
+        );
+    }
+
+    /// Spec 0091. A mirror is pushed like a lamp and lasts the frame.
+    #[test]
+    fn a_mirror_is_there_until_the_frame_is_reset() {
+        let mut scene = Scene::new();
+        let glass = glam::Vec3::new(2.0, 1.5, 0.0);
+
+        scene.mirror(TextureId(7), glass, glam::Vec3::NEG_X);
+
+        assert_eq!(scene.mirrors().len(), 1);
+        assert_eq!(scene.mirrors()[0].target, TextureId(7));
+        assert_eq!(scene.mirrors()[0].on_plane, glass);
+
+        scene.reset();
+
+        assert!(
+            scene.mirrors().is_empty(),
+            "a mirror outlived its frame, so a room that stopped pushing one \
+             would go on paying for it"
+        );
+    }
+
+    /// Spec 0091. Two is the cap, because each one is a pass over the whole
+    /// scene, and a third is turned away and counted rather than drawn.
+    #[test]
+    fn a_third_mirror_is_turned_away() {
+        let mut scene = Scene::new();
+
+        for which in 0..5 {
+            scene.mirror(
+                TextureId(which),
+                glam::Vec3::X * which as f32,
+                glam::Vec3::NEG_X,
+            );
+        }
+
+        assert_eq!(scene.mirrors().len(), MAX_MIRRORS);
+        assert_eq!(scene.turned.mirrors, 3, "the ones refused are not counted");
+        // and it is the first two that stayed, not the last
+        assert_eq!(scene.mirrors()[0].target, TextureId(0));
+        assert_eq!(scene.mirrors()[1].target, TextureId(1));
+    }
+
+    /// Spec 0091. What the bracket holds goes in a reflection and not on
+    /// the screen, which is what lets a mirror show the person looking into
+    /// it without the screen showing the inside of their head.
+    #[test]
+    fn what_is_only_in_reflections_is_not_in_the_frame() {
+        let mut scene = Scene::new();
+
+        scene.push(MeshId(0), &Transform::at(glam::Vec3::ZERO));
+
+        scene.only_in_reflections();
+        scene.push(MeshId(1), &Transform::at(glam::Vec3::Y));
+        scene.push(MeshId(1), &Transform::at(glam::Vec3::Y * 2.0));
+        scene.and_everywhere();
+
+        scene.push(MeshId(0), &Transform::at(glam::Vec3::X));
+
+        let on_screen = scene.batches(false);
+        let in_glass = scene.batches(true);
+
+        let count = |batches: &[(MeshId, TextureId, &[Instance])]| -> usize {
+            batches.iter().map(|(_, _, held)| held.len()).sum()
+        };
+
+        assert_eq!(count(&on_screen), 2, "the bracket leaked onto the screen");
+        assert_eq!(count(&in_glass), 4, "the bracket is missing from the glass");
+        assert!(
+            !on_screen.iter().any(|(mesh, _, _)| *mesh == MeshId(1)),
+            "mesh 1 is on the screen and should only be in reflections"
+        );
+        assert!(
+            in_glass.iter().any(|(mesh, _, _)| *mesh == MeshId(1)),
+            "mesh 1 is not in the reflection it was pushed for"
+        );
+    }
+
+    /// Spec 0091. A frame that forgets to close the bracket draws its room
+    /// into mirrors and nowhere else, which is a frame of black walls. It
+    /// costs that frame, and the next one starts level.
+    #[test]
+    fn a_forgotten_bracket_does_not_outlive_its_frame() {
+        let mut scene = Scene::new();
+
+        scene.only_in_reflections();
+        scene.push(MeshId(0), &Transform::at(glam::Vec3::ZERO));
+        // and no and_everywhere
+
+        assert!(
+            scene.batches(false).is_empty(),
+            "the forgotten frame should be the one that pays"
+        );
+
+        scene.reset();
+        scene.push(MeshId(0), &Transform::at(glam::Vec3::ZERO));
+
+        assert_eq!(
+            scene.batches(false).len(),
+            1,
+            "the next frame is still hiding its room, so one forgotten call \
+             broke every frame after it"
+        );
+    }
+
+    /// Spec 0092. Glass is pushed like anything else and lasts the frame.
+    #[test]
+    fn glass_is_there_until_the_frame_is_reset() {
+        let mut scene = Scene::new();
+
+        scene.glass(
+            MeshId(3),
+            TextureId(9),
+            &Transform::at(glam::Vec3::X),
+            glam::Vec4::ONE,
+        );
+
+        assert_eq!(scene.glass_surfaces().len(), 1);
+        assert_eq!(scene.glass_surfaces()[0].target, TextureId(9));
+        assert_eq!(scene.glass_surfaces()[0].mesh, MeshId(3));
+
+        scene.reset();
+
+        assert!(
+            scene.glass_surfaces().is_empty(),
+            "glass outlived its frame"
+        );
+    }
+
+    /// Spec 0092. The tint multiplies what the glass samples, so it behaves
+    /// like every other colour here: white is a mirror and past one glows.
+    #[test]
+    fn a_glass_tint_is_a_colour_like_any_other() {
+        let mut scene = Scene::new();
+        let at = Transform::at(glam::Vec3::ZERO);
+
+        scene.glass(MeshId(0), TextureId(1), &at, glam::Vec4::ONE);
+        scene.glass(MeshId(0), TextureId(1), &at, glam::vec4(3.2, 3.2, 3.2, 1.0));
+
+        let plain = scene.glass_surfaces()[0].instance;
+        let bright = scene.glass_surfaces()[1].instance;
+
+        assert!(!plain.glows(), "a white mirror should not glow on its own");
+        assert!(
+            bright.glows(),
+            "a tint past white should glow, like neon does"
         );
     }
 }

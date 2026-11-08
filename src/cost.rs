@@ -44,8 +44,11 @@ pub const OVERLAY: usize = MESH + 1;
 /// 0090. A slot of its own so a mirror's price is a column rather than a
 /// frame time that got worse.
 pub const TARGET: usize = OVERLAY + 1;
+/// The glass that wears what a target pass drew, per spec 0092. Its own
+/// slot for the reason `TARGET` has one.
+pub const GLASS: usize = TARGET + 1;
 /// How many slots there are, which is two queries each.
-pub const PASSES: usize = TARGET + 1;
+pub const PASSES: usize = GLASS + 1;
 
 /// What each pass is called, for a readout and for a sweep's columns.
 pub fn pass_name(slot: usize) -> &'static str {
@@ -56,6 +59,7 @@ pub fn pass_name(slot: usize) -> &'static str {
         MESH => "mesh",
         OVERLAY => "overlay",
         TARGET => "target",
+        GLASS => "glass",
         _ if slot >= FIRST_LAMP_FACE => "lamps",
         _ => "spots",
     }
@@ -434,6 +438,7 @@ mod tests {
             (MESH, "mesh"),
             (OVERLAY, "overlay"),
             (TARGET, "target"),
+            (GLASS, "glass"),
         ] {
             assert_eq!(
                 pass_name(slot),

@@ -324,6 +324,13 @@ struct VertexOutput {
     @location(2) uv: vec2<f32>,
     @location(3) world_position: vec3<f32>,
     @location(4) shininess: f32,
+    /// The same clip position again, as a varying, for spec 0092.
+    ///
+    /// `@builtin(position)` arrives at a fragment already divided through and
+    /// in framebuffer pixels, which would need the screen's size passing in
+    /// to turn back into a fraction. This is the undivided one, so glass
+    /// samples by `xy / w` and does not care how big anything is.
+    @location(5) clip: vec4<f32>,
 };
 
 // Per vertex: the mesh. Per instance: where it goes, what color it is, and how
@@ -356,6 +363,7 @@ fn vs_main(
     out.uv = uv;
     out.world_position = world.xyz;
     out.shininess = shininess;
+    out.clip = out.clip_position;
     return out;
 }
 
@@ -859,6 +867,35 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 // its grass see-through, and a blade of grass is edge on from nearly
 // everywhere: shaded this way the whole field went grey. What is water is
 // something a game says when it hands the mesh over, per `add_water_mesh`.
+// **Glass: a target sampled where the fragment is, not where the mesh says.**
+// Spec 0092.
+//
+// This is what makes a mirror a mirror. The map from a point on the glass to
+// the point of the reflection that belongs there is projective and depends on
+// where the eye is, so no texture coordinate on the mesh can carry it. Spec
+// 0090 said it could and was wrong.
+//
+// The same turn from a clip position to a texture coordinate that
+// `contact_shadow` and `shadow_factor` already make, with one difference: x
+// is negated. Spec 0090's equivalence is that the view from behind the glass
+// plus one flip in x is the true reflection, and
+// `a_camera_behind_the_glass_and_a_flip_is_a_true_mirror` is what holds the
+// axis. Flipping y as well is the mistake that looks almost right.
+//
+// No lighting. What a mirror shows is a scene that was lit when it was drawn,
+// and lighting it again would light it twice.
+@fragment
+fn fs_glass(in: VertexOutput) -> @location(0) vec4<f32> {
+    let ndc = in.clip.xyz / in.clip.w;
+    let uv = vec2<f32>(ndc.x * -0.5 + 0.5, ndc.y * -0.5 + 0.5);
+
+    let reflected = textureSample(surface_texture, surface_sampler, uv);
+
+    // the tint multiplies, so white is a mirror and anything past one glows,
+    // which is how every other colour in this engine behaves
+    return vec4<f32>(reflected.rgb * in.color.rgb, in.color.a);
+}
+
 @fragment
 fn fs_water(in: VertexOutput) -> @location(0) vec4<f32> {
     let surface = lit_surface(in);

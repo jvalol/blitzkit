@@ -200,6 +200,14 @@ pub struct Renderer {
     which_bind_groups: Vec<wgpu::BindGroup>,
     /// The far side of translucent geometry, then the near side.
     translucent_pipelines: [wgpu::RenderPipeline; 2],
+    /// Glass, per spec 0092: the mesh pipeline with a fragment stage that
+    /// samples its texture where the fragment is rather than where the mesh
+    /// says. One cull mode, because glass is a flat panel seen from the
+    /// front and a mirror you can walk behind is not a thing this builds.
+    glass_pipeline: wgpu::RenderPipeline,
+    /// Where the glass surfaces of one frame stand, written per frame the
+    /// way the outlines' buffer is.
+    glass_buffer: wgpu::Buffer,
     /// Spec 0075: the same pair, shaded as water.
     water_pipelines: [wgpu::RenderPipeline; 2],
     shadow_view: wgpu::TextureView,
@@ -924,6 +932,25 @@ impl Renderer {
             )
         });
 
+        // and once for glass, per spec 0092. The same pipeline in every way
+        // but its fragment stage, which is the water pair's arrangement: a
+        // mirror is opaque and depth tested, so it takes the mesh pass's own
+        // states rather than the translucent ones.
+        let glass_pipeline = create_mesh_pipeline(
+            &device,
+            drawn,
+            MeshLayouts {
+                camera: &camera_bind_group_layout,
+                texture: &texture_bind_group_layout,
+                shadow: &shadow_bind_group_layout,
+                scene_depth: &scene_depth_layout,
+            },
+            depth::mesh_primitive_state(),
+            depth::read_only_state(),
+            samples,
+            "fs_glass",
+        );
+
         // and twice more again for water, per spec 0075, which is the same
         // pass in every way but its fragment stage. A mesh handed over by
         // `add_water_mesh` is drawn by these and everything else by the pair
@@ -948,6 +975,7 @@ impl Renderer {
         let outline_pipeline =
             create_outline_pipeline(&device, &camera_bind_group_layout, drawn, samples);
         let outline_buffer = create_buffer(&device, 0, wgpu::BufferUsages::VERTEX);
+        let glass_buffer = create_buffer(&device, 0, wgpu::BufferUsages::VERTEX);
 
         let mut renderer = Self {
             window,
@@ -1000,6 +1028,8 @@ impl Renderer {
             occluding: false,
             culling: true,
             translucent_pipelines,
+            glass_pipeline,
+            glass_buffer,
             water_pipelines,
             meshes: Vec::new(),
             asked_fights: false,
@@ -1407,7 +1437,7 @@ impl Renderer {
 
         let mut shaped = 0;
 
-        for (mesh, _, instances) in scene.batches() {
+        for (mesh, _, instances) in scene.batches(false) {
             let Some(gpu) = self.meshes.get(mesh.0) else {
                 continue;
             };
@@ -1758,6 +1788,19 @@ impl Renderer {
             format: Some(self.drawn),
             ..Default::default()
         });
+
+        // **The mirrors first, which is why they are pushed rather than
+        // drawn by the game.** Spec 0091: `before_frame` has the renderer
+        // and no scene and `draw` has the scene and no renderer, so this is
+        // the only place in the frame that holds both.
+        //
+        // Before the screen pass, because the glass wears what came out.
+        // A mirror facing a mirror therefore shows the other's target as it
+        // was last frame, which spec 0090 leaves as it is.
+        for mirror in scene.mirrors().to_vec() {
+            let behind = self.camera.behind(mirror.on_plane, mirror.normal);
+            self.draw_to(mirror.target, &behind, scene, geometry);
+        }
 
         self.draw_into(&view, scene, geometry, Frame::Screen(text_renderer));
         self.queue.present(frame);
@@ -2154,7 +2197,7 @@ impl Renderer {
         // the light sees translucent things as solid, because a shadow map
         // holds a depth and has nowhere to put an alpha. It does not see a
         // glowing thing at all, per spec 0039.
-        let drawn = self.upload_instances(scene);
+        let drawn = self.upload_instances(scene, &frame);
         let outlines = self.upload_outlines(scene);
 
         // what the light can see, first of all. Skipped when nothing is drawn in
@@ -2562,6 +2605,77 @@ impl Renderer {
             }
         }
 
+        // **The glass, after the world and before the interface.** Spec
+        // 0092. After, because glass samples a scene that has to already be
+        // drawn and lit; before, because the interface sits on top of
+        // everything.
+        //
+        // Not in a target frame: a mirror in a mirror would be sampling the
+        // frame it is in the middle of drawing. The second bounce is the
+        // other mirror's target as it stood last frame, which is what spec
+        // 0090 settled.
+        let glass = if matches!(frame, Frame::Screen(_)) {
+            self.upload_glass(scene)
+        } else {
+            0
+        };
+
+        if glass > 0 {
+            let (into, onto) = match &self.colour {
+                Some(many) => (many, Some(view)),
+                None => (view, None),
+            };
+            let mut glass_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Glass Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: into,
+                    depth_slice: None,
+                    resolve_target: onto,
+                    ops: wgpu::Operations {
+                        // what the mesh pass left, because glass stands in
+                        // the room rather than replacing it
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                // read only, for the mesh pass's own reason: the prepass
+                // settled it and a pass that wrote it could not sample it
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth.view,
+                    depth_ops: None,
+                    stencil_ops: None,
+                }),
+                timestamp_writes: timing_writes(&mut self.timing, crate::cost::GLASS),
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            glass_pass.set_pipeline(&self.glass_pipeline);
+            glass_pass.set_bind_group(0, &self.camera_bind_group, &[0]);
+            glass_pass.set_bind_group(2, &self.shadow_bind_group, &[]);
+            glass_pass.set_bind_group(3, &self.scene_depth_bind_group, &[]);
+
+            for (which, pane) in scene.glass_surfaces().iter().enumerate() {
+                let Some(mesh) = self.meshes.get(pane.mesh.0) else {
+                    continue;
+                };
+                let Some(texture) = self.textures.get(pane.target.0) else {
+                    continue;
+                };
+                if mesh.index_count == 0 {
+                    continue;
+                }
+
+                glass_pass.set_bind_group(1, texture, &[]);
+                glass_pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                glass_pass.set_vertex_buffer(1, self.glass_buffer.slice(..));
+                glass_pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                counted.saw(mesh.index_count, 1);
+                let at = which as u32;
+                glass_pass.draw_indexed(0..mesh.index_count, 0, at..(at + 1));
+            }
+        }
+
         // **A target gets no interface painted over it.** Spec 0090: a
         // mirror showing the help text backwards is a mirror of the
         // screen rather than of the room. This is the only pass the two
@@ -2629,9 +2743,17 @@ impl Renderer {
             }
         }
 
-        self.read_the_clock();
-        self.read_what_is_hidden();
-        self.frame += 1;
+        // **A target pass is not a frame, as far as this is concerned.**
+        // Spec 0091. The counter is what says whether an occlusion answer
+        // is current, and advancing it three times per displayed frame
+        // leaves gaps in a record that is read by frame number. The clock
+        // is read once for the same reason, and the screen pass is last, so
+        // it is the one that reads.
+        if matches!(frame, Frame::Screen(_)) {
+            self.read_the_clock();
+            self.read_what_is_hidden();
+            self.frame += 1;
+        }
     }
 
     /// Takes whatever the depth buffer has said about the boxes, and asks
@@ -2908,9 +3030,10 @@ impl Renderer {
     ///
     /// A run is one of four kinds, so the instances of a kind lie together and
     /// a kind is a span rather than a list of indices.
-    fn upload_instances(&mut self, scene: &Scene) -> Drawn {
+    fn upload_instances(&mut self, scene: &Scene, frame: &Frame) -> Drawn {
         let views = self.views(scene);
-        let batches = scene.batches();
+        // a target frame also draws what spec 0091 keeps for reflections
+        let batches = scene.batches(matches!(frame, Frame::Target));
         let mut pushed: Vec<culling::Pushed> = Vec::with_capacity(batches.len());
 
         for (mesh, texture, instances) in batches {
@@ -3232,6 +3355,29 @@ impl Renderer {
         }
 
         vertices.len() as u32
+    }
+
+    /// Where this frame's glass stands, written the way the outlines are.
+    /// Spec 0092.
+    fn upload_glass(&mut self, scene: &Scene) -> u32 {
+        let panes = scene.glass_surfaces();
+        if panes.is_empty() {
+            return 0;
+        }
+
+        let instances: Vec<Instance> = panes
+            .iter()
+            .map(|pane| pane.instance.from_the_eye(self.camera.position))
+            .collect();
+
+        let bytes: &[u8] = bytemuck::cast_slice(&instances);
+        if bytes.len() as u64 > self.glass_buffer.size() {
+            self.glass_buffer = create_buffer_init(&self.device, bytes, wgpu::BufferUsages::VERTEX);
+        } else {
+            self.queue.write_buffer(&self.glass_buffer, 0, bytes);
+        }
+
+        panes.len() as u32
     }
 
     /// Writes this frame's quads into the vertex and index buffers, growing them when they are too small.
@@ -5691,6 +5837,124 @@ mod asked {
             "the window's camera came back with the target's aspect, {} not {}",
             renderer.camera.aspect(),
             was
+        );
+    }
+
+    /// Spec 0091. A target pass draws what the reflection bracket holds and
+    /// a screen pass does not.
+    ///
+    /// **This is the wiring and not the arithmetic.** `Scene::batches` is
+    /// tested either way in its own module; what can break silently here is
+    /// `upload_instances` asking for the wrong set, and the symptom would be
+    /// a mirror with nobody in it or a screen with a head in the way.
+    /// Neither says which from a picture.
+    #[test]
+    fn a_target_pass_draws_what_the_screen_pass_leaves_out() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(32, 32)) else {
+            return;
+        };
+
+        let cube = renderer.add_mesh(&crate::mesh::MeshData::cube());
+        let target = renderer.add_target(16, 16);
+        let geometry = Geometry::new();
+        let text = TextRenderer::new();
+
+        let mut scene = Scene::new();
+        scene.push(
+            cube,
+            &crate::mesh::Transform::at(glam::Vec3::new(0.0, 0.0, -4.0)),
+        );
+        scene.only_in_reflections();
+        scene.push(
+            cube,
+            &crate::mesh::Transform::at(glam::Vec3::new(2.0, 0.0, -4.0)),
+        );
+        scene.and_everywhere();
+
+        renderer.drew(&scene, &geometry, &text);
+        let on_screen = renderer.counted();
+
+        renderer.draw_to(target, &Camera::new(), &scene, &geometry);
+        let in_glass = renderer.counted();
+
+        assert!(
+            in_glass.triangles > on_screen.triangles,
+            "the glass drew {} triangles and the screen {}, so the bracket is \
+             not reaching the target pass",
+            in_glass.triangles,
+            on_screen.triangles
+        );
+    }
+
+    /// Spec 0092. The glass samples flipped in x and not in y, read out of
+    /// the shader that ships rather than out of a copy of its arithmetic.
+    ///
+    /// **Flipping y as well is the mistake that looks almost right**, which
+    /// is why this checks both halves. Spec 0090's equivalence is that the
+    /// view from behind the glass plus one flip in x is the true reflection,
+    /// and `camera::tests::a_camera_behind_the_glass_and_a_flip_is_a_true_mirror`
+    /// is what holds that. This is the other end of the same claim: that the
+    /// shader does what the claim says.
+    #[test]
+    fn the_glass_samples_flipped_in_x_alone() {
+        let glass = crate::shaders::MESH
+            .split("fn fs_glass")
+            .nth(1)
+            .expect("fs_glass is not in the shader that ships");
+        let uv = glass
+            .lines()
+            .find(|line| line.contains("let uv ="))
+            .expect("fs_glass builds no uv");
+
+        assert!(
+            uv.contains("ndc.x * -0.5 + 0.5"),
+            "x is not flipped, so the glass shows the room from behind it \
+             rather than reflected: {}",
+            uv.trim()
+        );
+        assert!(
+            uv.contains("ndc.y * -0.5 + 0.5"),
+            "y is not what the rest of this shader does, so the reflection \
+             is upside down: {}",
+            uv.trim()
+        );
+    }
+
+    /// Spec 0092. Glass is drawn, which is the wiring the arithmetic tests
+    /// cannot see.
+    ///
+    /// **What this would catch.** A pass guarded on the wrong thing, a
+    /// pipeline never bound, an instance buffer never written: any of them
+    /// leaves the glass simply not drawn, and the room behind it looks
+    /// perfectly fine because the wall is still there.
+    #[test]
+    fn glass_is_a_pass_of_its_own() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(32, 32)) else {
+            return;
+        };
+
+        let cube = renderer.add_mesh(&crate::mesh::MeshData::cube());
+        let target = renderer.add_target(16, 16);
+        let geometry = Geometry::new();
+        let text = TextRenderer::new();
+        let at = crate::mesh::Transform::at(glam::Vec3::new(0.0, 0.0, -4.0));
+
+        let mut plain = Scene::new();
+        plain.push(cube, &at);
+        renderer.drew(&plain, &geometry, &text);
+        let without = renderer.counted();
+
+        let mut glazed = Scene::new();
+        glazed.push(cube, &at);
+        glazed.glass(cube, target, &at, glam::Vec4::ONE);
+        renderer.drew(&glazed, &geometry, &text);
+        let with = renderer.counted();
+
+        assert!(
+            with.draws > without.draws,
+            "{} draws with glass and {} without, so the glass pass never ran",
+            with.draws,
+            without.draws
         );
     }
 }

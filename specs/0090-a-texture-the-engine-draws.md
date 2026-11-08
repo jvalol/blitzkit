@@ -27,9 +27,10 @@ it. `draw_into` takes a view and draws a whole frame into it, which spec
 0062 put there so a picture is a picture of what a game actually plays. And
 `add_texture` is a texture and a bind group pushed onto two parallel Vecs
 with the index handed back as a `TextureId`. A texture the engine draws is
-the first of those pointed at the second, so the mesh shader does not change
-and neither does any material: a mirror is a quad wearing a texture, and
-nothing drawing it needs to know where the pixels came from.
+the first of those pointed at the second, so making one and drawing into one
+cost almost nothing new.
+
+**What it does not buy is a mirror.** See the correction below.
 
 ## What a mirror is, which took two wrong answers to find
 
@@ -67,10 +68,8 @@ It is here rather than in a game because a reflection is one fact, and a copy
 of it in every game that hangs a mirror is the same two-lists fault this
 project keeps finding.
 
-**Undoing the left-right swap is the caller's.** The engine hands back the
-view from behind the glass. Laying it on the glass with `u` backwards is what
-makes it a reflection, it is one line in the quad's uv, and the alternative
-is three duplicated pipelines.
+**Undoing the left-right swap is the caller's**, and this spec was wrong
+about how. See the correction below.
 
 **`Renderer::add_target(width, height) -> TextureId`** makes a texture with
 `RENDER_ATTACHMENT | TEXTURE_BINDING` in the surface's format, builds its
@@ -108,6 +107,35 @@ mesh pass is 3.3 ms on the median and 4.7 ms on the 95th at 64 lamps (spec
 0089), and a mirror at half the window's width is a quarter of the fragments
 and all of the draw calls, so the two ends of that are worth measuring rather
 than predicting.
+
+## Correction, 2026-11-08: the flip is not a texture coordinate
+
+**This spec said the glass wears its target with `u` backwards, and that is
+wrong.** `vs_main` in `res/shaders/mesh.wgsl` ends with `out.uv = uv`, so a fragment
+samples its texture with the mesh's own interpolated uv. A quad wearing the target that
+way shows the whole reflected view squashed flat onto the quad, pinned to the
+surface, and it does not shift as you move. That is a picture of a room.
+
+The mapping from a point on the glass to a point in the reflected view is
+projective and depends on where the viewer is standing, so no mesh uv can
+carry it. What a planar mirror samples is **the fragment's own screen
+position**, with x flipped.
+
+This engine already has the idiom three times over, in `contact_shadow`,
+`shadow_factor` and the spot one, each doing
+`vec2(ndc.x * 0.5 + 0.5, ndc.y * -0.5 + 0.5)` to turn a clip position into a
+texture coordinate. Named rather than given lines, because writing this
+correction moved one of the lines it first cited. It had never done it for a surface's own texture, which
+is spec 0092.
+
+**What survives.** `Camera::behind` is right, and the equivalence it rests on
+is still exactly true: that camera's view plus one flip in x is the true
+reflection, which is what keeps every pipeline's cull as it is.
+`add_target` and `draw_to` are right. Only the last mile was wrong, and it
+was wrong in a spec and in a commit message before it was wrong in any code,
+which is the thing this project writes down about reasons in comments.
+
+Found by trying to build the room, like the gap spec 0091 closed.
 
 ## What a mirror has to be, which the engine does not enforce
 
@@ -167,9 +195,9 @@ depth limit, and no attempt to stop it: one bounce is what a hall of mirrors
 needs, and the second bounce being stale is cheaper than either fixing it or
 forbidding it.
 
-**Curved mirrors.** A funhouse mirror distorts, and distorting this is a
-matter of what the glass is shaped like and how the texture is laid on it,
-which is the game's. The engine's part is a true reflection.
+**Curved mirrors.** A funhouse mirror distorts, and the engine's part here is
+a true reflection. With the correction above, a warped panel is not a matter
+of laying the texture differently either: it wants its own spec.
 
 **Mipmaps on a target.** One level, because a mirror is looked at from the
 room it is in rather than from across a field.
