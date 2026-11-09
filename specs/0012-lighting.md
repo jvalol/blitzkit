@@ -57,3 +57,14 @@ Run `cargo run --example cubes` in blitzkit.
 
 Point and spot lights, several lights at once, shadows, physically based
 rendering, and ambient occlusion.
+
+## 2026-11-09: a shininess of nought is no highlight
+
+The power only makes the spot smaller. A small spot at full strength sliding
+over anything curved is a bead of plastic, which is what capriccio's people
+looked like at 900, the tightest number there was: Jake, 2026-11-09, the
+figure is too reflective, it looks like plastic.
+
+Nought and below now means no specular at all, where it used to be clamped to
+one and give the broadest highlight there is. Cloth and skin want it. Nothing
+else in any game asked for nought, so nothing else moved.

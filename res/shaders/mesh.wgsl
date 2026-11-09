@@ -465,7 +465,15 @@ fn spot_light(
 
     let light = spot.color_intensity.rgb * spot.color_intensity.a * faded * cone * reaching;
     let half_vector = normalize(to_light + to_viewer);
-    let specular = light * pow(max(dot(normal, half_vector), 0.0), max(shininess, 1.0));
+    // A shininess of nought or less is a surface with no highlight at all.
+    // Spec 0020: the power only makes the spot smaller, and a small spot at
+    // full strength on anything curved is a bead of plastic. Cloth and skin
+    // have no spot.
+    let specular = select(
+        light * pow(max(dot(normal, half_vector), 0.0), max(shininess, 1.0)),
+        vec3<f32>(0.0),
+        shininess <= 0.0,
+    );
 
     return base * light * lambert + specular;
 }
@@ -662,7 +670,15 @@ fn point_light(
 
     let light = lamp.color_intensity.rgb * lamp.color_intensity.a * faded * reaching;
     let half_vector = normalize(to_light + to_viewer);
-    let specular = light * pow(max(dot(normal, half_vector), 0.0), max(shininess, 1.0));
+    // A shininess of nought or less is a surface with no highlight at all.
+    // Spec 0020: the power only makes the spot smaller, and a small spot at
+    // full strength on anything curved is a bead of plastic. Cloth and skin
+    // have no spot.
+    let specular = select(
+        light * pow(max(dot(normal, half_vector), 0.0), max(shininess, 1.0)),
+        vec3<f32>(0.0),
+        shininess <= 0.0,
+    );
 
     return base * light * lambert + specular;
 }
@@ -751,7 +767,7 @@ fn lit_surface(in: VertexOutput) -> Lit {
     let diffuse = light * lambert;
 
     var specular = vec3<f32>(0.0);
-    if lambert > 0.0 {
+    if lambert > 0.0 && in.shininess > 0.0 {
         let half_vector = normalize(to_light + to_viewer);
         specular = light * pow(max(dot(normal, half_vector), 0.0), max(in.shininess, 1.0));
     }
