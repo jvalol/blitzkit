@@ -6155,17 +6155,26 @@ mod asked {
         // conditions and not a simpler path. Checked, because every
         // conclusion below would need re-reading if it did not.
         //
-        // **The first mirror filled comes back empty and the second
-        // draws.** Measured by looking at each in turn, a third of the way
-        // across so no recursion is needed to see the room:
+        // **This failed for a day and the engine was right the whole
+        // time.** It sampled the horizon row, and a camera at eye height
+        // never meets a floor below it, so what it was asking was whether
+        // empty sky is lit. One mirror happened to have a cube on that row
+        // and the other did not, which produced an asymmetry that looked
+        // like a rendering fault and was a sampling one.
         //
-        //     far  (filled first)   0,0,0
-        //     near (filled second)  189,189,189
+        // Twelve things were investigated off the back of it: a warm-up,
+        // the fill order, the quad's orientation, the recursion depth, the
+        // oblique frustum, submission hazards, usage conflicts, the state
+        // swap in `draw_to`, drawing the second target, the multisample
+        // resolve, what `Scene` does with two mirrors, and drawing no glass
+        // in a target frame at all. None of them was wrong with the engine.
         //
-        // Filling twice changes nothing, so it is not that the first has
-        // nothing to reflect yet. Two mirrors not facing each other work.
+        // So: sample where there is certainly something to see, and say so.
         let shot = renderer.picture(&scene, &geometry, &text);
-        let at = ((shot.height / 2) * shot.width + shot.width / 3) as usize * 4;
+        // three quarters down, which looks at the floor. The horizon row
+        // is level with the eye, and a camera at eye height never meets a
+        // floor below it: sampling there asked whether empty sky is lit.
+        let at = ((shot.height * 3 / 4) * shot.width + shot.width / 3) as usize * 4;
         let (r, g, b) = (shot.pixels[at], shot.pixels[at + 1], shot.pixels[at + 2]);
 
         assert!(
