@@ -1156,4 +1156,74 @@ mod tests {
             );
         }
     }
+
+    /// Spec 0093. **Everything on the kept side is drawn, not a sliver at
+    /// the plane.**
+    ///
+    /// The five tests above all pass against a shear that keeps almost
+    /// nothing: they sample a handful of points, and the one that walks away
+    /// from the glass walks straight down the view axis, dead centre, where
+    /// the shear does least. capriccio's mirrors came back holding one
+    /// figure standing near the glass and nothing else, and every one of
+    /// these was green.
+    ///
+    /// So this sweeps a grid: several depths beyond the plane, and across
+    /// the picture at each of them, because a frustum is a volume and the
+    /// faults live off the axis.
+    #[test]
+    fn everything_beyond_the_glass_is_drawn_and_not_a_sliver() {
+        let camera = at_the_glass().clipped_at(GLASS_ON, GLASS_FACES);
+        let plain = at_the_glass();
+
+        let away = (plain.target - plain.position).normalize();
+        // the two directions across the picture, from the camera's own frame
+        let right = away.cross(Vec3::Y).normalize();
+        let up = right.cross(away).normalize();
+
+        let mut drawn = 0;
+        let mut lost = Vec::new();
+
+        // **Beyond the glass, which is two metres out.** The first version
+        // of this started at one metre, which is between the eye and the
+        // plane and so is meant to be clipped: nine failures that were the
+        // test being wrong rather than the shear.
+        for metres in [2.5f32, 4.0, 8.0, 20.0, 45.0] {
+            // a width that stays inside the frustum at that distance: the
+            // field of view is 60 degrees, so half of it is well under the
+            // distance itself
+            let spread = metres * 0.3;
+
+            for across in [-1.0f32, 0.0, 1.0] {
+                for over in [-1.0f32, 0.0, 1.0] {
+                    let at = plain.position
+                        + away * metres
+                        + right * (across * spread)
+                        + up * (over * spread);
+
+                    let clip = camera.view_projection() * at.extend(1.0);
+                    if clip.w <= 0.0 {
+                        lost.push((metres, across, over, -1.0));
+                        continue;
+                    }
+                    let depth = clip.z / clip.w;
+
+                    if (0.0..=1.0).contains(&depth) {
+                        drawn += 1;
+                    } else {
+                        lost.push((metres, across, over, depth));
+                    }
+                }
+            }
+        }
+
+        assert!(
+            lost.is_empty(),
+            "{} of {} points on the kept side fell outside the depth range, \
+             so the reflection is a sliver at the glass rather than the room \
+             beyond it. The first few: {:?}",
+            lost.len(),
+            drawn + lost.len(),
+            &lost[..lost.len().min(6)]
+        );
+    }
 }
