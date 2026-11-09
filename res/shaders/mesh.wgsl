@@ -1,7 +1,7 @@
 // How many lamps and spots fit. Matches lighting::MAX_POINT_LIGHTS and
 // MAX_SPOT_LIGHTS, and lighting::tests::the_shaders_hold_the_same_caps reads
 // these two lines and fails if they stop matching.
-const MAX_POINT_LIGHTS: u32 = 64u;
+const MAX_POINT_LIGHTS: u32 = 128u;
 const MAX_SPOT_LIGHTS: u32 = 4u;
 
 // One lamp: two vec4s exactly, because a uniform block aligns every array

@@ -23,9 +23,17 @@ direction. Point lights light things and cast nothing. A scene with no point
 lights at all is lit exactly as it was before, which is what keeps every
 existing game looking the way it looked.
 
-**Up to sixty four**, because they travel in a fixed-size block in the uniform.
-A game that pushes more gets the first sixty four and a warning in the log; it
-does not lose the frame and it does not silently drop them without saying so.
+**Up to a hundred and twenty eight**, because they travel in a fixed-size block
+in the uniform. A game that pushes more gets the first of them and a warning in
+the log; it does not lose the frame and it does not silently drop them without
+saying so.
+
+It was sixty four until 2026-11-09, and the paragraphs below were written
+against that number and left as they were, because what they are about is the
+shape of the rule rather than its size. Spec 0089 measured sixty four against a
+hundred and twenty eight twice: the first time the pictures were byte for byte
+the same and sixty four stayed, and the second time, after capriccio's hall got
+a lit ceiling, four views of eleven differed and this moved.
 
 **The warning is once a frame and only when the number moves.** It was once
 per refused lamp. The arcade grew a room with a hundred ceiling lamps in it
@@ -85,7 +93,8 @@ hand checks are what cover that gap. The numbers they work on are not: since
 of both shaders and fails if either moves alone. Measuring spec 0089 is what
 turned that up, because every round of it edited both files.
 
-Whether sixty four is enough, and what a larger one would cost, is spec 0089.
+Whether the cap is enough, and what a larger one costs, is spec 0089, which has
+now asked it twice and answered it differently each time.
 
 **A cap reports a high-water mark, not a change.** Saying something whenever
 the count moved is a line a frame for a cap you walk in and out of: one turn

@@ -63,6 +63,8 @@ are the near ones. What is dropped is light in rooms you cannot see into.
 **So sixty four stays.** What made it enough is spec 0050's cull and the
 ranking under it, not the size of the number.
 
+It stayed for two days. See the second measurement below.
+
 ## What would change the answer
 
 A view where the surplus is in open sight rather than behind a wall. Nothing
@@ -70,6 +72,63 @@ in the building does that today, and nothing rules it out: this is one
 position, swept, on one machine. The instrument is the count of lamps that
 survive the cull against the cap, which is three lines in the arcade's
 `draw`, and the picture pair is the test.
+
+## 2026-11-09: it stopped being enough, two days later
+
+**The condition this spec named happened.** capriccio's hall had never had a
+lamp of its own: its light was the cabinets' marquees and the sign over the
+door. On 2026-11-09 every other square of its ceiling grid became a lit panel,
+which is twenty seven lamps hanging in front of you rather than in rooms behind
+a wall. That is the view this spec said would change the answer, and it did.
+
+### What it buys now
+
+Eleven views, each drawn at each cap with `--picture-to`, compared by
+`picture::how_far_apart`, which is the same rule the picture tests use: a
+channel moving more than eight, and 0.2% of the pixels doing it.
+
+| view | share differing |
+| --- | --- |
+| mid hall, ceiling in frame | 3.26% |
+| at the door, ceiling in frame | 2.31% |
+| straight down the hall | 1.92% |
+| `0.0,0.0,8.5` at yaw 5.6025, this spec's own worst | 1.00% |
+| looking back up the hall | 0.15% |
+| the other six | 0.00% |
+
+Four of eleven past the tolerance, against seven of seven byte identical two
+days before. "Nothing you can see" is over.
+
+### What it costs now
+
+Whole frame GPU time out of `Renderer::gpu_seconds`, four views, three runs at
+each cap, interleaved, each binary checked by grepping its own embedded shader
+for the cap it was built with. The first fifth of each run dropped as warm up.
+
+| view | 64 median / 95th | 128 median / 95th |
+| --- | --- | --- |
+| mid hall | 1.60 / 1.82 ms | 1.75 / 1.96 ms |
+| at the door, ceiling | 1.79 / 2.03 ms | 2.04 / 2.27 ms |
+| down the hall | 1.84 / 2.07 ms | 2.06 / 2.29 ms |
+| yaw 5.6025 | 0.45 / 0.73 ms | 0.36 / 0.57 ms |
+
+**These separate where the first measurement's did not.** Three runs at each
+cap, and in the three hall views every run at 128 is above every run at 64.
+Nine per cent was the floor this spec could read before; this is 9 to 14 per
+cent of the frame and about three per cent of the 8.33 ms there is to spend.
+
+### Two things this measurement does not settle
+
+**The fourth view is faster at 128**, consistently, by about a tenth of a
+millisecond. The instrument here is the whole frame rather than this spec's
+mesh pass, so it carries the shadow map passes too, and which lamps survive the
+cap decides which two of them cast. That is a plausible mechanism and it was
+not tested.
+
+**A hundred and twenty eight is not enough for the worst view either.** At yaw
+5.6025, 156 lamps survive the cull, so twenty eight are still dropped there.
+The cap was raised because it is now the thing deciding what the hall looks
+like, not because it has stopped biting.
 
 ## The two numbers that say the cap
 

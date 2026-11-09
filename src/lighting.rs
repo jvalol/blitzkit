@@ -79,7 +79,18 @@ impl Default for Light {
 /// does any work. The falloff is zero at the range rather than merely small, so
 /// a lamp in another room contributes exactly nothing and is charged exactly
 /// nothing for it.
-pub const MAX_POINT_LIGHTS: usize = 64;
+///
+/// **A hundred and twenty eight since 2026-11-09**, because the thing spec
+/// 0089 said would change the answer happened. That spec measured sixty four
+/// against a hundred and twenty eight and found the pictures byte for byte the
+/// same, and said plainly what would undo that: a view where the surplus is in
+/// open sight rather than behind a wall. The arcade's ceiling became lit
+/// panels, which is a room's worth of lamps in front of you rather than
+/// through a wall, and four views of eleven then differed past the share the
+/// picture tests call a difference, the worst by 3.3%. See spec 0089's own
+/// second measurement for what it costs, which is about a fifth of a
+/// millisecond in the one room.
+pub const MAX_POINT_LIGHTS: usize = 128;
 
 /// How many lamps may cast a shadow, out of the [`MAX_POINT_LIGHTS`] that may
 /// light. Each one is six passes over the scene, which is why it is two and not
