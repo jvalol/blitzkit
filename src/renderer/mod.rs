@@ -6112,6 +6112,18 @@ mod asked {
         renderer.set_camera(eye);
 
         let mut scene = Scene::new();
+        // **A floor under the whole room, not one small block to one side.**
+        // The first version put a single 0.8 cube at x 1.4 and sampled a
+        // third of the way across: from one mirror's viewpoint that cube
+        // need not land on that pixel at all, so "black" may only have meant
+        // "nothing there". A floor fills every sample point from both.
+        scene.push_material(
+            cube,
+            &crate::mesh::Transform::at(glam::Vec3::new(0.0, -1.5, 0.0))
+                .with_scale(glam::Vec3::new(12.0, 0.2, 12.0)),
+            glam::vec4(1.0, 1.0, 1.0, 1.0),
+            64.0,
+        );
         scene.push_material(
             cube,
             &crate::mesh::Transform::at(glam::Vec3::new(1.4, 0.0, 0.0))
