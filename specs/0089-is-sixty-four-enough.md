@@ -117,6 +117,22 @@ cap, and in the three hall views every run at 128 is above every run at 64.
 Nine per cent was the floor this spec could read before; this is 9 to 14 per
 cent of the frame and about three per cent of the 8.33 ms there is to spend.
 
+### And a cost the first measurement did not look for
+
+**It moves pixels in a scene with two lamps.** The cap sizes an array in the
+uniform block, so changing it changes the compiled shader, and the Metal
+compiler is free to emit different arithmetic for it. Refilming the examples
+afterwards, `cubes` came out different from the clip committed against the old
+cap, and `cubes` pushes two lights.
+
+It is deterministic and it is small: two runs of `cubes` at the new cap gave
+the same bytes, and the engine's own picture tests, which forgive eight per
+channel, did not move at all. The clips are compared byte for byte and did.
+
+So the cost of this number is not only time. Every clip and every still in the
+project is derived from a shader this constant is compiled into, and raising it
+is a reason to refilm them rather than a change that leaves them alone.
+
 ### Two things this measurement does not settle
 
 **The fourth view is faster at 128**, consistently, by about a tenth of a
