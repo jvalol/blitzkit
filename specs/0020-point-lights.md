@@ -87,6 +87,13 @@ turned that up, because every round of it edited both files.
 
 Whether sixty four is enough, and what a larger one would cost, is spec 0089.
 
+**A cap reports a high-water mark, not a change.** Saying something whenever
+the count moved is a line a frame for a cap you walk in and out of: one turn
+on the spot at capriccio's way in wrote 226 lines in fourteen seconds and
+buried everything else in the log. Jake, 2026-11-09, by pasting it twice and
+saying nothing. The same turn now writes 45, climbing to the worst and going
+quiet, and the worst is the number anybody reading the log was after.
+
 ## Acceptance criteria
 
 - A light is full strength where it sits. — `lighting::tests::a_point_light_is_full_strength_at_its_own_position`
@@ -98,7 +105,7 @@ Whether sixty four is enough, and what a larger one would cost, is spec 0089.
 - Two lights add up rather than one winning. — `lighting::tests::point_lights_add_together`
 - A scene with no point lights shades exactly as spec 0012 did. — `lighting::tests::no_point_lights_is_the_old_shading`
 - Lights are pushed per frame and cleared with the scene. — `renderer::scene::tests::point_lights_are_cleared_with_the_scene`
-- A cap says what it turned away once a frame, and again only when the count moves. — `renderer::scene::tests::a_cap_says_what_it_turned_away_once_a_frame`
+- A cap says what it turned away once a frame, and again only when it is worse than it has ever been. — `renderer::scene::tests::a_cap_says_what_it_turned_away_once_a_frame`
 - A lamp past the count is dropped, and the first ones kept. — `renderer::scene::tests::only_the_lamps_that_fit_are_kept`
 - The uniform matches the shader's block, field by field. — `renderer::uniform_tests::the_scene_uniform_is_laid_out_for_the_gpu`
 - A lamp is two vec4s, so an array of them is not silently padded apart. — `renderer::uniform_tests::a_lamp_is_two_vec4s_and_nothing_else`

@@ -195,9 +195,36 @@ depth limit, and no attempt to stop it: one bounce is what a hall of mirrors
 needs, and the second bounce being stale is cheaper than either fixing it or
 forbidding it.
 
+**Stale was the wrong word: it was empty.** Once spec 0093 put a near plane
+on the glass, the mirror behind you is filled from a camera standing behind
+that glass and looking the other way, so every fragment of it is clipped and
+the target holds nothing to be stale. Spec 0095 fills it from the reflection
+that can see it instead.
+
 **Curved mirrors.** A funhouse mirror distorts, and the engine's part here is
 a true reflection. With the correction above, a warped panel is not a matter
 of laying the texture differently either: it wants its own spec.
 
 **Mipmaps on a target.** One level, because a mirror is looked at from the
 room it is in rather than from across a field.
+
+## 2026-11-09: a target can be looked at
+
+`Renderer::target_picture` hands back what a target holds, as pixels, the
+way `read_back` does for the screen. The texture carries `COPY_SRC` for it,
+and what comes back is rgba whatever the surface's own order is.
+
+**Built after a night without it.** The only way to see a target was to hang
+it on a wall as an ordinary quad, which puts the lighting of whatever it is
+hung on between you and the picture, and a second mirror too when the wall is
+in the room the mirrors face. Two readings on 2026-11-09 were wrong for
+exactly that, and a third called a room lit cold when the only thing cold was
+red and blue the wrong way round.
+
+Four pictures written out settled in one minute what a night of posters had
+not: both mirrors hold the corridor, and the black panes in them are the
+bounce after the one two textures buy.
+
+### Acceptance criteria
+
+- A target hands back a picture of its own size, blank before anything is drawn and lit after. — `pictures::tests::a_target_hands_back_what_was_drawn_into_it`

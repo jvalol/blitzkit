@@ -87,6 +87,10 @@ yet.** The engine's half is built and tested; the glass is capriccio's.
 other's target as it was last frame. The cap of two is what keeps that from
 being a cost as well as a limit.
 
+**And that turned out to show nothing at all**, because the mirror behind you
+is filled from a camera looking away from its own clip plane. Spec 0095 is
+the fix and keeps the cap and the pass count.
+
 **A mirror that moves.** The plane is pushed every frame, so a moving one
 costs nothing extra, but nothing here helps a game work out where a swinging
 mirror's plane is.
@@ -94,3 +98,12 @@ mirror's plane is.
 **Telling a game what a mirror cost.** Spec 0090's `target` slot holds the
 last target pass drawn, so with two mirrors it holds the second. One slot per
 mirror is a column per mirror, which is a readout nobody asked for.
+
+## 2026-11-09
+
+**`mirror` takes the glass's box as well as its plane.** A plane says where a
+reflection goes and nothing about whether you can see it, and the engine has
+to tell a mirror beside you from one behind you: the first is drawn from your
+own reflection and the second from the reflection that can see it. Spec 0095
+guessed that from the camera twice and was wrong twice. The box is the
+game's, because only the game knows how far its panes run.

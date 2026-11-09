@@ -42,7 +42,7 @@ const WHICH_INDEXES: usize = if POINT_SHADOW_LAYERS > crate::lighting::MAX_SPOT_
 use crate::texture::TextureData;
 use culling::{Drawn, Seen, FIRST_LAMP, FIRST_SPOT, PICTURE, SUN, VIEWS};
 use render_text::*;
-use scene::{Instance, MeshId, Scene, TextureId};
+use scene::{Instance, MeshId, Mirror, Scene, TextureId};
 
 use std::sync::Arc;
 
@@ -1153,7 +1153,14 @@ impl Renderer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: self.config.format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            // and copied out of, so `target_picture` can hand one back.
+            // Spec 0090: a target nobody can look at is a target nobody can
+            // debug, which cost a night of hanging them on walls as posters
+            // and reading them through the lighting of whatever they were
+            // hung on.
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[self.drawn],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
@@ -1194,6 +1201,121 @@ impl Renderer {
         );
 
         id
+    }
+
+    /// Hands back what a target holds, as pixels. Spec 0090.
+    ///
+    /// **A target you cannot look at is a target you cannot debug.** The
+    /// only way to see one was to hang it on a wall as an ordinary quad,
+    /// which puts the lighting of whatever it is hung on between you and the
+    /// picture, and a second mirror too if the wall is in the room the
+    /// mirrors face. Both of those were read wrong on 2026-11-09.
+    ///
+    /// Nothing drawn into it yet is whatever it was cleared to, the same as
+    /// the screen's.
+    pub fn target_picture(&mut self, target: TextureId) -> Picture {
+        let Some((width, height)) = self.targets.get(&target.0).map(|into| into.size) else {
+            return Picture {
+                width: 0,
+                height: 0,
+                pixels: Vec::new(),
+            };
+        };
+        let Some(texture) = self.images.get(target.0) else {
+            return Picture {
+                width: 0,
+                height: 0,
+                pixels: Vec::new(),
+            };
+        };
+
+        let row = width * 4;
+        // wgpu wants each row of a copy aligned, and the padding comes back
+        // out below
+        let padded =
+            row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let read = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Target Readback"),
+            size: (padded * height) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Target Picture Encoder"),
+            });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &read,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        let landed = Arc::new(AtomicBool::new(false));
+        let told = landed.clone();
+
+        read.slice(..).map_async(wgpu::MapMode::Read, move |got| {
+            told.store(got.is_ok(), Ordering::Release);
+        });
+
+        let _ = self.device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
+
+        let mut pixels = Vec::with_capacity((row * height) as usize);
+
+        // **Handed back as rgba whatever the surface is.** A target wears
+        // the surface's own format, which on this machine is bgra, and a
+        // picture that comes out with red and blue swapped reads as a room
+        // lit cold. Which is how it read for ten minutes on 2026-11-09.
+        let swizzle = matches!(
+            self.config.format,
+            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+        );
+
+        if landed.load(Ordering::Acquire) {
+            if let Ok(got) = read.slice(..).get_mapped_range() {
+                for line in 0..height {
+                    let from = (line * padded) as usize;
+
+                    for texel in got[from..from + row as usize].chunks_exact(4) {
+                        if swizzle {
+                            pixels.extend_from_slice(&[texel[2], texel[1], texel[0], texel[3]]);
+                        } else {
+                            pixels.extend_from_slice(texel);
+                        }
+                    }
+                }
+            }
+        }
+
+        read.unmap();
+
+        Picture {
+            width,
+            height,
+            pixels,
+        }
     }
 
     /// Draws one frame of a scene into a target, from a camera of its own.
@@ -1805,8 +1927,8 @@ impl Renderer {
         // the only place in the frame that holds both.
         //
         // Before the screen pass, because the glass wears what came out.
-        // A mirror facing a mirror therefore shows the other's target as it
-        // was last frame, which spec 0090 leaves as it is.
+        // A mirror facing a mirror shows the other filled earlier in this
+        // same call, from the camera that can actually see it: spec 0095.
         self.fill_the_mirrors(scene, geometry);
 
         self.draw_into(&view, scene, geometry, Frame::Screen(text_renderer));
@@ -2002,18 +2124,8 @@ impl Renderer {
     /// published that. The two paths are the same frame by spec 0062, and
     /// this is part of the frame.
     fn fill_the_mirrors(&mut self, scene: &Scene, geometry: &Geometry) {
-        for mirror in scene.mirrors().to_vec() {
-            // **Clipped at its own glass, per spec 0093.** Without it the
-            // reflection starts at the reflected eye, which is as far behind
-            // the glass as the viewer is in front, so everything standing
-            // back there is in the picture. That is what stopped capriccio's
-            // hall of mirrors being placed three times over.
-            let behind = self
-                .camera
-                .behind(mirror.on_plane, mirror.normal)
-                .clipped_at(mirror.on_plane, mirror.normal);
-
-            self.draw_to(mirror.target, &behind, scene, geometry);
+        for (target, behind) in in_what_order(&self.camera, scene.mirrors()) {
+            self.draw_to(target, &behind, scene, geometry);
         }
     }
 
@@ -2643,28 +2755,17 @@ impl Renderer {
         // drawn and lit; before, because the interface sits on top of
         // everything.
         //
-        // Not in a target frame: a mirror in a mirror would be sampling the
-        // frame it is in the middle of drawing. The second bounce is the
-        // other mirror's target as it stood last frame, which is what spec
-        // 0090 settled.
         // **A target frame draws glass too, which is what makes a mirror
         // facing a mirror recede.** It did not, and what that looked like
         // was two walls of mirrors showing each other as nothing: Jake,
-        // 2026-11-08, the mirrors don't reflect each other. Spec 0090 says
-        // one bounce deep with the second bounce stale, and skipping the
-        // pass gave none at all.
+        // 2026-11-08, the mirrors don't reflect each other. Skipping the
+        // pass gave no recession at all.
         //
         // The hazard is one pane, not all of them: a mirror sampling the
-        // target it is being rendered into. That one is left out below.
-        // **A target frame draws glass too, which is what makes a mirror
-        // facing a mirror recede.** Spec 0094.
-        //
-        // In a target frame every mirror's glass shows its spare, which
-        // holds last frame's reflection and which nothing is writing now.
-        // That is the whole of why there is a spare: with one texture each,
-        // filling mirror A sampled B's target and then filling B wrote it,
-        // so both were read and written in one submission and both came out
-        // black.
+        // target it is being rendered into, which is a usage conflict and
+        // panics rather than going black. That one is left out below, and
+        // every other mirror's glass reads a target `fill_the_mirrors`
+        // filled before this pass, per spec 0095's order.
         let filling = match frame {
             Frame::Screen(_) => None,
             Frame::Target(id) => Some(id),
@@ -2709,10 +2810,13 @@ impl Renderer {
             for (which, pane) in scene
                 .glass_surfaces()
                 .iter()
-                .filter(|pane| Some(pane.target) != filling)
+                .filter(|pane| {
+                    !is_the_deepest(scene, filling)
+                        && Some(pane_wears(scene, pane.target, filling)) != filling
+                })
                 .enumerate()
             {
-                let worn = pane.target;
+                let worn = pane_wears(scene, pane.target, filling);
                 let Some(mesh) = self.meshes.get(pane.mesh.0) else {
                     continue;
                 };
@@ -3420,7 +3524,10 @@ impl Renderer {
         let instances: Vec<Instance> = scene
             .glass_surfaces()
             .iter()
-            .filter(|pane| Some(pane.target) != filling)
+            .filter(|pane| {
+                !is_the_deepest(scene, filling)
+                    && Some(pane_wears(scene, pane.target, filling)) != filling
+            })
             .map(|pane| pane.instance.from_the_eye(self.camera.position))
             .collect();
 
@@ -3457,6 +3564,94 @@ impl Renderer {
             self.queue.write_buffer(&self.index_buffer, 0, indices);
         }
     }
+}
+
+/// Which camera draws each mirror, and in what order. Spec 0095.
+///
+/// **A mirror the eye is not looking at still faces the eye.** Reflecting
+/// the eye in it gives a camera standing behind that glass and looking the
+/// other way, away from the half-space spec 0093's clip plane keeps, so what
+/// it draws is nothing at all. On the screen that costs nothing, because a
+/// mirror you are not looking at is not on the screen. Inside another
+/// mirror's reflection it is the whole picture: capriccio's corridor showed
+/// its far wall as black rectangles, and only ever inside the near wall's
+/// glass.
+///
+/// So a mirror nobody is facing is drawn from the camera that does see it,
+/// which is the reflection standing in front of it. That is the second
+/// bounce, and it comes back deepest first so the first bounce samples this
+/// frame's rather than last frame's.
+///
+/// **Clipped at its own glass either way, per spec 0093.** Without it the
+/// reflection starts at the reflected eye, which is as far behind the glass
+/// as the viewer is in front, so everything standing back there is in the
+/// picture. That is what stopped capriccio's hall of mirrors being placed
+/// three times over.
+/// Which of a mirror's two textures a pane of it wears in this frame.
+///
+/// **The screen's one on the screen, and the other inside another mirror.**
+/// Spec 0094: a target is only right for the camera its pass was drawn from,
+/// so the picture a pane shows depends on which pass is looking at it. A
+/// pane that is not a mirror's wears what the game gave it either way.
+fn pane_wears(scene: &Scene, pane: TextureId, filling: Option<TextureId>) -> TextureId {
+    if filling.is_none() {
+        return pane;
+    }
+
+    scene
+        .mirrors()
+        .iter()
+        .find(|mirror| mirror.target == pane)
+        .map(|mirror| mirror.inside)
+        .unwrap_or(pane)
+}
+
+/// Whether this pass is the deepest one, which is the second bounce.
+///
+/// **Nothing in it wears glass.** Two textures hold two bounces, and a
+/// mirror seen in the deepest pass would want a third picture that does not
+/// exist. Whatever it wore there was drawn from a camera that cannot see it,
+/// so it came out as a black rectangle at the end of the recession: Jake,
+/// 2026-11-09, four times over, still black. Left off, the frame at that
+/// depth holds the wall behind it instead, which is a room carrying on
+/// rather than a window onto nothing, and at two bounces deep nobody is
+/// counting mirrors.
+fn is_the_deepest(scene: &Scene, filling: Option<TextureId>) -> bool {
+    filling.is_some_and(|id| scene.mirrors().iter().any(|mirror| mirror.inside == id))
+}
+
+fn in_what_order(camera: &Camera, mirrors: &[Mirror]) -> Vec<(TextureId, Camera)> {
+    let seen_from = |camera: &Camera, mirror: &Mirror| {
+        camera
+            .behind(mirror.on_plane, mirror.normal)
+            .clipped_at(mirror.on_plane, mirror.normal)
+    };
+
+    // what each mirror holds for the screen: your own reflection in it
+    let eyes: Vec<Camera> = mirrors.iter().map(|m| seen_from(camera, m)).collect();
+    let mut out = Vec::with_capacity(mirrors.len() * 2);
+
+    // **The inside pictures first, because the screen's ones sample them.**
+    // A mirror seen inside another is a picture of the room from that other
+    // mirror's camera reflected in this one, which is the second bounce. Two
+    // passes a mirror rather than one, and spec 0091's cap counts mirrors
+    // rather than passes for exactly this reason.
+    //
+    // Another mirror and not a particular one: spec 0091 carries two, so
+    // there is only ever the other. A third would want saying which.
+    for (n, mirror) in mirrors.iter().enumerate() {
+        let Some(through) = eyes.iter().enumerate().find(|(k, _)| *k != n) else {
+            continue;
+        };
+
+        out.push((mirror.inside, seen_from(through.1, mirror)));
+    }
+
+    for (mirror, eye) in mirrors.iter().zip(eyes) {
+        out.push((mirror.target, eye));
+    }
+
+    out
 }
 
 fn create_buffer(
@@ -4920,6 +5115,155 @@ pub struct Counted {
 mod tests {
     use super::*;
 
+    /// Spec 0094 and spec 0095. Two mirrors facing each other, with the eye
+    /// between them.
+    ///
+    /// **Each one is drawn twice, because a target is right for one camera.**
+    /// Spec 0092's glass samples by screen position, so what a pane shows
+    /// belongs to the pass that drew it. On the screen a mirror wants the
+    /// eye reflected in it. Inside the mirror facing it, the same panes want
+    /// that other mirror's camera reflected in it. One texture held one of
+    /// them, and whichever was chosen the other went black: both were
+    /// shipped on 2026-11-09 and Jake reported both within the hour.
+    #[test]
+    fn each_mirror_is_drawn_once_for_the_screen_and_once_for_the_other() {
+        let mut eye = Camera::new();
+        eye.position = glam::Vec3::ZERO;
+        eye.target = -glam::Vec3::Z;
+
+        let ahead = Mirror {
+            target: TextureId(1),
+            inside: TextureId(11),
+            on_plane: glam::vec3(0.0, 0.0, -4.0),
+            normal: glam::Vec3::Z,
+        };
+        let behind_you = Mirror {
+            target: TextureId(2),
+            inside: TextureId(12),
+            on_plane: glam::vec3(0.0, 0.0, 4.0),
+            normal: -glam::Vec3::Z,
+        };
+        let both = [ahead, behind_you];
+
+        let order = in_what_order(&eye, &both);
+
+        assert_eq!(order.len(), 4, "two mirrors are four pictures");
+
+        // the inside ones first, so the screen's ones sample this frame's
+        assert_eq!(
+            order.iter().map(|(target, _)| *target).collect::<Vec<_>>(),
+            vec![
+                ahead.inside,
+                behind_you.inside,
+                ahead.target,
+                behind_you.target
+            ],
+        );
+
+        let of = |target: TextureId| {
+            both.iter()
+                .find(|m| m.target == target || m.inside == target)
+                .copied()
+                .unwrap()
+        };
+
+        // **A camera looking away from its own glass is not a fault here.**
+        // It was treated as one all morning. Where a mirror's glass lands on
+        // a picture, the ray that got there reflects into the half-space its
+        // clip plane keeps, so there is something to draw at exactly those
+        // pixels. Where it lands nowhere, the picture is empty and nothing
+        // samples it. That is why this needs no test of which way anything
+        // points, and why two of them went in and came out again.
+        for (target, camera) in &order {
+            let mirror = of(*target);
+
+            assert!(
+                (camera.position - mirror.on_plane).dot(mirror.normal) < 0.0,
+                "every one of them is drawn from behind its own glass"
+            );
+        }
+
+        // **The screen's picture is your own reflection and the inside one
+        // is not.** They are different cameras, which is the whole of spec
+        // 0094: one texture cannot be both.
+        let screen = order
+            .iter()
+            .find(|(target, _)| *target == ahead.target)
+            .unwrap()
+            .1;
+        let inside = order
+            .iter()
+            .find(|(target, _)| *target == ahead.inside)
+            .unwrap()
+            .1;
+
+        assert!(
+            screen.position.distance(inside.position) > 1.0,
+            "the two pictures of one mirror are drawn from the same place, so \
+             one texture would have done"
+        );
+        assert_eq!(
+            screen.position,
+            eye.behind(ahead.on_plane, ahead.normal).position,
+            "the screen's picture is the eye reflected in the glass"
+        );
+    }
+
+    /// Spec 0095. One mirror, which is every game that is not a hall of
+    /// mirrors, gets exactly the reflection it got before.
+    #[test]
+    fn a_single_mirror_is_drawn_from_the_eye_as_it_always_was() {
+        let mut eye = Camera::new();
+        eye.position = glam::Vec3::ZERO;
+        eye.target = -glam::Vec3::Z;
+
+        let one = Mirror {
+            target: TextureId(1),
+            inside: TextureId(11),
+            on_plane: glam::vec3(0.0, 0.0, -4.0),
+            normal: glam::Vec3::Z,
+        };
+        let order = in_what_order(&eye, &[one]);
+        let plainly = eye
+            .behind(one.on_plane, one.normal)
+            .clipped_at(one.on_plane, one.normal);
+
+        assert_eq!(order.len(), 1);
+        assert_eq!(order[0].1.position, plainly.position);
+        assert_eq!(order[0].1.target, plainly.target);
+    }
+
+    /// Spec 0095. Edge on, every mirror is still drawn, both pictures of it.
+    ///
+    /// A frame that filled none would leave each one holding a reflection of
+    /// somewhere else. Nothing about the order depends on an angle now, so
+    /// this holds the thing that used to flicker: there is no threshold left
+    /// for a turn to cross.
+    #[test]
+    fn mirrors_edge_on_to_the_eye_are_all_still_filled() {
+        let mut eye = Camera::new();
+        eye.position = glam::Vec3::ZERO;
+        // straight along both planes, so neither dot comes out positive
+        eye.target = glam::Vec3::X;
+
+        let walls = [
+            Mirror {
+                target: TextureId(1),
+                inside: TextureId(11),
+                on_plane: glam::vec3(0.0, 0.0, -4.0),
+                normal: glam::Vec3::Z,
+            },
+            Mirror {
+                target: TextureId(2),
+                inside: TextureId(12),
+                on_plane: glam::vec3(0.0, 0.0, 4.0),
+                normal: -glam::Vec3::Z,
+            },
+        ];
+
+        assert_eq!(in_what_order(&eye, &walls).len(), walls.len() * 2);
+    }
+
     /// Spec 0086. The rule the engine owns, which is pure arithmetic and
     /// wants no card.
     #[test]
@@ -6059,7 +6403,7 @@ mod asked {
             glam::vec4(1.0, 1.0, 1.0, 1.0),
             64.0,
         );
-        scene.mirror(target, glass_at, facing);
+        scene.mirror(target, TextureId(target.0 + 1), glass_at, facing);
         scene.glass(
             quad,
             target,
@@ -6137,7 +6481,7 @@ mod asked {
             (near, 4.0f32, -glam::Vec3::Z),
         ] {
             let at = glam::Vec3::new(0.0, 0.0, z);
-            scene.mirror(target, at, facing);
+            scene.mirror(target, TextureId(target.0 + 1), at, facing);
             scene.glass(
                 quad,
                 target,

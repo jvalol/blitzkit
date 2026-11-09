@@ -833,6 +833,69 @@ mod pictures {
             );
         }
 
+        /// Spec 0090: a target can be looked at, which is what tells a
+        /// target that holds nothing from one that holds the wrong thing.
+        ///
+        /// **Built after a night of hanging them on walls as posters.** That
+        /// puts the lighting of whatever the poster is made of between you
+        /// and the picture, and a second mirror too when the wall is in the
+        /// room the mirrors face. Two readings on 2026-11-09 were wrong for
+        /// exactly that, and a third called a room cold when the only thing
+        /// cold was the byte order.
+        #[test]
+        fn a_target_hands_back_what_was_drawn_into_it() {
+            let Some(mut renderer) = pollster::block_on(Renderer::offscreen(64, 64)) else {
+                eprintln!("no adapter here, which is a skip and not a failure");
+                return;
+            };
+
+            let target = renderer.add_target(32, 24);
+
+            // nothing drawn into it yet, and it still answers with a picture
+            // of the right shape rather than nothing at all
+            let blank = renderer.target_picture(target);
+
+            assert_eq!((blank.width, blank.height), (32, 24));
+            assert_eq!(blank.pixels.len(), 32 * 24 * 4);
+
+            // and one with a mesh in it comes back with something on it
+            let mut scene = Scene::new();
+            let cube = renderer.add_mesh(&MeshData::cube());
+
+            scene.push_colored(cube, &Transform::at(Vec3::ZERO), vec4(1.0, 1.0, 1.0, 1.0));
+            scene.push_light(PointLight::new(vec3(0.0, 2.0, 2.0), Vec3::ONE, 4.0, 20.0));
+
+            let mut camera = Camera::new();
+            camera.position = vec3(0.0, 0.0, 2.0);
+            camera.target = Vec3::ZERO;
+
+            renderer.draw_to(target, &camera, &scene, &Geometry::new());
+
+            let drawn = renderer.target_picture(target);
+            let lit = drawn
+                .pixels
+                .chunks_exact(4)
+                .filter(|texel| texel[0] > 40 || texel[1] > 40 || texel[2] > 40)
+                .count();
+
+            // **Against the blank, not against a number out of the air.**
+            // An empty target is what this has to tell a drawn one from.
+            assert_eq!(
+                blank
+                    .pixels
+                    .chunks_exact(4)
+                    .filter(|texel| texel[0] > 40 || texel[1] > 40 || texel[2] > 40)
+                    .count(),
+                0,
+                "the target had something on it before anything was drawn"
+            );
+            assert!(
+                lit > 100,
+                "a target with a lit cube in it came back with {} pixels on",
+                lit
+            );
+        }
+
         /// Spec 0062: a machine with no adapter skips rather than fails.
         #[test]
         fn no_device_is_not_a_failure() {

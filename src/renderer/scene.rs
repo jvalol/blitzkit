@@ -273,6 +273,8 @@ pub struct Scene {
     /// which passed with the change check taken out.
     turned: Turned,
     said: Option<Turned>,
+    /// The worst any cap has turned away since this scene was made.
+    worst: Turned,
     spoke: usize,
 }
 
@@ -302,6 +304,28 @@ struct Turned {
 impl Turned {
     fn any(&self) -> bool {
         *self != Self::default()
+    }
+
+    /// Whether any cap turned away more this time than it ever had.
+    fn past(&self, worst: &Self) -> bool {
+        self.lamps > worst.lamps
+            || self.casting > worst.casting
+            || self.spots > worst.spots
+            || self.outlines > worst.outlines
+            || self.kept > worst.kept
+            || self.mirrors > worst.mirrors
+    }
+
+    /// The worse of the two, cap by cap.
+    fn worse_of(&self, other: &Self) -> Self {
+        Self {
+            lamps: self.lamps.max(other.lamps),
+            casting: self.casting.max(other.casting),
+            spots: self.spots.max(other.spots),
+            outlines: self.outlines.max(other.outlines),
+            kept: self.kept.max(other.kept),
+            mirrors: self.mirrors.max(other.mirrors),
+        }
     }
 }
 
@@ -356,10 +380,22 @@ impl Scene {
     /// news, and it is still remembered, so a fault that comes back says so
     /// again.
     fn say_what_was_turned_away(&mut self) {
-        if Some(self.turned) == self.said || !self.turned.any() {
+        // **Worse than it has ever been, not merely different.** This said
+        // something whenever the count changed, which for a cap you walk
+        // into and out of is every frame: one turn on the spot at
+        // capriccio's way in bought two hundred lines in fourteen seconds
+        // and buried everything else in the log. Jake, 2026-11-09, twice in
+        // one morning, by pasting the log and saying nothing.
+        //
+        // A high-water mark says the same thing in a handful of lines. It
+        // climbs to the worst and goes quiet, and the worst is the number
+        // you wanted anyway.
+        if !self.turned.past(&self.worst) || !self.turned.any() {
             self.said = Some(self.turned);
             return;
         }
+
+        self.worst = self.turned.worse_of(&self.worst);
 
         let Turned {
             lamps,
@@ -613,7 +649,7 @@ impl Scene {
     ///
     /// [`push_light`]: Scene::push_light
     /// [`Camera::behind`]: crate::camera::Camera::behind
-    pub fn mirror(&mut self, target: TextureId, on_plane: Vec3, normal: Vec3) {
+    pub fn mirror(&mut self, target: TextureId, inside: TextureId, on_plane: Vec3, normal: Vec3) {
         if self.mirrors.len() >= MAX_MIRRORS {
             self.turned.mirrors += 1;
             return;
@@ -623,6 +659,7 @@ impl Scene {
             target,
             on_plane,
             normal,
+            inside,
         });
     }
 
@@ -1035,6 +1072,15 @@ pub struct Mirror {
     pub on_plane: Vec3,
     /// Which way the glass faces. Its length does not matter.
     pub normal: Vec3,
+    /// What it wears when it is seen inside another mirror. Spec 0094.
+    ///
+    /// **Two textures because a target is right for one camera.** Spec
+    /// 0092's glass samples by screen position, so the picture in it belongs
+    /// to the pass it was drawn from. On the screen this mirror wants the
+    /// eye reflected in it; inside the mirror facing it, the same panes want
+    /// that mirror's own camera reflected in it. Different cameras, so
+    /// different pictures, and one texture can hold one of them.
+    pub inside: TextureId,
 }
 
 /// A surface wearing a target, sampled in screen space. Spec 0092.
@@ -2148,10 +2194,17 @@ mod tests {
     /// same value either way. It was asserting on something it could not
     /// see, which is the fault this file keeps a lookout for.
     ///
-    /// Two controls, and both fail. Count every push in `push_light` rather
-    /// than only the refused ones, and the first assertion goes. Take
-    /// `Some(self.turned) == self.said` out of the test in
-    /// `say_what_was_turned_away`, and the second does.
+    /// **A high-water mark and not a change.** Saying something whenever the
+    /// count moved meant a line a frame for a cap you walk in and out of:
+    /// one turn on the spot at capriccio's way in bought two hundred lines
+    /// in fourteen seconds. It climbs to the worst now and goes quiet, which
+    /// is the number anybody reading the log was after.
+    ///
+    /// Three controls, and all three fail. Count every push in `push_light`
+    /// rather than only the refused ones, and the first assertion goes. Take
+    /// `self.turned.past(&self.worst)` out of `say_what_was_turned_away` and
+    /// the quiet frames start talking. Leave `self.worst` unraised and the
+    /// new worst says nothing.
     #[test]
     fn a_cap_says_what_it_turned_away_once_a_frame() {
         let mut scene = Scene::new();
@@ -2198,7 +2251,8 @@ mod tests {
 
         assert_eq!(scene.spoke, 1, "the same overflow was said twice");
 
-        // and a frame that is over by a different amount is worth a line
+        // and a frame that is over by less says nothing, which is what
+        // keeps a cap you walk in and out of from writing a line a frame
         for n in 0..(MAX_POINT_LIGHTS + 2) {
             scene.push_light(PointLight::new(
                 Vec3::new(n as f32, 0.0, 0.0),
@@ -2216,7 +2270,23 @@ mod tests {
                 ..Turned::default()
             })
         );
-        assert_eq!(scene.spoke, 2, "a different overflow went unsaid");
+        assert_eq!(
+            scene.spoke, 1,
+            "an overflow smaller than the worst was said"
+        );
+
+        // and one that is worse than it has ever been is worth a line
+        for n in 0..(MAX_POINT_LIGHTS + 12) {
+            scene.push_light(PointLight::new(
+                Vec3::new(n as f32, 0.0, 0.0),
+                Vec3::ONE,
+                1.0,
+                1.0,
+            ));
+        }
+        scene.reset();
+
+        assert_eq!(scene.spoke, 2, "a new worst went unsaid");
 
         // a frame that fits says nothing, and is still remembered, so the
         // fault coming back is news again
@@ -2443,7 +2513,7 @@ mod tests {
         let mut scene = Scene::new();
         let glass = glam::Vec3::new(2.0, 1.5, 0.0);
 
-        scene.mirror(TextureId(7), glass, glam::Vec3::NEG_X);
+        scene.mirror(TextureId(7), TextureId(8), glass, glam::Vec3::NEG_X);
 
         assert_eq!(scene.mirrors().len(), 1);
         assert_eq!(scene.mirrors()[0].target, TextureId(7));
@@ -2465,9 +2535,12 @@ mod tests {
         let mut scene = Scene::new();
 
         for which in 0..5 {
+            let at = glam::Vec3::X * which as f32;
+
             scene.mirror(
                 TextureId(which),
-                glam::Vec3::X * which as f32,
+                TextureId(which + 10),
+                at,
                 glam::Vec3::NEG_X,
             );
         }
