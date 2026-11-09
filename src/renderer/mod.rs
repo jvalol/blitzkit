@@ -6018,4 +6018,152 @@ mod asked {
             without.draws
         );
     }
+
+    /// Spec 0092 and 0093, in the smallest room there is.
+    ///
+    /// **Every diagnosis of capriccio's mirrors came from a room with
+    /// thirteen other things in it**, read off a pane through a reflected
+    /// camera and a screen-space sample. Seven of them were wrong. This is
+    /// two quads and a block in an empty scene, read back as pixels.
+    ///
+    /// The mirror faces the camera across the origin with one lit block
+    /// behind the eye. If the glass shows anything but the clear colour,
+    /// the reflection reached it.
+    #[test]
+    fn a_mirror_in_an_empty_room_shows_something() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(256, 256)) else {
+            return;
+        };
+
+        let cube = renderer.add_mesh(&crate::mesh::MeshData::cube());
+        let quad = renderer.add_mesh(&crate::mesh::MeshData::plane());
+        let target = renderer.add_target(256, 256);
+        let geometry = Geometry::new();
+        let text = TextRenderer::new();
+
+        // the eye at the origin looking down -z, the glass four along, and a
+        // block behind the eye for the glass to have something to show
+        let mut eye = Camera::new();
+        eye.position = glam::Vec3::ZERO;
+        eye.target = -glam::Vec3::Z;
+        renderer.set_camera(eye);
+
+        let glass_at = glam::Vec3::new(0.0, 0.0, -4.0);
+        let facing = glam::Vec3::Z;
+
+        let mut scene = Scene::new();
+        scene.push_material(
+            cube,
+            &crate::mesh::Transform::at(glam::Vec3::new(0.0, 0.0, 3.0))
+                .with_scale(glam::Vec3::splat(1.5)),
+            glam::vec4(1.0, 1.0, 1.0, 1.0),
+            64.0,
+        );
+        scene.mirror(target, glass_at, facing);
+        scene.glass(
+            quad,
+            target,
+            &crate::mesh::Transform::at(glass_at)
+                .with_rotation(glam::Quat::from_rotation_x(std::f32::consts::FRAC_PI_2))
+                .with_scale(glam::Vec3::new(3.0, 1.0, 3.0)),
+            glam::vec4(1.0, 1.0, 1.0, 1.0),
+        );
+
+        let shot = renderer.picture(&scene, &geometry, &text);
+
+        // the middle of the picture, which is the middle of the glass
+        let at = ((shot.height / 2) * shot.width + shot.width / 2) as usize * 4;
+        let (r, g, b) = (shot.pixels[at], shot.pixels[at + 1], shot.pixels[at + 2]);
+
+        assert!(
+            r > 8 || g > 8 || b > 8,
+            "the glass in an empty room came back {},{},{}, which is the \
+             clear colour: the reflection is not reaching it at all",
+            r,
+            g,
+            b
+        );
+    }
+
+    /// Spec 0091's cap of two, in the same empty room: two mirrors facing
+    /// each other, which is what a hall of mirrors is and what capriccio's
+    /// corridor does not do.
+    ///
+    /// The one-mirror version above passes, so whatever is wrong there is
+    /// either the second mirror or the room. This is the second mirror,
+    /// alone.
+    #[test]
+    fn two_mirrors_facing_each_other_both_show_something() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(256, 256)) else {
+            return;
+        };
+
+        let cube = renderer.add_mesh(&crate::mesh::MeshData::cube());
+        let quad = renderer.add_mesh(&crate::mesh::MeshData::plane());
+        let near = renderer.add_target(256, 256);
+        let far = renderer.add_target(256, 256);
+        let geometry = Geometry::new();
+        let text = TextRenderer::new();
+
+        // the eye between them, looking at the far one
+        let mut eye = Camera::new();
+        eye.position = glam::Vec3::ZERO;
+        eye.target = -glam::Vec3::Z;
+        renderer.set_camera(eye);
+
+        let mut scene = Scene::new();
+        scene.push_material(
+            cube,
+            &crate::mesh::Transform::at(glam::Vec3::new(1.4, 0.0, 0.0))
+                .with_scale(glam::Vec3::splat(0.8)),
+            glam::vec4(1.0, 1.0, 1.0, 1.0),
+            64.0,
+        );
+
+        for (target, z, facing) in [
+            (far, -4.0f32, glam::Vec3::Z),
+            (near, 4.0f32, -glam::Vec3::Z),
+        ] {
+            let at = glam::Vec3::new(0.0, 0.0, z);
+            scene.mirror(target, at, facing);
+            scene.glass(
+                quad,
+                target,
+                &crate::mesh::Transform::at(at)
+                    .with_rotation(glam::Quat::from_rotation_x(
+                        std::f32::consts::FRAC_PI_2 * facing.z.signum(),
+                    ))
+                    .with_scale(glam::Vec3::new(3.0, 1.0, 3.0)),
+                glam::vec4(1.0, 1.0, 1.0, 1.0),
+            );
+        }
+
+        // **The offscreen device runs at eight samples with a multisample
+        // colour, the same as a window**, so this reproduces the window's
+        // conditions and not a simpler path. Checked, because every
+        // conclusion below would need re-reading if it did not.
+        //
+        // **The first mirror filled comes back empty and the second
+        // draws.** Measured by looking at each in turn, a third of the way
+        // across so no recursion is needed to see the room:
+        //
+        //     far  (filled first)   0,0,0
+        //     near (filled second)  189,189,189
+        //
+        // Filling twice changes nothing, so it is not that the first has
+        // nothing to reflect yet. Two mirrors not facing each other work.
+        let shot = renderer.picture(&scene, &geometry, &text);
+        let at = ((shot.height / 2) * shot.width + shot.width / 3) as usize * 4;
+        let (r, g, b) = (shot.pixels[at], shot.pixels[at + 1], shot.pixels[at + 2]);
+
+        assert!(
+            r > 8 || g > 8 || b > 8,
+            "the first mirror filled came back {},{},{} a third of the way \
+             across, where the room is plainly in view and no bounce is \
+             needed. The second mirror in the same frame draws",
+            r,
+            g,
+            b
+        );
+    }
 }
