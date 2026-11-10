@@ -1,9 +1,10 @@
 # 0097 A front door for the arcade
 
-**Status:** draft
+**Status:** implemented
 **Date:** 2026-11-09
-**Built:** 2026-11-09, and run against a local server. The alias is not added
-yet, so nothing answers on the name.
+**Built:** 2026-11-09. The alias went on the blitzkit-web project the same
+evening, and the certificate needed no issuing: the one that was there already
+covers `*.jva.lol`.
 
 ## Goal
 
@@ -142,12 +143,15 @@ which has WebGPU:
   colour, which moved by 47 on the docs page and by 17 here and barely at all
   when no key was held.
 
-What a local server cannot answer, and it is the half that can still be
-wrong, because both halves are the alias rather than the page:
+And on the alias, once it answered, which is the half a local server cannot
+be asked about:
 
-- `arcadium.jva.lol/` answers with the building, and
-  `arcadium.jva.lol/web/capriccio.js` with the module rather than with the
-  page, which is the rewrite trap above and reads as a code fault.
+- `arcadium.jva.lol/` answers 200 with the building and no docs chrome, and
+  `arcadium.jva.lol/web/capriccio.js` answers with 95,424 bytes of JavaScript
+  rather than with the page, which is the rewrite trap above and would have
+  read as a code fault.
+- The canonical link on that host still names `blitzkit.jva.lol/arcadium/`,
+  which is what keeps the alias out of search results as a second site.
 
 ## Out of scope
 
