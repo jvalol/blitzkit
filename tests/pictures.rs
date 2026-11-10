@@ -627,6 +627,57 @@ mod pictures {
             );
         }
 
+        /// Spec 0012: the shader honours a specular strength, and a strength
+        /// of one is what it did before the term existed.
+        ///
+        /// **Both halves matter and only the second is free.** The Rust copy
+        /// of this shading is held by `lighting::tests`, and on the morning
+        /// of 2026-11-09 the shader grew a rule those three functions did not
+        /// and nothing noticed for a day. So the term is asked of the real
+        /// pipeline here: the same gold ball at nought keeps its colour and
+        /// loses its highlight, and at one it is the reference to the pixel.
+        #[test]
+        fn the_shader_honours_a_specular_strength() {
+            let Some(dulled) = apart_from_the_shot("a-sphere-has-a-highlight", |scene, meshes| {
+                scene.push_surface(
+                    meshes.sphere,
+                    blitzkit::renderer::scene::TextureId::WHITE,
+                    &Transform::at(vec3(0.0, 1.0, 0.0)).with_scale(Vec3::splat(2.0)),
+                    vec4(0.9, 0.7, 0.2, 1.0),
+                    96.0,
+                    0.0,
+                );
+            }) else {
+                return;
+            };
+
+            assert!(
+                dulled > SHARE,
+                "the shader draws the same ball with the highlight turned off, so it is not \
+                 reading the strength at all"
+            );
+
+            let Some(same) = apart_from_the_shot("a-sphere-has-a-highlight", |scene, meshes| {
+                scene.push_surface(
+                    meshes.sphere,
+                    blitzkit::renderer::scene::TextureId::WHITE,
+                    &Transform::at(vec3(0.0, 1.0, 0.0)).with_scale(Vec3::splat(2.0)),
+                    vec4(0.9, 0.7, 0.2, 1.0),
+                    96.0,
+                    1.0,
+                );
+            }) else {
+                return;
+            };
+
+            assert!(
+                same <= SHARE,
+                "a strength of one is not what push_material already drew, so every game's \
+                 pictures moved when this arrived: {} of them",
+                same
+            );
+        }
+
         /// Spec 0062: drawing the same thing twice gives the same pixels,
         /// which is what makes a reference worth keeping at all.
         #[test]

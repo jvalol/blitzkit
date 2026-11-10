@@ -324,6 +324,7 @@ struct VertexOutput {
     @location(2) uv: vec2<f32>,
     @location(3) world_position: vec3<f32>,
     @location(4) shininess: f32,
+    @location(6) specular: f32,
     /// The same clip position again, as a varying, for spec 0092.
     ///
     /// `@builtin(position)` arrives at a fragment already divided through and
@@ -346,6 +347,7 @@ fn vs_main(
     @location(6) model_3: vec3<f32>,
     @location(7) color: vec4<f32>,
     @location(8) shininess: f32,
+    @location(9) specular: f32,
 ) -> VertexOutput {
     // **The eye comes off here and not on the CPU.** An instance is written
     // where it stands, so a kept run can be written once and drawn for as
@@ -363,6 +365,7 @@ fn vs_main(
     out.uv = uv;
     out.world_position = world.xyz;
     out.shininess = shininess;
+    out.specular = specular;
     out.clip = out.clip_position;
     return out;
 }
@@ -419,6 +422,7 @@ fn spot_light(
     to_viewer: vec3<f32>,
     base: vec3<f32>,
     shininess: f32,
+    specular_strength: f32,
 ) -> vec3<f32> {
     let range = spot.position_range.w;
     if range <= 0.0 {
@@ -470,7 +474,9 @@ fn spot_light(
     // full strength on anything curved is a bead of plastic. Cloth and skin
     // have no spot.
     let specular = select(
-        light * pow(max(dot(normal, half_vector), 0.0), max(shininess, 1.0)),
+        light
+            * specular_strength
+            * pow(max(dot(normal, half_vector), 0.0), max(shininess, 1.0)),
         vec3<f32>(0.0),
         shininess <= 0.0,
     );
@@ -644,6 +650,7 @@ fn point_light(
     to_viewer: vec3<f32>,
     base: vec3<f32>,
     shininess: f32,
+    specular_strength: f32,
 ) -> vec3<f32> {
     let range = lamp.position_range.w;
     if range <= 0.0 {
@@ -675,7 +682,9 @@ fn point_light(
     // full strength on anything curved is a bead of plastic. Cloth and skin
     // have no spot.
     let specular = select(
-        light * pow(max(dot(normal, half_vector), 0.0), max(shininess, 1.0)),
+        light
+            * specular_strength
+            * pow(max(dot(normal, half_vector), 0.0), max(shininess, 1.0)),
         vec3<f32>(0.0),
         shininess <= 0.0,
     );
@@ -769,7 +778,9 @@ fn lit_surface(in: VertexOutput) -> Lit {
     var specular = vec3<f32>(0.0);
     if lambert > 0.0 && in.shininess > 0.0 {
         let half_vector = normalize(to_light + to_viewer);
-        specular = light * pow(max(dot(normal, half_vector), 0.0), max(in.shininess, 1.0));
+        specular = light
+            * in.specular
+            * pow(max(dot(normal, half_vector), 0.0), max(in.shininess, 1.0));
     }
 
     // shadow dims what the light contributes, never the ambient fill. The map
@@ -848,6 +859,7 @@ fn lit_surface(in: VertexOutput) -> Lit {
             to_viewer,
             base.rgb,
             in.shininess,
+            in.specular,
         );
     }
 
@@ -862,6 +874,7 @@ fn lit_surface(in: VertexOutput) -> Lit {
             to_viewer,
             base.rgb,
             in.shininess,
+            in.specular,
         );
     }
 

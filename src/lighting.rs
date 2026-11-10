@@ -37,7 +37,14 @@ impl Light {
     ///
     /// `normal` and `to_viewer` are unit vectors in world space, `base` is the
     /// surface color, and `shininess` is how tight the highlight is.
-    pub fn shade(&self, normal: Vec3, to_viewer: Vec3, base: Vec3, shininess: f32) -> Vec3 {
+    pub fn shade(
+        &self,
+        normal: Vec3,
+        to_viewer: Vec3,
+        base: Vec3,
+        shininess: f32,
+        specular_strength: f32,
+    ) -> Vec3 {
         let to_light = -self.direction.normalize_or_zero();
         let normal = normal.normalize_or_zero();
         let lambert = normal.dot(to_light).max(0.0);
@@ -49,7 +56,7 @@ impl Light {
         // all, the same as `mesh.wgsl`. Spec 0012.
         let specular = if lambert > 0.0 && shininess > 0.0 {
             let half = (to_light + to_viewer.normalize_or_zero()).normalize_or_zero();
-            light * normal.dot(half).max(0.0).powf(shininess.max(1.0))
+            light * specular_strength * normal.dot(half).max(0.0).powf(shininess.max(1.0))
         } else {
             Vec3::ZERO
         };
@@ -184,6 +191,7 @@ impl PointLight {
         to_viewer: Vec3,
         base: Vec3,
         shininess: f32,
+        specular_strength: f32,
     ) -> Vec3 {
         let offset = self.position - at;
         let distance = offset.length();
@@ -204,7 +212,7 @@ impl PointLight {
         // A shininess of nought or less is a surface with no highlight at all,
         // the same as `mesh.wgsl`. Spec 0012.
         let specular = if shininess > 0.0 {
-            light * normal.dot(half).max(0.0).powf(shininess.max(1.0))
+            light * specular_strength * normal.dot(half).max(0.0).powf(shininess.max(1.0))
         } else {
             Vec3::ZERO
         };
@@ -340,6 +348,7 @@ impl SpotLight {
         to_viewer: Vec3,
         base: Vec3,
         shininess: f32,
+        specular_strength: f32,
     ) -> Vec3 {
         let offset = self.position - at;
         let distance = offset.length();
@@ -360,7 +369,7 @@ impl SpotLight {
         // A shininess of nought or less is a surface with no highlight at all,
         // the same as `mesh.wgsl`. Spec 0012.
         let specular = if shininess > 0.0 {
-            light * normal.dot(half).max(0.0).powf(shininess.max(1.0))
+            light * specular_strength * normal.dot(half).max(0.0).powf(shininess.max(1.0))
         } else {
             Vec3::ZERO
         };
@@ -467,10 +476,10 @@ mod tests {
 
     #[test]
     fn a_spot_does_not_light_the_back_of_a_surface() {
-        let away = spot().shade(Vec3::ZERO, -Vec3::Y, -Vec3::Y, WHITE, 32.0);
+        let away = spot().shade(Vec3::ZERO, -Vec3::Y, -Vec3::Y, WHITE, 32.0, 1.0);
         assert_eq!(away, Vec3::ZERO);
 
-        let toward = spot().shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0);
+        let toward = spot().shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0, 1.0);
         assert!(toward.length() > 0.0, "the floor under it was dark");
     }
 
@@ -478,7 +487,7 @@ mod tests {
     fn a_spot_carries_its_color() {
         let mut green = spot();
         green.color = Vec3::new(0.0, 1.0, 0.0);
-        let lit = green.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0);
+        let lit = green.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0, 1.0);
 
         assert!(lit.y > 0.0);
         assert!(
@@ -495,7 +504,7 @@ mod tests {
 
         assert_eq!(broken.cone(-Vec3::Y), 0.0);
         assert_eq!(
-            broken.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0),
+            broken.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0, 1.0),
             Vec3::ZERO
         );
     }
@@ -545,7 +554,7 @@ mod tests {
 
         assert_eq!(dead.falloff(0.0), 0.0);
         assert_eq!(
-            dead.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0),
+            dead.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0, 1.0),
             Vec3::ZERO
         );
     }
@@ -553,18 +562,18 @@ mod tests {
     #[test]
     fn a_point_light_does_not_light_the_back_of_a_surface() {
         // a floor at the origin facing down, with the lamp above it
-        let away = lamp().shade(Vec3::ZERO, -Vec3::Y, -Vec3::Y, WHITE, 32.0);
+        let away = lamp().shade(Vec3::ZERO, -Vec3::Y, -Vec3::Y, WHITE, 32.0, 1.0);
 
         assert_eq!(away, Vec3::ZERO);
         // and the same surface turned over is lit
-        let toward = lamp().shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0);
+        let toward = lamp().shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0, 1.0);
         assert!(toward.length() > 0.0);
     }
 
     #[test]
     fn a_point_light_carries_its_color() {
         let red = PointLight::new(Vec3::Y, Vec3::new(1.0, 0.0, 0.0), 1.0, 4.0);
-        let lit = red.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0);
+        let lit = red.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0, 1.0);
 
         assert!(lit.x > 0.0);
         assert!(lit.y.abs() < 1e-6, "red light turned up green");
@@ -572,7 +581,12 @@ mod tests {
 
         // and twice the intensity is brighter
         let brighter = PointLight::new(Vec3::Y, Vec3::new(1.0, 0.0, 0.0), 2.0, 4.0);
-        assert!(brighter.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0).x > lit.x);
+        assert!(
+            brighter
+                .shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0, 1.0)
+                .x
+                > lit.x
+        );
     }
 
     #[test]
@@ -580,8 +594,8 @@ mod tests {
         let red = PointLight::new(Vec3::Y, Vec3::new(1.0, 0.0, 0.0), 1.0, 4.0);
         let blue = PointLight::new(Vec3::Y, Vec3::new(0.0, 0.0, 1.0), 1.0, 4.0);
 
-        let both = red.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0)
-            + blue.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0);
+        let both = red.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0, 1.0)
+            + blue.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0, 1.0);
 
         assert!(both.x > 0.0 && both.z > 0.0, "one of them won outright");
     }
@@ -593,9 +607,9 @@ mod tests {
         let sun = Light::new();
         let none: &[PointLight] = &[];
 
-        let from_sun = sun.shade(Vec3::Y, Vec3::Y, WHITE, 32.0);
+        let from_sun = sun.shade(Vec3::Y, Vec3::Y, WHITE, 32.0, 1.0);
         let from_lamps = none.iter().fold(Vec3::ZERO, |total, lamp| {
-            total + lamp.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0)
+            total + lamp.shade(Vec3::ZERO, Vec3::Y, Vec3::Y, WHITE, 32.0, 1.0)
         });
 
         assert_eq!(from_lamps, Vec3::ZERO);
@@ -612,8 +626,8 @@ mod tests {
         let to_light = -light.direction;
         let away = light.direction;
 
-        let lit = light.shade(to_light, to_light, white(), 32.0);
-        let dark = light.shade(away, to_light, white(), 32.0);
+        let lit = light.shade(to_light, to_light, white(), 32.0, 1.0);
+        let dark = light.shade(away, to_light, white(), 32.0, 1.0);
 
         assert!(lit.x > dark.x, "lit {:?} dark {:?}", lit, dark);
     }
@@ -622,7 +636,7 @@ mod tests {
     fn the_dark_side_is_ambient() {
         let light = Light::new();
         // facing directly away, so no diffuse and no highlight
-        let shaded = light.shade(light.direction, -light.direction, white(), 32.0);
+        let shaded = light.shade(light.direction, -light.direction, white(), 32.0, 1.0);
 
         assert!((shaded - light.ambient).length() < 1e-5, "{:?}", shaded);
     }
@@ -632,14 +646,14 @@ mod tests {
         let mut light = Light::new();
         let normal = -light.direction;
 
-        let dim = light.shade(normal, normal, white(), 32.0);
+        let dim = light.shade(normal, normal, white(), 32.0, 1.0);
         light.intensity = 2.0;
-        let bright = light.shade(normal, normal, white(), 32.0);
+        let bright = light.shade(normal, normal, white(), 32.0, 1.0);
 
         assert!(bright.x > dim.x);
         // ambient is not scaled by intensity, only the light itself
         light.intensity = 0.0;
-        let unlit = light.shade(normal, normal, white(), 32.0);
+        let unlit = light.shade(normal, normal, white(), 32.0, 1.0);
         assert!((unlit - light.ambient).length() < 1e-5, "{:?}", unlit);
     }
 
@@ -658,8 +672,8 @@ mod tests {
         let light = Light::new();
         let normal = -light.direction;
 
-        let broad = light.shade(normal, Vec3::Y, white(), 4.0);
-        let tight = light.shade(normal, Vec3::Y, white(), 128.0);
+        let broad = light.shade(normal, Vec3::Y, white(), 4.0, 1.0);
+        let tight = light.shade(normal, Vec3::Y, white(), 128.0, 1.0);
 
         // same diffuse, so any difference is the highlight
         assert!(broad.x >= tight.x);
@@ -680,19 +694,66 @@ mod tests {
         let to_viewer = Vec3::Y;
 
         let sun = Light::new();
-        let lit = sun.shade(-sun.direction, to_viewer, white(), 1.0);
-        let matte = sun.shade(-sun.direction, to_viewer, white(), 0.0);
+        let lit = sun.shade(-sun.direction, to_viewer, white(), 1.0, 1.0);
+        let matte = sun.shade(-sun.direction, to_viewer, white(), 0.0, 1.0);
         assert!(matte.x < lit.x, "the sun: {} against {}", matte.x, lit.x);
 
         let lamp = lamp();
-        let lit = lamp.shade(Vec3::ZERO, normal, to_viewer, white(), 1.0);
-        let matte = lamp.shade(Vec3::ZERO, normal, to_viewer, white(), 0.0);
+        let lit = lamp.shade(Vec3::ZERO, normal, to_viewer, white(), 1.0, 1.0);
+        let matte = lamp.shade(Vec3::ZERO, normal, to_viewer, white(), 0.0, 1.0);
         assert!(matte.x < lit.x, "a lamp: {} against {}", matte.x, lit.x);
 
         let spot = spot();
-        let lit = spot.shade(Vec3::ZERO, normal, to_viewer, white(), 1.0);
-        let matte = spot.shade(Vec3::ZERO, normal, to_viewer, white(), 0.0);
+        let lit = spot.shade(Vec3::ZERO, normal, to_viewer, white(), 1.0, 1.0);
+        let matte = spot.shade(Vec3::ZERO, normal, to_viewer, white(), 0.0, 1.0);
         assert!(matte.x < lit.x, "a spot: {} against {}", matte.x, lit.x);
+    }
+
+    /// Strength scales the highlight and leaves everything else alone, for
+    /// the sun, a lamp and a spot alike. Spec 0012.
+    ///
+    /// **A strength of one is what this engine did before it had the term**,
+    /// which is why no game's picture moved when it arrived. Half is half a
+    /// highlight on the same surface, and nought is the same as no highlight
+    /// at all, reached the other way.
+    #[test]
+    fn strength_scales_the_highlight() {
+        let normal = Vec3::Y;
+        let to_viewer = Vec3::Y;
+
+        let sun = Light::new();
+        let full = sun.shade(-sun.direction, to_viewer, white(), 32.0, 1.0);
+        let half = sun.shade(-sun.direction, to_viewer, white(), 32.0, 0.5);
+        let none = sun.shade(-sun.direction, to_viewer, white(), 32.0, 0.0);
+        let matte = sun.shade(-sun.direction, to_viewer, white(), 0.0, 1.0);
+
+        assert!(none.x < half.x && half.x < full.x, "the sun does not scale");
+        assert!(
+            (none.x - matte.x).abs() < 1e-6,
+            "no strength is not the same surface as no highlight: {} against {}",
+            none.x,
+            matte.x
+        );
+        // the highlight is what moved and nothing else did
+        assert!(
+            (full.x - none.x - (full.x - half.x) * 2.0).abs() < 1e-5,
+            "the sun's highlight does not scale linearly"
+        );
+
+        for (who, full, half) in [
+            (
+                "a lamp",
+                lamp().shade(Vec3::ZERO, normal, to_viewer, white(), 32.0, 1.0),
+                lamp().shade(Vec3::ZERO, normal, to_viewer, white(), 32.0, 0.5),
+            ),
+            (
+                "a spot",
+                spot().shade(Vec3::ZERO, normal, to_viewer, white(), 32.0, 1.0),
+                spot().shade(Vec3::ZERO, normal, to_viewer, white(), 32.0, 0.5),
+            ),
+        ] {
+            assert!(half.x < full.x, "{} does not scale", who);
+        }
     }
 
     /// The caps, read out of the shaders rather than trusted to a comment.
@@ -744,8 +805,8 @@ mod tests {
         let to_viewer = Vec3::new(0.0, 1.0, 1.0).normalize();
 
         assert_eq!(
-            plain.shade(at, normal, to_viewer, Vec3::ONE, 32.0),
-            asking.shade(at, normal, to_viewer, Vec3::ONE, 32.0),
+            plain.shade(at, normal, to_viewer, Vec3::ONE, 32.0, 1.0),
+            asking.shade(at, normal, to_viewer, Vec3::ONE, 32.0, 1.0),
             "asking for a shadow changed the light itself"
         );
         assert_eq!(plain.falloff(4.0), asking.falloff(4.0));

@@ -39,6 +39,16 @@ pub struct Instance {
     pub color: [f32; 4],
     /// How tight the specular highlight is, per spec 0012.
     pub shininess: f32,
+    /// And how strong it is, nought to one, per spec 0012.
+    ///
+    /// **Tightness alone was the whole of a surface here, and it is not
+    /// enough.** The highlight is added on top of the colour at the lamp's
+    /// full intensity, so a near black floor still takes a full white spot,
+    /// and the only way to quieten one was to make it so small it missed the
+    /// pixel. capriccio ran `aim::VOID` to a quarter of a million doing that.
+    /// This is the other knob: one multiplies the lobe's width, this one its
+    /// height.
+    pub specular: f32,
 }
 
 unsafe impl bytemuck::Pod for Instance {}
@@ -55,12 +65,20 @@ impl Instance {
             5 => Float32x3,
             6 => Float32x3,
             7 => Float32x4,
-            8 => Float32
+            8 => Float32,
+            9 => Float32
         ],
     };
 
     /// A surface that is neither mirror nor chalk.
     pub const DEFAULT_SHININESS: f32 = 32.0;
+
+    /// A highlight at the lamp's full strength, which is what this engine did
+    /// before it could be told otherwise.
+    ///
+    /// Every push but `push_surface` hands this out, so nothing drawn by any
+    /// game moved when the term arrived.
+    pub const DEFAULT_SPECULAR: f32 = 1.0;
 
     /// Whether this one is drawn see-through. Any alpha short of full is, so a
     /// game asks for translucency by dimming the alpha of its color and nothing
@@ -134,6 +152,7 @@ impl Instance {
             ],
             color: color.to_array(),
             shininess,
+            specular: Self::DEFAULT_SPECULAR,
         }
     }
 
@@ -597,17 +616,44 @@ impl Scene {
         color: Vec4,
         shininess: f32,
     ) {
-        // whichever set the bracket has open, per spec 0091. Every other
-        // push funnels through here, so there is one place that decides.
+        self.push_surface(
+            mesh,
+            texture,
+            transform,
+            color,
+            shininess,
+            Instance::DEFAULT_SPECULAR,
+        );
+    }
+
+    /// The same, saying how strong the highlight is as well as how tight.
+    /// Spec 0012.
+    ///
+    /// `specular` is nought to one and multiplies the lobe. Nought is the
+    /// same surface a shininess of nought gives, and one is what every other
+    /// push hands out, which is why none of them moved when this arrived.
+    ///
+    /// **This is the one that knows the bracket.** Every other push funnels
+    /// through here, so there is one place that decides, per spec 0091.
+    pub fn push_surface(
+        &mut self,
+        mesh: MeshId,
+        texture: TextureId,
+        transform: &Transform,
+        color: Vec4,
+        shininess: f32,
+        specular: f32,
+    ) {
         let into = if self.into_reflections {
             &mut self.reflected
         } else {
             &mut self.instances
         };
 
-        into.entry((mesh, texture))
-            .or_default()
-            .push(Instance::new(transform, color, shininess));
+        let mut instance = Instance::new(transform, color, shininess);
+        instance.specular = specular;
+
+        into.entry((mesh, texture)).or_default().push(instance);
     }
 
     /// Everything pushed from here until [`and_everywhere`] goes in
@@ -2114,19 +2160,27 @@ mod tests {
     /// It was 120 bytes: a whole 4x4 matrix with a row of nought, nought,
     /// nought, one in it, and a normal matrix the model matrix already
     /// contained. Both are gone, which is a frame of a million instances
-    /// carrying sixty eight megabytes rather than a hundred and twenty.
+    /// carrying seventy two megabytes rather than a hundred and twenty.
+    ///
+    /// **72 and not 68.** Spec 0012's specular strength is a fifth float and
+    /// there is no spare slot: the four columns, the colour and the
+    /// shininess pack exactly, and this struct is four byte aligned, so a
+    /// byte would cost as much as a float. A million instances carry four
+    /// megabytes more than they did.
     #[test]
     fn an_instance_is_small() {
-        // four tightly packed columns, a color, a shininess
-        assert_eq!(std::mem::size_of::<Instance>(), 48 + 16 + 4);
-        assert!(std::mem::size_of::<Instance>() <= 68);
+        // four tightly packed columns, a color, a shininess, a strength
+        assert_eq!(std::mem::size_of::<Instance>(), 48 + 16 + 4 + 4);
+        assert!(std::mem::size_of::<Instance>() <= 72);
         assert_eq!(std::mem::offset_of!(Instance, color), 48);
         assert_eq!(std::mem::offset_of!(Instance, shininess), 64);
+        assert_eq!(std::mem::offset_of!(Instance, specular), 68);
 
         let attributes = Instance::DESC.attributes;
         assert_eq!(attributes[3].offset, 36);
         assert_eq!(attributes[4].offset, 48);
         assert_eq!(attributes[5].offset, 64);
+        assert_eq!(attributes[6].offset, 68);
         assert_eq!(Instance::DESC.array_stride, Instance::SIZE);
     }
 
