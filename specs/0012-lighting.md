@@ -138,10 +138,8 @@ is relying on it without anyone having said so.
 
 That also says which rooms were safe. capriccio's mostly did not move,
 because they are lit by point lamps and a lamp's falloff varies with
-distance and gives a plane its gradient honestly. The cellar's baize is the
-exception that proves it: `cellar::LAMP_RANGE` is 6.0 over a 9 by 10 room, so
-there is almost no falloff across the table, and the cloth collapsed like a
-sunlit floor. `aim::SHEEN` papers over that one.
+distance and gives a plane its gradient honestly. The cellar's baize looked
+like the exception, and the section below measured it and found it is not.
 
 **So 32 stays**, and the earlier reading of it, that it stands in for a
 light, was too weak. It is doing the lighting's whole job on anything flat.
@@ -217,3 +215,49 @@ there was no other way to make a highlight quiet.
 - Strength scales the highlight, for the sun, a lamp and a spot. — `lighting::tests::strength_scales_the_highlight`
 - The shader honours it, and a strength of one is what it drew before. — `pictures::tests::the_shader_honours_a_specular_strength`
 - An instance is still small, and says what the fifth float cost. — `renderer::scene::tests::an_instance_is_small`
+
+## 2026-11-10: the cellar was not an exception, and I did not check
+
+**Jake: do the falloff work.** The section above named two things that light
+their rooms evenly and leave a highlight to suggest a pool, the cellar's
+pendant and lantern's candle. One of them was wrong and it was wrong because
+it was never measured.
+
+**The cellar's pendant already pools.** Asked of `PointLight::shade` at five
+points along the cloth, with the shininess at nought so the answer is
+diffuse and nothing else: 0.2302 at the middle and 0.0997 at either end, a
+gradient of 2.3. The rendered pixels agree, 128 to 147 to 125 of green
+across the baize. Drawing the cloth matte against drawing it at 32 moves it
+by less than one greyscale unit.
+
+So `aim::SHEEN` was measuring nothing on the baize. Its whole 0.8% is two
+bright patches on the cushion jaws either side of a pocket, where the
+geometry turns and a lamp directly overhead can finally reach the half
+vector. It is deleted, and the cloth and the cushions are matte, which is
+what cloth is.
+
+**The fire was wrong too.** It contributes exactly nought to the table,
+because it sits below the table top and a surface facing up takes nothing
+from a light beneath it. It lights the room's walls, not its tables.
+
+**lantern's claim holds.** At 32 the wall behind the candle reads 206 and
+224 where the pool is, and 160 and 163 at nought: its variation across that
+wall collapses from 1.55 to 1.16. The pool really is the highlight there.
+
+But that is not a falloff bug with a fix in it. `lantern::LAMP_RANGE` is 9.0
+and that game's own doc calls it the number that decides whether this is a
+game, far enough and you never put one down, short enough and you walk in a
+bubble. Over a room two metres across, `(1 - d/range)²` varies about 1.33,
+which is most of why the wall is flat without a highlight. The ways out are
+shortening a deliberate gameplay constant in another repo, or changing this
+engine's falloff curve for all sixteen games, and neither is a tidy-up.
+
+**What this corrects about the section above.** The reading there, that a
+wide highlight is indistinguishable from the pool a point source ought to
+cast, is right and lantern is the case for it. The cellar was offered as a
+second case and is not one: it was an eye reading a picture whose
+surroundings had changed, which is the same mistake that was caught once
+that evening and then made again in the same room. The claim that got
+written down, that `LAMP_RANGE` 6.0 over a 9 by 10 room leaves almost no
+falloff across the table, is simply false. Two ratios would have said so and
+neither was taken.
