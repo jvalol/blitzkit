@@ -136,6 +136,41 @@ are byte-identical.
 **What it costs.** `stamp` still cannot become a real check, for these two.
 A clip that was refilmed and a clip that changed look the same in a diff.
 
+## 2026-11-09: two things ruled out, and the hunt narrowed
+
+Asked again because the arcade's ceiling changed and the clips had to be
+refilmed anyway. Nothing here fixes it; what it does is take two suspects off
+the list and say how big the thing actually is.
+
+**It is not the keys, and not the mesh built part way through.** menger builds
+a new depth the first time one is asked for, and its clip presses up and down,
+which made the mid-run `add_mesh` the obvious suspect. Three films of menger
+with the key table emptied gave three different streams. It happens in the
+quiet frames.
+
+**It is not the encoder.** The same raw frames encoded twice, through the
+command this script uses, give the same bytes. And the encoder is not
+amplifying a small render difference either: one pixel of one frame moved by
+14 and re-encoded comes out as the same picture to the pixel, so x264 swallows
+a difference that size whole rather than rippling it.
+
+**So it is the render, and it is intermittent rather than steady.** Two films
+of menger at the clip's own seven seconds were byte-identical across all 420
+frames. A different pair, at two seconds, differed in one frame by one pixel.
+A clip filmed today against the one committed this morning differs in 46 of
+its 212 frames past the share `picture::how_far_apart` calls a difference.
+Three measurements of the same thing, three different sizes.
+
+**And `load` is not a readout of digits.** The guess was that what moves is the
+three numbers it draws. Its fresh clip against the committed one differs in all
+452 frames, worst 5.31% of one. Whatever that is, it is most of the picture and
+not a line of text.
+
+**A short sample does not characterise a clip**, which is this spec's own
+mistake made again: a two second pair read as one pixel and was written up as
+if it said something about the seven second clip. It did not. The numbers above
+are each stated with the length they were taken at for that reason.
+
 ## A run with no clock cannot say what a frame took
 
 `load` puts up what a frame cost in milliseconds, and in a film those three

@@ -125,9 +125,11 @@ compiler is free to emit different arithmetic for it. Refilming the examples
 afterwards, `cubes` came out different from the clip committed against the old
 cap, and `cubes` pushes two lights.
 
-It is deterministic and it is small: two runs of `cubes` at the new cap gave
-the same bytes, and the engine's own picture tests, which forgive eight per
-channel, did not move at all. The clips are compared byte for byte and did.
+It is deterministic and it is not small. Two runs of `cubes` at the new cap
+gave the same bytes, so this is the cap and not noise, and `./same-picture`
+puts 88 of its 302 frames past the share the picture tests call a difference,
+the worst at 0.72%. The engine's own picture tests did not move, which says
+what they cover rather than that the change is slight.
 
 So the cost of this number is not only time. Every clip and every still in the
 project is derived from a shader this constant is compiled into, and raising it
