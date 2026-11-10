@@ -100,40 +100,66 @@ want it.
 
 - A shininess of nought is no highlight, in all three lights. — `lighting::tests::nought_shininess_is_no_highlight_anywhere`
 
-## 2026-11-09: what 32 is actually doing
+## 2026-11-09: on a flat surface, 32 is the only shading there is
 
-**Jake: measure lantern and poolhall.** capriccio had just stopped taking
-this default on 196 surfaces and the question was whether the other games
-should too.
+**Jake: measure lantern and poolhall.** Then: measure the other six.
+capriccio had just stopped taking this default on 196 surfaces and the
+question was whether the other games should too.
 
-Set to nought, one picture moved in each.
+Set to nought, eight games, six move:
 
-**lantern, `left-behind`, 23.0% of its pixels, and nought is wrong.** The
-warm pool the candle throws on the wall behind it is the specular highlight.
-At nought the wall goes flat and evenly lit and the candle stops lighting the
-room, which in a game about carrying a candle is the picture. lantern has ten
-surfaces and not one of them states a shininess, so it has run on this
-default from the start.
+| game | picture | moved | surfaces on the default |
+| --- | --- | --- | --- |
+| cascada | a-run-going-over | 27.7% | 1 |
+| lantern | left-behind | 23.0% | 10 |
+| cairn | drawn-out | 16.8% | 1 |
+| carom | after-the-shot | 16.4% | 5 |
+| securitysweep | the-yard | 6.5% | 5 |
+| poolhall | after-the-break | 3.4% | 7 |
+| marble | — | nothing | 1 |
+| slider | — | nothing | 1 |
 
-**poolhall, `after-the-break`, 3.4%, and it is a toss-up.** The near rail
-loses a blown-out white streak and reads as wood; the cue loses a sheen it
-has some claim to. Small either way and nobody's call but Jake's.
+**Nought is wrong in every one that moves, and for one reason.** Each is a
+large flat plane that carries a soft bright gradient at 32 and goes to a
+single uniform colour at nought: cascada's and carom's floors, cairn's
+ground, lantern's wall behind the candle, securitysweep's crates. cascada's
+27.7% is one call site.
 
-**The default is standing in for a light.** That is the finding, and it is
-the same fault capriccio found from the other side. There is no specular
-strength in this engine, only tightness, so a highlight is always at the
-lamp's full intensity: wide enough and it is indistinguishable from the pool
-of light a point source ought to be casting by diffuse falloff alone. In the
-cellar that cost a flat green baize and `aim::SHEEN` papers over it. In
-lantern the same accident is holding the game up.
+The reason is arithmetic rather than taste. Diffuse here is
+`light * dot(normal, to_light)` and the sun's direction is one vector, so on
+a flat plane the normal is the same at every point, lambert is constant, and
+ambient is constant. **The only term that varies across a flat floor is the
+specular, because the half vector follows the viewer.** Take it away and the
+floor is one colour by construction. `Light::shade` is where that is written.
 
-So this stays 32, and not only because spec 0012 picked it. **A game whose
-lamps light their rooms properly would not notice this number, and the games
-that notice are the ones whose lamps do not.** Before the default moves
-again, the thing to fix is the falloff: lantern's candle and the cellar's
-pendant both light their whole room evenly and let a highlight do the work of
-a pool. A specular strength term would be the other half, and the engine has
-never had one.
+So this default is not a surface finish. On flat geometry lit by the sun it
+is the whole of the shading, and a game that draws a floor and nothing else
+is relying on it without anyone having said so.
 
-Measured by setting the constant and running each game's own picture tests,
-with the constant put back afterwards. Nothing in any repo changed.
+That also says which rooms were safe. capriccio's mostly did not move,
+because they are lit by point lamps and a lamp's falloff varies with
+distance and gives a plane its gradient honestly. The cellar's baize is the
+exception that proves it: `cellar::LAMP_RANGE` is 6.0 over a 9 by 10 room, so
+there is almost no falloff across the table, and the cloth collapsed like a
+sunlit floor. `aim::SHEEN` papers over that one.
+
+**So 32 stays**, and the earlier reading of it, that it stands in for a
+light, was too weak. It is doing the lighting's whole job on anything flat.
+Two things would have to change before the number could:
+
+- **Falloff that earns its gradient.** lantern's candle and the cellar's
+  pendant both light their whole room evenly and leave a highlight to suggest
+  a pool.
+- **A specular strength**, which this engine has never had. It has tightness
+  only, so every highlight sits at the lamp's full intensity. capriccio
+  found this twice without naming it: `aim::DULL` notes that 64 is small and
+  bright and a hot spot, and `aim::VOID` has to run to a quarter of a million
+  because the shader adds the highlight on top of the surface rather than
+  multiplying it in, so a near black floor still takes a full white one. Its
+  figures read as plastic at 900, the tightest number there was.
+
+Measured by setting the constant, running each game's own picture tests, and
+putting the constant back. poolhall's 3.4% is the one that is arguable on
+looks rather than settled by the above: its near rail loses a blown-out white
+streak and reads as wood, its cue loses a sheen it has some claim to. Nothing
+in any repo changed.
