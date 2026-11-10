@@ -191,3 +191,63 @@ that breakage lands in sixteen places.
 So: a draft, and it stays one. What to watch is the browser and
 `hit_vertex_return`, and what to want is the hall of mirrors, because that
 is the one of the three that is a room rather than a capability.
+
+## 2026-11-10: the spike, and four things it found
+
+**Jake: do the spike.** The cheapest question, outside the engine: does a ray
+query work at all on wgpu 30.0.1 and Metal, given that wgpu documents the
+feature as having major bugs. `ray-spike` at the project root is the answer:
+one triangle in an acceleration structure, four rays at it, two aimed to hit
+and two to miss.
+
+**It works.** Four of four answered the way arithmetic says they should, `t`
+came back 5.000 for both hits, which is the distance from the ray's origin to
+the triangle's plane, and the instance's `custom_data` came back as the 7 it
+was set to, so instance identity survives.
+
+So the technology is not the blocker. Getting there turned up four things
+that are, none of which were in this spec before.
+
+**The opt-in is `unsafe`.** wgpu 30 refuses an `EXPERIMENTAL_` feature
+without `ExperimentalFeatures::enabled()`, which is a `const unsafe fn`
+whose contract is that there may be UB-containing bugs reachable from
+otherwise safe code. Enabling ray queries puts that `unsafe` block in the
+engine's device creation, in a library sixteen games build against. That is
+a different thing from an experimental feature flag.
+
+**The shader cannot be one source.** naga needs `enable wgpu_ray_query;` as
+the first item of a shader that declares an `acceleration_structure`. So
+`mesh.wgsl` becomes two files or a preprocessor, and
+`lighting::tests::the_shaders_hold_the_same_caps` currently holds one file
+against the Rust.
+
+**The default limits cannot build one.** `Limits::default()` has
+`max_blas_geometry_count` of 0, so the engine would have to ask for the
+adapter's limits where it asks for defaults today, which changes what it
+promises on every other adapter too.
+
+**`hit_vertex_return` is still false**, on wgpu 30.0.1 and Metal, which
+confirms 2026-11-09's reading and leaves reflections where this spec put
+them.
+
+**And the cost this spec never counted.** The renderer turns features on by
+asking the adapter, so a ray path would switch itself on for this machine
+and off elsewhere. Every picture test in the engine and in sixteen games
+renders through that renderer, and the whole point of the ray is better
+shadows, so those references would differ by adapter. Bless them here and
+they fail anywhere without ray queries. That is answerable, with two
+references or by forcing the raster path in tests, but it means the first
+commit of a shadow ray changes how every picture test in this project works
+before one shadow improves.
+
+**Where that leaves it.** A draft still, and the argument of the section
+above is unchanged: this adds a third account of shadowing and deletes
+nothing. The spike's value is that the next person to ask does not have to
+find out whether the stack works, and `ray-spike` runs in a second.
+
+**The spike is not in the gate.** `./list-repos` finds the engine, its
+shapes, capriccio and `games/*`, and nothing at the project root, so
+`./check-all` never builds this. It will rot the first time wgpu's
+experimental API changes, which it is documented to intend. That is the
+right trade for a thing whose job was to answer one question once, and it is
+written here so the rot is expected rather than discovered.
