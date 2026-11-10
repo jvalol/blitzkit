@@ -45,7 +45,9 @@ impl Light {
         let light = self.color * self.intensity;
         let diffuse = light * lambert;
 
-        let specular = if lambert > 0.0 {
+        // A shininess of nought or less is a surface with no highlight at
+        // all, the same as `mesh.wgsl`. Spec 0012.
+        let specular = if lambert > 0.0 && shininess > 0.0 {
             let half = (to_light + to_viewer.normalize_or_zero()).normalize_or_zero();
             light * normal.dot(half).max(0.0).powf(shininess.max(1.0))
         } else {
@@ -199,7 +201,13 @@ impl PointLight {
 
         let light = self.color * self.intensity * faded;
         let half = (to_light + to_viewer.normalize_or_zero()).normalize_or_zero();
-        let specular = light * normal.dot(half).max(0.0).powf(shininess.max(1.0));
+        // A shininess of nought or less is a surface with no highlight at all,
+        // the same as `mesh.wgsl`. Spec 0012.
+        let specular = if shininess > 0.0 {
+            light * normal.dot(half).max(0.0).powf(shininess.max(1.0))
+        } else {
+            Vec3::ZERO
+        };
 
         base * light * lambert + specular
     }
@@ -349,7 +357,13 @@ impl SpotLight {
 
         let light = self.color * self.intensity * faded;
         let half = (to_light + to_viewer.normalize_or_zero()).normalize_or_zero();
-        let specular = light * normal.dot(half).max(0.0).powf(shininess.max(1.0));
+        // A shininess of nought or less is a surface with no highlight at all,
+        // the same as `mesh.wgsl`. Spec 0012.
+        let specular = if shininess > 0.0 {
+            light * normal.dot(half).max(0.0).powf(shininess.max(1.0))
+        } else {
+            Vec3::ZERO
+        };
 
         base * light * lambert + specular
     }
@@ -649,6 +663,36 @@ mod tests {
 
         // same diffuse, so any difference is the highlight
         assert!(broad.x >= tight.x);
+    }
+
+    /// The sun, a lamp and a spot all take a shininess of nought the way
+    /// `mesh.wgsl` does: no highlight at all.
+    ///
+    /// The shader grew that on 2026-11-09 and these three did not, so for a
+    /// day spec 0012 said one thing and half the engine did another. Nought
+    /// clamped to a power of one here, which is the broadest highlight there
+    /// is, so the surfaces asking for none were the ones furthest out. That
+    /// is also why this compares nought against one rather than against
+    /// something tighter: the two used to be the same number.
+    #[test]
+    fn nought_shininess_is_no_highlight_anywhere() {
+        let normal = Vec3::Y;
+        let to_viewer = Vec3::Y;
+
+        let sun = Light::new();
+        let lit = sun.shade(-sun.direction, to_viewer, white(), 1.0);
+        let matte = sun.shade(-sun.direction, to_viewer, white(), 0.0);
+        assert!(matte.x < lit.x, "the sun: {} against {}", matte.x, lit.x);
+
+        let lamp = lamp();
+        let lit = lamp.shade(Vec3::ZERO, normal, to_viewer, white(), 1.0);
+        let matte = lamp.shade(Vec3::ZERO, normal, to_viewer, white(), 0.0);
+        assert!(matte.x < lit.x, "a lamp: {} against {}", matte.x, lit.x);
+
+        let spot = spot();
+        let lit = spot.shade(Vec3::ZERO, normal, to_viewer, white(), 1.0);
+        let matte = spot.shade(Vec3::ZERO, normal, to_viewer, white(), 0.0);
+        assert!(matte.x < lit.x, "a spot: {} against {}", matte.x, lit.x);
     }
 
     /// The caps, read out of the shaders rather than trusted to a comment.

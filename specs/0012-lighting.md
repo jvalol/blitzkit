@@ -68,3 +68,34 @@ figure is too reflective, it looks like plastic.
 Nought and below now means no specular at all, where it used to be clamped to
 one and give the broadest highlight there is. Cloth and skin want it. Nothing
 else in any game asked for nought, so nothing else moved.
+
+## 2026-11-09: half the engine had grown it and half had not
+
+The section above says nought and below means no specular at all. `mesh.wgsl`
+does that, in all three of its loops. `Light::shade`, `PointLight::shade` and
+`SpotLight::shade` did not. They clamped to a power of one, which is the
+broadest highlight there is, so a surface asking for none got the strongest
+one going.
+
+Each of those three carries a comment saying it matches the loop in the
+shader and the two are kept in step by hand. This spec names that gap as the
+reason for the hand checks below. The gap is what happened: a shader edit in
+the morning, three Rust copies of it left alone, and a spec saying the engine
+did something that half of it did not.
+
+The numbers from the control run, a matte surface against a power of one:
+`2.123249` and `2.123249`, the same to the last digit. Now the matte one is
+strictly dimmer, for the sun, a lamp and a spot alike.
+
+Nothing on screen moved, because the shader was already right. What was wrong
+is everything that reads the shading in Rust, which is the picture tests, the
+probes and anything a game works out before it draws.
+
+**The default stays 32.** capriccio asked for nought on 196 surfaces and now
+says so itself, in its own `aim::Plain`, which is the right place for a
+building to disagree with an engine. Eight other games take the default and
+want it.
+
+### Acceptance criteria
+
+- A shininess of nought is no highlight, in all three lights. — `lighting::tests::nought_shininess_is_no_highlight_anywhere`
