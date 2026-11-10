@@ -130,3 +130,64 @@ through that opening. It would also be a different engine.
 
 **Replacing the map anywhere.** It stays, everywhere, for as long as a
 browser cannot trace a ray.
+
+## 2026-11-10: what would make this worth doing
+
+**Jake: what would make ray tracing worth adding to the engine.**
+
+The section above on what it costs already answers it, in the sentence it
+turns on itself: not two mechanisms becoming one, so nothing here deletes
+anything.
+
+**That is the bar, and the repo is why.** Nearly every design note in it is
+one value: one account rather than two that drift. `cellar::stair_foot`
+exists because a stair's foot was written out nine times. `spa::doorway` and
+`aleph::gallery_west` exist because two rooms wanted the same wall. The
+shader caps are held against the Rust by a test. `same-picture` reads
+`CHANNEL` out of `picture.rs` rather than keeping a second copy of what
+counts as a difference. A ray query as drafted adds a third account of
+shadowing, native with, native without, and wasm, all drawing the same
+rooms. In this engine that is the expensive kind of change rather than the
+clever one, and a thing that only ever adds has to be paid for by something
+nothing else can do.
+
+Three things would tip it, in order of weight.
+
+**The browser gets ray queries.** Then the map and the march both go and
+three paths become one, which is the only route to deleting anything.
+2026-11-10 moved this further away rather than closer: spec 0097 put the
+arcade at a door of its own, so the browser build is the front door now and
+more load bearing than it was.
+
+**Reflections become possible.** This machine's `hit_vertex_return` is
+false, so a ray says it hit and not what it hit, which is why this spec is
+shadows. But reflections are where the complexity actually is. Specs 0091 to
+0095 are five about mirrors: one a game can hang, glass that samples the
+screen, a near plane on the glass, two textures a mirror, and a mirror only
+a mirror sees. Collapsing five into one is deletion, and it is the only
+candidate in this repo big enough to pay for a path that exists on some
+adapters and not others.
+
+**A room that cannot be built any other way.** Mirrors facing mirrors is a
+render pass per bounce, and spec 0095 already needs two cameras and a
+deepest first ordering to manage two of them. A hall of mirrors is where
+rasterised reflection stops scaling, and no amount of shadow quality gives
+it to you.
+
+**Shadows are the weakest first use, which is the one this spec is about.**
+Two mechanisms cover it, the combination is honest, and what a ray buys is a
+lit line at a cube's foot and occluders off the edge of the screen. Set
+against that, the faults Jake finds by walking are geometry and lighting: on
+2026-11-09 and the night after, a doorway plastered shut by a strip no room
+roofed, a ceiling rippling from a shininess nobody chose, a floor no lamp
+reached, a pocket mouth reading as chrome. Not one of them would have been
+caught or prevented by a shadow ray.
+
+**And the blocker this spec already names.** wgpu documents
+`EXPERIMENTAL_RAY_QUERY` as having major bugs and expecting breaking
+changes. On an engine whose claim is that sixteen games build against it,
+that breakage lands in sixteen places.
+
+So: a draft, and it stays one. What to watch is the browser and
+`hit_vertex_return`, and what to want is the hall of mirrors, because that
+is the one of the three that is a room rather than a capability.
