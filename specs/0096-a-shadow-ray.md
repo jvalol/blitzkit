@@ -122,6 +122,9 @@ louder fault than a soft edge and easier to miss in a still.
 **Reflections.** They want the surface at the hit, which this adapter does
 not return. That is its own spec and it starts with building the tables.
 
+That reason is wrong, and the last section of this spec is where it was
+measured. The hit returns enough to rebuild the surface by hand.
+
 **Soft shadows and area lights.** One ray, hard edge.
 
 **Any light that bounces.** The threshold that started this conversation is
@@ -251,3 +254,56 @@ shapes, capriccio and `games/*`, and nothing at the project root, so
 experimental API changes, which it is documented to intend. That is the
 right trade for a thing whose job was to answer one question once, and it is
 written here so the rot is expected rather than discovered.
+
+## 2026-11-10: what a hit actually returns, and what that opens
+
+**Jake: mirrors then, and the browser doesn't matter until ray queries are
+available.** Two decisions in one line. Reflections are the thing worth
+wanting, and the fallback path for the wasm builds is accepted as a cost
+rather than treated as a veto.
+
+So the question becomes the one this spec answered wrongly. It says
+reflections want the surface at the hit and this adapter does not return it.
+What it meant was `EXPERIMENTAL_RAY_HIT_VERTEX_RETURN`, which is still false
+here. What it did not do was ask what a hit returns instead.
+
+**Eleven fields**, read off naga 30.0.1's own `type_gen.rs`:
+
+```
+kind  t  instance_custom_data  instance_index  sbt_record_offset
+geometry_index  primitive_index  barycentrics  front_face
+object_to_world  world_to_object
+```
+
+**`barycentrics` and `primitive_index` are the surface.** `ray-spike` now
+asks for them and rebuilds the struck point on the CPU from the triangle's
+own vertices, weighting them `1 - u - v`, `u`, `v`. Against
+`origin + t * direction`, which the GPU never saw:
+
+```
+ ray  t       triangle  barycentrics     where it landed      apart
+  0   5.000   0         0.250  0.500     0.000  0.000  0.000  0.00000
+  1   5.000   0         0.375  0.250     0.000 -0.500  0.000  0.00000
+```
+
+Exact, both of them. What `hit_vertex_return` saves is the lookup, not the
+information: with the vertices in hand a shader interpolates the normal and
+the uv the same way, `object_to_world` carries the normal into the world,
+`front_face` says which side, and `instance_index` or `instance_custom_data`
+says whose material to use.
+
+**So the tables are the work, and they are ordinary.** The vertex and index
+buffers bound as storage beside the acceleration structure, and a per
+instance table of what spec 0012 keeps in an `Instance`: colour, shininess,
+specular, texture. Nothing in that needs a feature this adapter lacks.
+
+**What this does not settle**, and it is most of it. That the buffers can be
+bound alongside an acceleration structure and read at the hit is untried
+here. So is anything about cost: a reflection ray per pixel is not a shadow
+ray per casting lamp, and this spec's budget section does not cover it.
+Spec 0091 to 0095's machinery is what would be deleted, and that is the case
+for doing it, but none of it comes out until a ray can draw a mirror that
+looks as right as the one that is there.
+
+What is settled is that the reason written in Out of scope above was not the
+real obstacle, and that it was never measured. The obstacle is work.
