@@ -150,16 +150,70 @@ Two things would have to change before the number could:
 - **Falloff that earns its gradient.** lantern's candle and the cellar's
   pendant both light their whole room evenly and leave a highlight to suggest
   a pool.
-- **A specular strength**, which this engine has never had. It has tightness
-  only, so every highlight sits at the lamp's full intensity. capriccio
-  found this twice without naming it: `aim::DULL` notes that 64 is small and
-  bright and a hot spot, and `aim::VOID` has to run to a quarter of a million
-  because the shader adds the highlight on top of the surface rather than
-  multiplying it in, so a near black floor still takes a full white one. Its
-  figures read as plastic at 900, the tightest number there was.
+- **A specular strength**, which this engine did not have until the section
+  below. It had tightness only, so every highlight sat at the lamp's full
+  intensity. capriccio found this twice without naming it: `aim::DULL` notes
+  that 64 is small and bright and a hot spot, and `aim::VOID` has to run to a
+  quarter of a million because the shader adds the highlight on top of the
+  surface rather than multiplying it in, so a near black floor still takes a
+  full white one. Its figures read as plastic at 900, the tightest number
+  there was.
 
 Measured by setting the constant, running each game's own picture tests, and
 putting the constant back. poolhall's 3.4% is the one that is arguable on
 looks rather than settled by the above: its near rail loses a blown-out white
 streak and reads as wood, its cue loses a sheen it has some claim to. Nothing
 in any repo changed.
+
+## 2026-11-09: the other knob
+
+**Jake: add a specular strength term.** The section above named it as one of
+two things that would have to change before the default could, so here it is.
+The other, falloff that earns its own gradient, is still not done.
+
+`Instance` carries a `specular` beside its `shininess`: one is how wide the
+lobe is, the other how tall. `Scene::push_surface` is the push that says
+both, and every other push hands out `Instance::DEFAULT_SPECULAR`, which is
+1.0 and is what this engine did before the term existed. **Nothing any game
+draws moved.** 108 `push_material` and 81 `push_textured` call sites across
+the project kept their signatures and their pixels.
+
+Nought is the same surface a shininess of nought gives, reached from the
+other side, and both are now sayable: `push_surface(.., 0.0, 1.0)` is a
+matte surface and `push_surface(.., 96.0, 0.0)` is a tight lobe turned off.
+They agree, and the test says so.
+
+**Both copies, or neither.** The three `shade` functions in `lighting.rs`
+take the strength as well, because this spec has said since it was written
+that they and the fragment stage are two copies of one calculation kept in
+step by hand, and the morning of this same day is what that costs when they
+drift: the shader grew the nought rule and the three Rust functions did not.
+So the term is held twice. `lighting::tests::strength_scales_the_highlight`
+asks the Rust, and `pictures::tests::the_shader_honours_a_specular_strength`
+asks the real pipeline, which is the half the Rust cannot see. Each has a
+control: dropping the factor from the Rust fails the first, dropping it from
+the three places in `mesh.wgsl` fails the second.
+
+That second test also holds the no-op. It draws the reference's own ball
+through `push_surface` at a strength of one and asks that the picture matches
+to the share a picture test calls a difference, so a change here that moved
+every game's stills would fail rather than needing sixteen repositories
+looked at.
+
+**It costs four bytes an instance**, 68 to 72. Spec 0060 took an instance
+from 120 to 68 and this is the first thing to put any back. There was no
+spare slot: four columns, a colour and a shininess pack exactly, and the
+struct is four byte aligned, so a byte would have cost as much as a float. A
+frame of a million instances carries 72 MB rather than 68.
+
+**Nothing uses it yet**, which is deliberate. What it is for is the work the
+section above describes, and the first surfaces that want it are the ones
+already named: a baize that should read as cloth under a lamp rather than as
+varnish, and `aim::VOID` at a quarter of a million, which exists only because
+there was no other way to make a highlight quiet.
+
+### Acceptance criteria
+
+- Strength scales the highlight, for the sun, a lamp and a spot. — `lighting::tests::strength_scales_the_highlight`
+- The shader honours it, and a strength of one is what it drew before. — `pictures::tests::the_shader_honours_a_specular_strength`
+- An instance is still small, and says what the fifth float cost. — `renderer::scene::tests::an_instance_is_small`

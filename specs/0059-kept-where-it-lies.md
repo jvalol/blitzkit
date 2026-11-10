@@ -41,7 +41,8 @@ Measured again with this reverted, the shell kept in patches:
 | 4096000 | not asked | 11.4 ms |
 
 A million and two million both hold a frame. That is better than this spec
-ever measured, because spec 0060 made an instance 68 bytes afterwards, and
+ever measured, because spec 0060 made an instance 68 bytes afterwards, 72
+since spec 0012's specular strength, and
 it is what the engine does today without drawing anything where it lies.
 
 **If it is tried again**, the thing to build first is the test that would

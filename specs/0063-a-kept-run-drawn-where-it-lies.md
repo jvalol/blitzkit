@@ -18,7 +18,10 @@ not anything moved:
 2. The eye was subtracted from each survivor as it was copied, per spec 0051.
 3. `write_buffer` sent the whole vector to the GPU.
 
-An instance is 68 bytes since spec 0060, so step 3 alone was 272 MB a frame.
+An instance was 68 bytes when this was measured, per spec 0060, so step 3
+alone was 272 MB a frame. It is 72 since spec 0012's specular strength, so
+the same four million would be 288 MB: the measurement stands and the
+number it was taken at has moved.
 Steps 1 and 2 are four million iterations of a loop that no amount of care
 makes free.
 

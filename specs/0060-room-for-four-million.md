@@ -74,7 +74,7 @@ of two million instances is a game that has not divided one.
 
 ## Acceptance criteria
 
-- An instance is sixty eight bytes or fewer, and its layout is what the
+- An instance is seventy two bytes or fewer, and its layout is what the
   pipeline is built from, so the two cannot
   drift. — `renderer::scene::tests::an_instance_is_small`
 - A normal rebuilt from the model matrix is the normal the old matrix
@@ -129,3 +129,33 @@ needed to be level.
 
 **Anything about textures.** The texture a batch wears is still one per
 draw, and nothing here changes what that costs.
+
+## 2026-11-10: seventy two, and why the number moved
+
+This spec's whole point was that 120 bytes carried two things nothing needed:
+a row of nought, nought, nought, one, and a normal matrix the model matrix
+already held. Taking both out gave sixty eight.
+
+Spec 0012 has since added a fifth float, a specular strength, and an instance
+is seventy two. The acceptance criterion above says seventy two now, and this
+is the paragraph that keeps it from reading as the budget quietly slipping.
+
+**There was no spare slot.** Four columns at twelve bytes, a colour at
+sixteen and a shininess at four pack to sixty eight exactly, and the struct
+is four byte aligned, so a single byte would have cost the same four as a
+float. The alternative on the table was encoding the shininess as a `log2`
+half beside a half for the strength, which keeps sixty eight and buys a
+number rather than a capability, with a decode in the shader nobody reading
+it asked for. Jake, 2026-11-10: pay it.
+
+**What it costs, said plainly.** A frame of a million instances carries 72 MB
+rather than 68. The four gigabyte buffer spec 0069 measures holds about
+59.6 million instances rather than 63.2 million, which is the one number in
+this project that moved because of it, and the engine computes that line
+rather than writing it down.
+
+The distinction worth keeping is the one this spec made in the first place.
+Sixty eight was never a target for its own sake: it was what was left after
+removing what nothing used. A field something uses is not the same kind of
+byte as a field nothing uses, and the test's job is to notice the next one
+either way.

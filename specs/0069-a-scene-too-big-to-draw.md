@@ -29,8 +29,11 @@ wgpu error: Validation Error
     Buffer size 4331600000 is greater than the maximum buffer size (4294967295)
 ```
 
-The wall is this adapter's four gigabyte buffer over the sixty eight bytes
-spec 0060 got an instance down to: 63,161,283 of them. The wall is fine.
+The wall is this adapter's four gigabyte buffer over the bytes spec 0060 got
+an instance down to: 63,161,283 of them at the sixty eight an instance was
+when this was written, and about 59.6 million at the seventy two it is since
+spec 0012 added a specular strength. The engine computes that line rather
+than holding it, so it moved on its own. The wall is fine.
 Walking into it and taking the process with you is not.
 
 **Spec 0060 chose this on purpose and chose wrong.** It made
@@ -70,9 +73,11 @@ That is what makes this a cap rather than a crash.
 ## What this does not do
 
 **It does not raise the ceiling.** Sixty three million instances is what a
-four gigabyte buffer holds at sixty eight bytes each, and spec 0060 already
-argued the second buffer out on the grounds that nothing needed it. This
-spec is about the edge, not the size.
+four gigabyte buffer held at the sixty eight bytes an instance was when this
+was written, and spec 0060 already argued the second buffer out on the
+grounds that nothing needed it. This spec is about the edge, not the size,
+and the edge is wherever the arithmetic puts it: at seventy two bytes it is
+about 59.6 million and this spec is unchanged.
 
 **It does not choose cleverly what to leave out.** First kept, first drawn.
 Leaving out the furthest, or the smallest, or the least recently seen is a
