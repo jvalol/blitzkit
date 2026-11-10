@@ -261,3 +261,54 @@ that evening and then made again in the same room. The claim that got
 written down, that `LAMP_RANGE` 6.0 over a 9 by 10 room leaves almost no
 falloff across the table, is simply false. Two ratios would have said so and
 neither was taken.
+
+## 2026-11-10: the falloff curve is not the lever
+
+**Jake: change the engine's falloff curve.** The section above left two ways
+to give lantern's candle a pool that is a light rather than a highlight:
+shorten a gameplay constant in that repo, or change this curve for all
+sixteen games. This measured the second and the answer is no.
+
+**What was tried.** Both keep `falloff(0) = 1` and `falloff(range) = 0`, so a
+lamp out of range still costs nothing, which spec 0020 relies on.
+
+- `(1 - d/r)⁴`, the same shape made steeper.
+- `clamp(1 - (d/r)⁴)² / (d² + 1)`, the windowed inverse square every modern
+  renderer uses, which is the principled one.
+
+Measured on lantern's `left-behind`, which is the picture the case was built
+on, with the shininess at nought so the answer is diffuse alone. The pool on
+the wall against the wall immediately beside it:
+
+| | pool | beside | contrast | mean |
+| --- | --- | --- | --- | --- |
+| today's curve, highlight at 32 | 224.0 | 147.3 | **1.52** | 176.3 |
+| today's curve, no highlight | 162.8 | 142.2 | 1.14 | 156.9 |
+| fourth power | 131.3 | 110.8 | 1.18 | 128.2 |
+| windowed inverse square | 104.1 | 84.3 | 1.23 | 101.5 |
+| windowed inverse square, lamp at 1.9 | 190.4 | 155.2 | 1.23 | 185.7 |
+
+**The best candidate closes a fifth of the gap and cannot be bought back.**
+The last row is the inverse square with `lantern::LAMP_INTENSITY` raised from
+0.5 to 1.9, which puts the brightness back and leaves the contrast at 1.23,
+the same number it was at 0.5. So the fill underneath is not what holds the
+gradient down. The lamp already owns those pixels.
+
+**What actually holds it down is the distances.** A lamp whose range is 9
+lighting a wall a couple of metres off has almost nothing to vary over,
+whatever shape the curve is. `(1 - d/r)²` across that wall moves about 1.33
+and the inverse square about 2.2, and neither reaches the surface as contrast
+because the wall is close to the lamp compared with the range.
+
+So the lever is `lantern::LAMP_RANGE`, which is that game's own number and
+its own call, and this engine's curve stays as it is. Changing it would have
+cost sixteen games' intensities, every picture test reblessed, and every room
+darker, to move the one case it was for from 1.14 to 1.23.
+
+**A measurement in here was wrong before this one.** The first pass reported
+peak over edge across that row, which reads the ends of the wall where it
+meets other geometry and is bright for reasons the candle has nothing to do
+with. The numbers above are the pool against what is beside it, which is the
+question that was being asked. The conclusion did not change and the reason
+given for it did: the first pass blamed the ambient and the fixed braziers,
+and raising the lamp's intensity shows that was wrong.
