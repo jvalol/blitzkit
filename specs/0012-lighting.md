@@ -99,3 +99,41 @@ want it.
 ### Acceptance criteria
 
 - A shininess of nought is no highlight, in all three lights. — `lighting::tests::nought_shininess_is_no_highlight_anywhere`
+
+## 2026-11-09: what 32 is actually doing
+
+**Jake: measure lantern and poolhall.** capriccio had just stopped taking
+this default on 196 surfaces and the question was whether the other games
+should too.
+
+Set to nought, one picture moved in each.
+
+**lantern, `left-behind`, 23.0% of its pixels, and nought is wrong.** The
+warm pool the candle throws on the wall behind it is the specular highlight.
+At nought the wall goes flat and evenly lit and the candle stops lighting the
+room, which in a game about carrying a candle is the picture. lantern has ten
+surfaces and not one of them states a shininess, so it has run on this
+default from the start.
+
+**poolhall, `after-the-break`, 3.4%, and it is a toss-up.** The near rail
+loses a blown-out white streak and reads as wood; the cue loses a sheen it
+has some claim to. Small either way and nobody's call but Jake's.
+
+**The default is standing in for a light.** That is the finding, and it is
+the same fault capriccio found from the other side. There is no specular
+strength in this engine, only tightness, so a highlight is always at the
+lamp's full intensity: wide enough and it is indistinguishable from the pool
+of light a point source ought to be casting by diffuse falloff alone. In the
+cellar that cost a flat green baize and `aim::SHEEN` papers over it. In
+lantern the same accident is holding the game up.
+
+So this stays 32, and not only because spec 0012 picked it. **A game whose
+lamps light their rooms properly would not notice this number, and the games
+that notice are the ones whose lamps do not.** Before the default moves
+again, the thing to fix is the falloff: lantern's candle and the cellar's
+pendant both light their whole room evenly and let a highlight do the work of
+a pool. A specular strength term would be the other half, and the engine has
+never had one.
+
+Measured by setting the constant and running each game's own picture tests,
+with the constant put back afterwards. Nothing in any repo changed.
