@@ -63,6 +63,13 @@ pub fn looks_right(drawn: &Picture, reference: &Path) -> Result<(), String> {
 
 /// The same, to a share the caller names. See `SHARE` and `SPARSE`.
 pub fn looks_right_within(drawn: &Picture, reference: &Path, allowed: f32) -> Result<(), String> {
+    held(drawn, reference, allowed, blessing())
+}
+
+/// The same with the answer to `BLESS` handed in, so a test can ask what
+/// blessing does without setting a variable every other test in the process
+/// shares.
+fn held(drawn: &Picture, reference: &Path, allowed: f32, blessing: bool) -> Result<(), String> {
     if drawn.pixels.is_empty() {
         return Err(format!(
             "{} came back with no pixels at all",
@@ -70,7 +77,11 @@ pub fn looks_right_within(drawn: &Picture, reference: &Path, allowed: f32) -> Re
         ));
     }
 
-    if std::env::var("BLESS").is_ok() || !reference.exists() {
+    if blessing || !reference.exists() {
+        if already_there(drawn, reference, allowed) {
+            return Ok(());
+        }
+
         write(reference, drawn)?;
         eprintln!("blessed {}", reference.display());
 
@@ -337,7 +348,7 @@ fn beside(reference: &Path, what: &str) -> PathBuf {
 /// tolerance a picture test uses, so a release does not commit a frame
 /// nobody can tell from the one already there. Spec 0083.
 pub fn save(picture: &Picture, path: &Path) -> Result<(), String> {
-    if already_there(picture, path) {
+    if already_there(picture, path, SHARE) {
         return Ok(());
     }
 
@@ -349,7 +360,7 @@ pub fn save(picture: &Picture, path: &Path) -> Result<(), String> {
 ///
 /// A file that is not there, cannot be read, or holds a frame of another
 /// size is not it, and in each of those cases the caller writes.
-fn already_there(picture: &Picture, path: &Path) -> bool {
+fn already_there(picture: &Picture, path: &Path, allowed: f32) -> bool {
     let Ok(was) = image::open(path) else {
         return false;
     };
@@ -362,7 +373,22 @@ fn already_there(picture: &Picture, path: &Path) -> bool {
 
     let (count, _) = apart(&was, picture);
 
-    count as f32 / (picture.width * picture.height) as f32 <= SHARE
+    count as f32 / (picture.width * picture.height) as f32 <= allowed
+}
+
+/// Whether `BLESS` is asking for references to be rewritten.
+///
+/// Set and empty is not asking. `BLESS= cargo test` sets it to the empty
+/// string rather than leaving it unset, and reading that as asking wrote a
+/// probe's frame over a reference on 2026-11-09, which was only noticed
+/// because the test it belonged to passed when it had no business passing.
+fn blessing() -> bool {
+    asked_to_bless(std::env::var("BLESS").ok())
+}
+
+/// The rule itself: any non-empty value is asking, and nothing else is.
+fn asked_to_bless(how: Option<String>) -> bool {
+    how.is_some_and(|how| !how.is_empty())
 }
 
 fn write(path: &Path, picture: &Picture) -> Result<(), String> {
@@ -448,6 +474,69 @@ mod tests {
 
         // five hundred of ten thousand is 5%, which SHARE is nowhere near
         save(&marked(500), &path).unwrap();
+
+        assert_ne!(was, std::fs::read(&path).unwrap());
+    }
+
+    /// `BLESS=` is not asking.
+    ///
+    /// It sets the variable to the empty string rather than leaving it
+    /// unset, and `var().is_ok()` reads that as asking. On 2026-11-09 a
+    /// probe run that way wrote its frame over a reference, and the only
+    /// sign of it was a test passing when it had no business passing.
+    #[test]
+    fn an_empty_bless_is_not_asking() {
+        assert!(!asked_to_bless(None));
+        assert!(!asked_to_bless(Some(String::new())));
+
+        // the control: anything with something in it still asks
+        assert!(asked_to_bless(Some("1".to_string())));
+        assert!(asked_to_bless(Some("yes".to_string())));
+    }
+
+    /// Blessing asks `already_there` first, so a reference that already
+    /// holds the picture is left alone.
+    ///
+    /// `refresh-screenshots` has done this since spec 0083 and `BLESS` had
+    /// not, so one blessing of capriccio rewrote five references nobody had
+    /// asked about, each a tenth of a percent from the one it replaced.
+    ///
+    /// To the share the caller named rather than to `SHARE`, or a test
+    /// drawing something small enough to need `SPARSE` would have its real
+    /// change blessed away as noise.
+    #[test]
+    fn blessing_leaves_a_reference_that_already_holds_the_picture() {
+        let path = std::env::temp_dir().join("blitzkit-bless-guard.png");
+        let _ = std::fs::remove_file(&path);
+
+        held(&grey(), &path, SHARE, true).unwrap();
+        let was = std::fs::read(&path).unwrap();
+
+        // five of ten thousand is 0.0005, inside SHARE
+        held(&marked(5), &path, SHARE, true).unwrap();
+        assert_eq!(was, std::fs::read(&path).unwrap(), "blessed what was there");
+
+        // six is past SPARSE, so a test holding a small thing still gets its
+        // change written rather than blessed away as noise
+        held(&marked(6), &path, SPARSE, true).unwrap();
+        assert_ne!(
+            was,
+            std::fs::read(&path).unwrap(),
+            "a sparse test's change was swallowed"
+        );
+    }
+
+    /// The control. Without it the test above passes for a bless that never
+    /// writes anything at all.
+    #[test]
+    fn blessing_writes_a_reference_that_moved() {
+        let path = std::env::temp_dir().join("blitzkit-bless-moved.png");
+        let _ = std::fs::remove_file(&path);
+
+        held(&grey(), &path, SHARE, true).unwrap();
+        let was = std::fs::read(&path).unwrap();
+
+        held(&marked(500), &path, SHARE, true).unwrap();
 
         assert_ne!(was, std::fs::read(&path).unwrap());
     }

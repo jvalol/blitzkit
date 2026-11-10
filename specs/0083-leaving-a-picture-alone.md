@@ -72,3 +72,39 @@ measures it without touching a file.
 **The picture tests.** They compare and do not save, so none of this is on
 their path. `BLESS` still writes whatever was drawn, which is right: blessing
 is a person saying this is the new reference.
+
+That last sentence was wrong, and the section below says why.
+
+## 2026-11-09: blessing leaves a picture alone too
+
+**Jake: fix the bless guard too.**
+
+Blessing capriccio's ten changed rooms rewrote fifteen references. The extra
+five were `figure`, `garden`, `mirrors`, `register` and `valhalla-hall`, none
+of which had failed, and `./same-picture` puts the worst of them a tenth of a
+percent from the file it replaced, against a threshold of two tenths. Five
+files of noise in a commit about something else, which is this spec's own
+subject.
+
+The paragraph above said `BLESS` writing whatever was drawn is right, because
+blessing is a person saying this is the new reference. The first half of that
+is true of the pictures that changed. It cannot be true of the ones that did
+not: `BLESS` is a flag on a run, the run draws every picture in it, and nobody
+is saying anything about a reference they were never shown a difference for.
+So blessing now asks `already_there` first, the same question
+`refresh-screenshots` has asked since this spec was written.
+
+**To the share the caller named**, not to `SHARE`. A test drawing something
+small enough to need `SPARSE` would otherwise have its real change blessed
+away as noise by a looser rule than the one it is held to.
+
+**`BLESS=` is not asking.** It sets the variable to the empty string rather
+than leaving it unset, and the check was `var("BLESS").is_ok()`. A probe run
+that way on 2026-11-09 wrote a frame of solid magenta over `cellar.png`, and
+the only sign of it was the test passing when it had no business passing.
+
+## Acceptance criteria
+
+- Blessing leaves a reference that already holds the picture, and still writes a sparse test's real change. — `picture::tests::blessing_leaves_a_reference_that_already_holds_the_picture`
+- The control: blessing writes a reference that moved. — `picture::tests::blessing_writes_a_reference_that_moved`
+- An empty `BLESS` is not asking to bless. — `picture::tests::an_empty_bless_is_not_asking`
