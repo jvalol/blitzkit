@@ -48,6 +48,26 @@
   # Keep aligned with the Hugo that jva.lol pins and that is installed locally.
   HUGO_VERSION = "0.166.0"
 
+# arcadium.jva.lol is this same site under a second name, serving the arcade's
+# own page at its root. Spec 0097: a second Netlify site would build this repo
+# again to publish the same 7.9 MB of wasm that site/scripts/build copies in.
+# The domain alias is added in the site's settings; jva.lol is on Netlify DNS,
+# so that writes the record.
+#
+# **The root and nothing else.** The alias serves the whole site, the arcade's
+# module included, so the page fetches arcadium.jva.lol/web/capriccio.js. The
+# obvious `/*` answers that with this page's HTML and the reader gets a module
+# error about an unexpected `<`, and fetching it from the canonical host
+# instead wants CORS headers Netlify does not send.
+#
+# force, because the alias already has a home page to serve at this path and
+# without it Netlify serves that instead.
+[[redirects]]
+  from = "https://arcadium.jva.lol/"
+  to = "/arcadium/"
+  status = 200
+  force = true
+
 # /docs/promises/ and /docs/how-its-built/ were the same page under two names
 # on 2026-09-26, and it is gone.
 #
