@@ -129,3 +129,46 @@ with extra steps and none of its hardware.
 
 **More than one traced surface at a time.** Two is a second budget and
 nothing has asked for it.
+
+## 2026-11-11: the spike, and four things it found
+
+**Jake: do the spike.** `capriccio::tests::zz_spike`, ignored by default and
+compiled with the suite so it cannot rot the way `ray-spike` is expected to.
+It traces the arcade's own boxes on one CPU core and writes pictures. No
+renderer, no shader, no feature.
+
+**It reads.** The hall from its doorway, boxes alone, is unmistakably the
+hall: the aisle, both rows of cabinets, the floor and the end wall. The
+answer to the only question this spec said was worth spiking is yes.
+
+**The list is `solid` plus `lids`, not `solid`.** The first picture came back
+with a hole where the arcade's ceiling is. A suspended ceiling is drawn and
+never collided, so it is in no list `solid` keeps. The same pair
+`Room::outside` already makes, for the same reason, and the Behavior section
+above was wrong to say `room::solid` on its own.
+
+**Colour is load bearing rather than a refinement.** Shaded flat, the sphere
+is a grey ball and what is in it is barely legible. With a colour per box the
+aisle, both rows of cabinets and the swapped floor and ceiling all read at a
+glance. So the material table in Behavior is not an improvement to be added
+later; without it there is no effect to look at.
+
+**The sphere shows what is behind the eye**, which is the whole claim. The
+cabinets behind the camera are wrapped round the inside of the ring, inverted
+and compressed, while the aisle ahead is inverted in the middle of it.
+
+### And a number, which is not a measurement of the real thing
+
+635 boxes, 900 by 720, three frames including the sphere's three bounces:
+4.4 seconds on one CPU core in release, so about 1.5 seconds a frame drawn
+full screen, single threaded, with no acceleration structure. The sphere
+covers a fraction of a frame and a GPU has thousands of cores. That is not a
+budget and it does not replace the pass slot this spec asks for, but it is
+the right side of the line by a wide enough margin to stop worrying about
+whether 635 boxes a ray is affordable.
+
+### What it does not answer
+
+Anything about the renderer. The storage buffer, the bind group, the shader
+and the cost of three bounces at a quarter of the screen are all untried,
+and those are the work.
