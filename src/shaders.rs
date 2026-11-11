@@ -20,6 +20,9 @@ pub(crate) const MESH: &str = include_str!("../res/shaders/mesh.wgsl");
 /// The depth-only shader a light draws the scene with.
 pub(crate) const SHADOW: &str = include_str!("../res/shaders/shadow.wgsl");
 
+/// A ray against a list of boxes, per spec 0098.
+pub(crate) const TRACE: &str = include_str!("../res/shaders/trace.wgsl");
+
 /// What a shader's `const NAME` reads, as the type Rust holds it in.
 ///
 /// Panics rather than returning an option, because every caller is a test and

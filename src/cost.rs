@@ -47,8 +47,15 @@ pub const TARGET: usize = OVERLAY + 1;
 /// The glass that wears what a target pass drew, per spec 0092. Its own
 /// slot for the reason `TARGET` has one.
 pub const GLASS: usize = TARGET + 1;
+/// The surfaces that trace the scene rather than sample a picture of it,
+/// per spec 0098. Its own slot for the reason `TARGET` has one, and for
+/// one more: on 2026-11-11 the arcade's mirrors turned out to be two
+/// renders of the world every frame from everywhere in the building, 139
+/// ms from the top of its bridge, and nobody had measured them. A tracer
+/// is the same shape of thing. It gets a column before it gets a room.
+pub const LENS: usize = GLASS + 1;
 /// How many slots there are, which is two queries each.
-pub const PASSES: usize = GLASS + 1;
+pub const PASSES: usize = LENS + 1;
 
 /// What each pass is called, for a readout and for a sweep's columns.
 pub fn pass_name(slot: usize) -> &'static str {
@@ -60,6 +67,7 @@ pub fn pass_name(slot: usize) -> &'static str {
         OVERLAY => "overlay",
         TARGET => "target",
         GLASS => "glass",
+        LENS => "lens",
         _ if slot >= FIRST_LAMP_FACE => "lamps",
         _ => "spots",
     }

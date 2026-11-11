@@ -92,6 +92,81 @@ fn shots() -> Vec<Shot> {
                 camera.target = vec3(0.0, 1.0, 0.0);
             },
         },
+        // spec 0098: a surface that traces the scene rather than sampling a
+        // picture of it. A row of boxes behind a glass ball, which is the one
+        // thing the glass of spec 0092 cannot do: a render to texture shows
+        // what a second camera could see, and this shows the row inverted.
+        Shot {
+            name: "a-lens-bends-what-is-behind-it",
+            scene: |scene, meshes| {
+                let mut boxes = Vec::new();
+
+                // a row running away, so the cone the ball squeezes has
+                // something different in it at every angle. A flat wall
+                // behind a lens is a flat disc, which the arcade found by
+                // trying it four times.
+                for n in 0..9 {
+                    let at = vec3(0.0, 0.5, -2.0 - n as f32 * 2.0);
+                    let wide = vec3(0.6, 1.0 + n as f32 * 0.1, 0.6);
+                    let tint = vec4(
+                        0.25 + (n % 3) as f32 * 0.3,
+                        0.35 + (n % 2) as f32 * 0.4,
+                        0.75 - (n % 4) as f32 * 0.15,
+                        1.0,
+                    );
+
+                    for side in [-1.0f32, 1.0] {
+                        let stands = vec3(at.x + side * 1.6, at.y, at.z);
+
+                        scene.push_material(
+                            meshes.cube,
+                            &Transform::at(stands).with_scale(wide),
+                            tint,
+                            96.0,
+                        );
+                        boxes.push(blitzkit::renderer::scene::Traced::new(
+                            blitzkit::collision::Aabb::new(
+                                stands - wide * 0.5,
+                                stands + wide * 0.5,
+                            ),
+                            tint,
+                        ));
+                    }
+                }
+
+                // a floor, so the picture is of a room rather than of a
+                // ball in the dark, and so the ray that goes straight
+                // through the middle of the glass meets something
+                let floor = vec3(0.0, -0.01, -10.0);
+                let floor_wide = vec3(14.0, 0.02, 30.0);
+
+                scene.push_material(
+                    meshes.cube,
+                    &Transform::at(floor).with_scale(floor_wide),
+                    vec4(0.55, 0.55, 0.6, 1.0),
+                    4.0,
+                );
+                boxes.push(blitzkit::renderer::scene::Traced::new(
+                    blitzkit::collision::Aabb::new(
+                        floor - floor_wide * 0.5,
+                        floor + floor_wide * 0.5,
+                    ),
+                    vec4(0.55, 0.55, 0.6, 1.0),
+                ));
+
+                scene.traces(&boxes);
+                scene.lens(
+                    meshes.sphere,
+                    &Transform::at(vec3(0.0, 0.9, 1.0)).with_scale(Vec3::splat(0.9)),
+                    vec4(1.0, 1.0, 1.0, 1.0),
+                    1.5,
+                );
+            },
+            camera: |camera| {
+                camera.position = vec3(0.0, 1.1, 4.4);
+                camera.target = vec3(0.0, 0.9, 1.0);
+            },
+        },
         // spec 0051's whole reason, which was tested by counting distinct
         // floats and is now a picture of a marble that either has a surface
         // or has seven steps
@@ -434,6 +509,13 @@ mod pictures {
         #[test]
         fn a_sphere_has_a_highlight() {
             looks_right("a-sphere-has-a-highlight");
+        }
+
+        /// Spec 0098: a lens shows the row behind it, inverted, which is
+        /// what a render to texture cannot do.
+        #[test]
+        fn a_lens_bends_what_is_behind_it() {
+            looks_right("a-lens-bends-what-is-behind-it");
         }
 
         #[test]

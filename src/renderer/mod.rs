@@ -208,6 +208,14 @@ pub struct Renderer {
     /// Where the glass surfaces of one frame stand, written per frame the
     /// way the outlines' buffer is.
     glass_buffer: wgpu::Buffer,
+    /// Spec 0098: a surface that traces the scene rather than sampling a
+    /// picture of it. Its own pipeline, its own bind group, and a storage
+    /// buffer of boxes that every such surface in a frame shares.
+    lens_pipeline: wgpu::RenderPipeline,
+    lens_buffer: wgpu::Buffer,
+    traced_buffer: wgpu::Buffer,
+    seen_buffer: wgpu::Buffer,
+    trace_bind_group: wgpu::BindGroup,
     /// Spec 0075: the same pair, shaded as water.
     water_pipelines: [wgpu::RenderPipeline; 2],
     shadow_view: wgpu::TextureView,
@@ -951,6 +959,78 @@ impl Renderer {
             "fs_glass",
         );
 
+        // and spec 0098's tracer, which shares none of the above: its own
+        // bind group, because the camera's carries sixty four lamps and four
+        // spots and a tracer reads none of them, and its own shader.
+        let trace_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Trace Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let seen_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Seen Buffer"),
+            size: std::mem::size_of::<Tracing>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // **The whole cap, once, rather than grown.** It is 48 kilobytes and
+        // the alternative is remaking the bind group whenever a room gets
+        // bigger, which is a second thing to keep in step.
+        let traced_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Traced Buffer"),
+            size: scene::Traced::SIZE * scene::MAX_TRACED as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let trace_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Trace Bind Group"),
+            layout: &trace_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: seen_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: traced_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let lens_pipeline = create_lens_pipeline(
+            &device,
+            drawn,
+            &trace_layout,
+            depth::mesh_primitive_state(),
+            depth::read_only_state(),
+            samples,
+        );
+
+        let lens_buffer = create_buffer(&device, 0, wgpu::BufferUsages::VERTEX);
+
         // and twice more again for water, per spec 0075, which is the same
         // pass in every way but its fragment stage. A mesh handed over by
         // `add_water_mesh` is drawn by these and everything else by the pair
@@ -1030,6 +1110,11 @@ impl Renderer {
             translucent_pipelines,
             glass_pipeline,
             glass_buffer,
+            lens_pipeline,
+            lens_buffer,
+            traced_buffer,
+            seen_buffer,
+            trace_bind_group,
             water_pipelines,
             meshes: Vec::new(),
             asked_fights: false,
@@ -2837,6 +2922,68 @@ impl Renderer {
             }
         }
 
+        // and spec 0098's lenses, which trace the scene rather than sample a
+        // picture of it. After the glass, because both stand in the room the
+        // mesh pass drew and this one bends what is behind it.
+        //
+        // **One draw a lens, because each bends by its own index** and the
+        // index is in the uniform rather than the instance: a second field on
+        // every instance in a scene of sixty four thousand, for a thing a
+        // handful of surfaces use, is the trade spec 0060 already refused.
+        let lenses = self.upload_lenses(scene);
+
+        // the boxes every lens in this frame looks at, written once
+        self.upload_traced(scene);
+
+        if lenses > 0 {
+            let (into, onto) = match &self.colour {
+                Some(many) => (many, Some(view)),
+                None => (view, None),
+            };
+            let mut lens_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Lens Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: into,
+                    depth_slice: None,
+                    resolve_target: onto,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth.view,
+                    depth_ops: None,
+                    stencil_ops: None,
+                }),
+                timestamp_writes: timing_writes(&mut self.timing, crate::cost::LENS),
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            lens_pass.set_pipeline(&self.lens_pipeline);
+
+            for (which, lens) in scene.lenses().iter().enumerate() {
+                let Some(mesh) = self.meshes.get(lens.mesh.0) else {
+                    continue;
+                };
+
+                if mesh.index_count == 0 {
+                    continue;
+                }
+
+                lens_pass.set_bind_group(0, &self.trace_bind_group, &[]);
+                lens_pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                lens_pass.set_vertex_buffer(1, self.lens_buffer.slice(..));
+                lens_pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                counted.saw(mesh.index_count, 1);
+
+                let at = which as u32;
+
+                lens_pass.draw_indexed(0..mesh.index_count, 0, at..(at + 1));
+            }
+        }
+
         // **A target gets no interface painted over it.** Spec 0090: a
         // mirror showing the help text backwards is a mirror of the
         // screen rather than of the room. This is the only pass the two
@@ -3545,6 +3692,71 @@ impl Renderer {
         instances.len() as u32
     }
 
+    /// This frame's boxes and the three camera fields a tracer reads, per
+    /// spec 0098.
+    ///
+    /// **Shifted by the eye, like everything else.** Spec 0051 hands the
+    /// shaders a world with the camera taken off it, because a building this
+    /// size loses the float precision an edge needs. The instances are
+    /// already shifted, so the boxes have to be too or a traced ray and the
+    /// surface it starts from are in different worlds.
+    ///
+    /// Clamped rather than grown: the buffer is the whole cap and a game that
+    /// hands over more boxes than that loses the tail rather than the frame.
+    fn upload_traced(&mut self, scene: &Scene) -> u32 {
+        let eye = self.camera.position;
+        let used = scene.traced().len().min(scene::MAX_TRACED);
+        let shifted: Vec<scene::Traced> = scene.traced()[..used]
+            .iter()
+            .map(|one| one.from_the_eye(eye))
+            .collect();
+
+        if !shifted.is_empty() {
+            self.queue
+                .write_buffer(&self.traced_buffer, 0, bytemuck::cast_slice(&shifted));
+        }
+
+        let light = &scene.light;
+        let ambient = light.ambient;
+
+        self.queue.write_buffer(
+            &self.seen_buffer,
+            0,
+            bytemuck::bytes_of(&Tracing {
+                view_projection: self.camera.view_projection_from_the_eye().to_cols_array(),
+                camera: [0.0, 0.0, 0.0, used as f32],
+                ambient: [ambient.x, ambient.y, ambient.z, 0.0],
+                light_direction: light.direction.extend(0.0).to_array(),
+                light_color: light.color.extend(light.intensity).to_array(),
+            }),
+        );
+
+        used as u32
+    }
+
+    /// Where this frame's lenses stand, written the way the glass is.
+    fn upload_lenses(&mut self, scene: &Scene) -> u32 {
+        let instances: Vec<Instance> = scene
+            .lenses()
+            .iter()
+            .map(|lens| lens.instance.from_the_eye(self.camera.position))
+            .collect();
+
+        if instances.is_empty() {
+            return 0;
+        }
+
+        let bytes: &[u8] = bytemuck::cast_slice(&instances);
+
+        if bytes.len() as u64 > self.lens_buffer.size() {
+            self.lens_buffer = create_buffer_init(&self.device, bytes, wgpu::BufferUsages::VERTEX);
+        } else {
+            self.queue.write_buffer(&self.lens_buffer, 0, bytes);
+        }
+
+        instances.len() as u32
+    }
+
     /// Writes this frame's quads into the vertex and index buffers, growing them when they are too small.
     fn upload_geometry(&mut self, geometry: &Geometry) {
         let vertices: &[u8] = bytemuck::cast_slice(geometry.vertex_data());
@@ -4222,6 +4434,84 @@ struct MeshLayouts<'a> {
     texture: &'a wgpu::BindGroupLayout,
     shadow: &'a wgpu::BindGroupLayout,
     scene_depth: &'a wgpu::BindGroupLayout,
+}
+
+/// What spec 0098's tracer reads, which is three fields off the camera and
+/// nothing else.
+///
+/// Everything in it is relative to the eye, per spec 0051, which is why the
+/// camera is not in it: the eye is the origin.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+struct Tracing {
+    view_projection: [f32; 16],
+    /// xyz is nought, which is where the eye is; w is how many boxes are real
+    camera: [f32; 4],
+    /// rgb is what a ray that leaves the room comes back as, a is unused
+    ambient: [f32; 4],
+    light_direction: [f32; 4],
+    light_color: [f32; 4],
+}
+
+unsafe impl bytemuck::Pod for Tracing {}
+unsafe impl bytemuck::Zeroable for Tracing {}
+
+/// Spec 0098's shader, read the way `mesh_source` reads the mesh one: the
+/// renderer compiles this, and `shaders::TRACE` is the same file read as
+/// text so no number in a test can disagree with the one that ships.
+fn trace_source() -> &'static str {
+    include_str!("../../res/shaders/trace.wgsl")
+}
+
+/// Spec 0098's pipeline. Its own, because it shares no bind group with the
+/// mesh pass and no stage with it either.
+fn create_lens_pipeline(
+    device: &wgpu::Device,
+    color_format: wgpu::TextureFormat,
+    trace: &wgpu::BindGroupLayout,
+    primitive: wgpu::PrimitiveState,
+    depth_stencil: wgpu::DepthStencilState,
+    samples: u32,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("Trace Shader"),
+        source: wgpu::ShaderSource::Wgsl(trace_source().into()),
+    });
+
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("Lens Pipeline Layout"),
+        bind_group_layouts: &[Some(trace)],
+        immediate_size: 0,
+    });
+
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Lens Pipeline"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            buffers: &[Some(crate::mesh::Vertex::DESC), Some(Instance::DESC)],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: color_format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive,
+        depth_stencil: Some(depth_stencil),
+        multisample: wgpu::MultisampleState {
+            count: samples,
+            ..Default::default()
+        },
+        multiview_mask: None,
+        cache: None,
+    })
 }
 
 fn create_mesh_pipeline(
