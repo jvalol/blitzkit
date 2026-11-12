@@ -128,6 +128,33 @@ whole building. A game hands the engine the list it already keeps.
 **Does not.** Any of spec 0096's machinery, and none of it is wanted: this
 spec exists because that machinery is the expensive part.
 
+## 2026-11-12: the lens was twice the size it thought it was
+
+`vs_main` took the lens's radius as `length(model_0)`, on the argument
+written beside it that a unit sphere scaled has one column's length for its
+radius. `MeshData::sphere` is a unit *diameter*: every vertex of it is half a
+unit from the middle. So every lens drawn through this pass believed itself
+twice its real size, the exit point it solved for was not on the glass, and
+what came back was two flat regions rather than a room.
+
+**Nothing here caught it and the picture is why.** `a-lens-bends-what-is-
+behind-it` was blessed by eye, and a wrong bend looks like a bend: the fix
+moved 0.7% of that picture's pixels, which is a change you would not notice
+and would bless again. What found it was capriccio's spec 0064 building a
+room round one of these, where the ball is large against its surroundings
+and the error is not subtle.
+
+The radius is taken off the vertex now, `length(model_0) * length(position)`,
+because a sphere's vertices are all the same distance from its middle and
+that distance is the thing being asked for. It is right for a mesh of any
+radius, which the old line was not for any mesh but one.
+
+**What is still not held** is the shading inside the glass. `shade` knows the
+ambient and the one directional light, so a traced room lit by lamps comes
+back at its colours times the ambient alone. capriccio's room multiplies the
+whole thing by five to make up for it, which is a fudge in a game making up
+for a gap in an engine. Point lights in the tracer are their own spec.
+
 ## Acceptance criteria
 
 - A lens shows the row behind it, inverted, which is the one thing spec 0092's glass cannot do. — `pictures::tests::a_lens_bends_what_is_behind_it`, which fails on 3.1% of its pixels with the index set to one

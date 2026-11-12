@@ -85,8 +85,20 @@ fn vs_main(
     out.color = color;
     out.world_position = world.xyz;
     out.middle = model_3;
-    // a unit sphere scaled, so one column's length is the radius
-    out.radius = length(model_0);
+    // **The radius is the scale times the mesh's own, not the scale.** This
+    // read `length(model_0)` on the argument that a unit sphere scaled has
+    // one column's length for its radius, and `MeshData::sphere` is a unit
+    // *diameter*: every vertex of it is half a unit out. So every lens drawn
+    // through here thought itself twice its real size, the exit point it
+    // worked out was nowhere near the glass, and what came back was two flat
+    // regions instead of a room.
+    //
+    // Taken off the vertex rather than written down, because a sphere's
+    // vertices are all the same distance from its middle and that distance
+    // is the thing being asked for. Spec 0064's room found this by building
+    // on it; the engine's own picture was blessed by eye and a wrong bend
+    // looks like a bend.
+    out.radius = length(model_0) * length(position);
     out.index = shininess;
 
     return out;
