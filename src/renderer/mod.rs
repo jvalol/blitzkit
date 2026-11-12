@@ -133,6 +133,9 @@ pub struct Renderer {
     /// onto the surface as it always did.
     colour: Option<wgpu::TextureView>,
     mesh_pipeline: wgpu::RenderPipeline,
+    /// Spec 0086: the same pass with the sun taken out of it, for whatever
+    /// the game handed to `Scene::backdrop`.
+    sky_pipeline: wgpu::RenderPipeline,
     /// The prepass again for anything whose texture has holes in it, with the
     /// texture bound so the holes can be cut before the depth is written.
     /// Spec 0047.
@@ -242,6 +245,15 @@ pub struct Renderer {
 struct GpuMesh {
     /// Spec 0075: drawn by the water pipelines rather than the ordinary ones.
     water: bool,
+    /// Spec 0086: drawn by the sky pipeline, which is the ordinary one with
+    /// the sun taken out.
+    ///
+    /// Said at the push and not at the upload, which is the one way this
+    /// differs from `water`: a game says a mesh is water when it hands the
+    /// vertices over, and says a mesh is the sky by handing it to
+    /// `Scene::backdrop`. Asking for it twice would be a second account of
+    /// one thing.
+    sky: bool,
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     index_count: u32,
@@ -959,6 +971,26 @@ impl Renderer {
             "fs_glass",
         );
 
+        // and once for the sky, per spec 0086. The same pass again with
+        // nothing but the colour, the picture and the fill in its fragment
+        // stage: a backdrop is not a surface the sun falls on, and shaded as
+        // one it carries the dome's own terminator across the sky as a hard
+        // edge.
+        let sky_pipeline = create_mesh_pipeline(
+            &device,
+            drawn,
+            MeshLayouts {
+                camera: &camera_bind_group_layout,
+                texture: &texture_bind_group_layout,
+                shadow: &shadow_bind_group_layout,
+                scene_depth: &scene_depth_layout,
+            },
+            depth::mesh_primitive_state(),
+            depth::read_only_state(),
+            samples,
+            "fs_sky",
+        );
+
         // and spec 0098's tracer, which shares none of the above: its own
         // bind group, because the camera's carries sixty four lamps and four
         // spots and a tracer reads none of them, and its own shader.
@@ -1091,6 +1123,7 @@ impl Renderer {
             depth,
             colour,
             mesh_pipeline,
+            sky_pipeline,
             cutout_prepass_pipeline,
             outline_pipeline,
             outline_buffer,
@@ -1565,6 +1598,7 @@ impl Renderer {
             bounds: data.bounds(),
             boxy: data.is_box(),
             water: false,
+            sky: false,
         });
 
         MeshId(self.meshes.len() - 1)
@@ -2796,12 +2830,24 @@ impl Renderer {
 
                         // set when it changes rather than once before the
                         // loop, because which one this batch wants is the
-                        // mesh's own answer
-                        let wanted: *const wgpu::RenderPipeline =
-                            if mesh.water { for_water } else { pipeline };
-                        if wanted != set {
-                            mesh_pass.set_pipeline(if mesh.water { for_water } else { pipeline });
-                            set = wanted;
+                        // mesh's own answer.
+                        //
+                        // The sky first, per spec 0086. A backdrop is opaque
+                        // and so only ever reaches this through the first
+                        // run, where the water slot holds the ordinary
+                        // pipeline anyway; the order is written down rather
+                        // than relied on.
+                        let wanted: &wgpu::RenderPipeline = if mesh.sky {
+                            &self.sky_pipeline
+                        } else if mesh.water {
+                            for_water
+                        } else {
+                            pipeline
+                        };
+                        let at: *const wgpu::RenderPipeline = wanted;
+                        if at != set {
+                            mesh_pass.set_pipeline(wanted);
+                            set = at;
                         }
                         mesh_pass.set_bind_group(1, &self.textures[texture_id.0], &[]);
                         mesh_pass.set_bind_group(2, &self.shadow_bind_group, &[]);
@@ -3371,6 +3417,18 @@ impl Renderer {
 
         // and whatever stands behind all of it, placed here because here is
         // what knows the far plane. Spec 0086.
+        //
+        // Handing a mesh over this way is what makes it the sky, so the mark
+        // is taken here rather than asked for a second time. It is never
+        // taken off: a mesh that was ever the sky is the sky, and a game
+        // wanting the same shape as a solid wants a second mesh, which is
+        // what `add_water_mesh` already says about water.
+        if let Some(sky) = scene.behind_it_all() {
+            if sky.mesh.0 < self.meshes.len() {
+                self.meshes[sky.mesh.0].sky = true;
+            }
+        }
+
         let behind = scene.behind_it_all().and_then(|behind| {
             if behind.mesh.0 >= self.meshes.len() || behind.texture.0 >= self.textures.len() {
                 log::warn!("a scene asked for a backdrop that was never added");
@@ -6716,6 +6774,93 @@ mod asked {
             r,
             g,
             b
+        );
+    }
+
+    /// Spec 0086: the sun does not move the sky.
+    ///
+    /// **capriccio had the sun on its sky dome for a fortnight and it read
+    /// as a fault in the weather.** A backdrop went through `fs_main` like
+    /// any other mesh, so the half of the dome turned toward the sun came
+    /// out brighter, and where `max(dot(N, L), 0)` clipped at nought there
+    /// was a hard edge across the sky in the shape of the dome's own
+    /// terminator. It was hunted in the storm's picture four times over: the
+    /// radial term was taken out, the picture was dumped and found even, the
+    /// texture was swapped for a grid and the edge stayed behind the grid,
+    /// and every mip level was painted its own hue and all of it came back
+    /// level nought. What found it was turning the sun off.
+    ///
+    /// So the claim is the general one rather than the terminator's: a
+    /// backdrop is drawn the same whichever way the light points. That holds
+    /// the diffuse, the highlight and the shadow at once, which is what
+    /// `fs_sky` drops.
+    ///
+    /// A wall across the view rather than a dome, because a backdrop is
+    /// placed at the eye and a dome seen from inside is back faces. It is
+    /// wound toward the camera and its normal points up, square to the
+    /// view, so the two suns are straight onto that normal and straight at
+    /// the back of it: under `fs_main` one lights it fully and the other
+    /// leaves it at the fill.
+    #[test]
+    fn the_sun_does_not_move_the_sky() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(64, 64)) else {
+            return;
+        };
+
+        // counter-clockwise seen from the origin looking down -z, so it is a
+        // front face and the mesh pass does not cull it
+        let up = [0.0, 1.0, 0.0];
+        let wall = crate::mesh::MeshData::new(
+            vec![
+                crate::mesh::Vertex::new([-1.0, -1.0, -1.0], up, [0.0, 1.0]),
+                crate::mesh::Vertex::new([1.0, -1.0, -1.0], up, [1.0, 1.0]),
+                crate::mesh::Vertex::new([1.0, 1.0, -1.0], up, [1.0, 0.0]),
+                crate::mesh::Vertex::new([-1.0, 1.0, -1.0], up, [0.0, 0.0]),
+            ],
+            vec![0, 1, 2, 0, 2, 3],
+        );
+        let wall = renderer.add_mesh(&wall);
+        let geometry = Geometry::new();
+        let text = TextRenderer::new();
+
+        let mut eye = Camera::new();
+        eye.position = glam::Vec3::ZERO;
+        eye.target = -glam::Vec3::Z;
+        renderer.set_camera(eye);
+
+        // `None` draws no backdrop at all, which is what says the other two
+        // drew one. The first draft asked instead that the picture was
+        // neither black nor white, and a backdrop lit to clipping is white:
+        // the guard failed before the claim could, so breaking `fs_sky` on
+        // purpose reported the wrong thing.
+        let shot = |renderer: &mut Renderer, from: Option<glam::Vec3>| {
+            let mut scene = Scene::new();
+            scene.light.intensity = 0.5;
+            scene.light.ambient = glam::Vec3::splat(0.2);
+
+            if let Some(from) = from {
+                scene.light.direction = from;
+                scene.backdrop(wall, TextureId::WHITE, glam::Vec4::ONE, 32.0);
+            }
+
+            renderer.picture(&scene, &geometry, &text).pixels
+        };
+
+        // straight down onto the wall's own normal, and straight up at the
+        // back of it
+        let lit = shot(&mut renderer, Some(glam::Vec3::NEG_Y));
+        let away = shot(&mut renderer, Some(glam::Vec3::Y));
+        let none = shot(&mut renderer, None);
+
+        assert_eq!(lit.len(), away.len());
+        assert_ne!(
+            lit, none,
+            "the backdrop drew nothing, so this test is testing nothing"
+        );
+        assert_eq!(
+            lit, away,
+            "the sky changed when the sun did, so a backdrop is still being \
+             shaded like a solid"
         );
     }
 

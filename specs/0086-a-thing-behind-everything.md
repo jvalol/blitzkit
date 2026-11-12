@@ -56,11 +56,51 @@ That is the game's shape to fix rather than the engine's, and it is written
 here because it is the second thing anybody giving this a backdrop will get
 wrong.
 
+## A backdrop is not lit, 2026-11-12
+
+Jake, playing capriccio: *the shift from day to night has a border like thing
+going on.* A pale wedge in the sky over the garden, with a hard edge down one
+side of it, in the same place every evening.
+
+**It was the dome taking the sun.** A backdrop went through `fs_main` like any
+other mesh, so `max(dot(N, L), 0)` ran over its normals: the half turned
+toward the sun came out brighter, and where that clipped at nought there was
+an edge across the sky in the shape of the dome's own terminator. The sun is
+in a sky rather than on it, and a dome is the one surface where the normals
+are a fact about the mesh and nothing about what is being drawn.
+
+The hunt is worth the line it costs. The radial term in the storm's own
+picture was taken out and the wedge stayed. The picture was dumped and came
+back even mottle with no such blob in it. The texture was swapped for a red
+grid and the wedge was still there, behind the grid. Every mip level was
+painted its own hue and all of it came back level nought, so it was not a
+transition either. Four passes, each of them looking at the picture, and the
+picture was never the thing. What found it was setting the light's intensity
+to nought and watching the wedge go with it.
+
+**`fs_sky`, which is the colour, the picture and the fill.** No lambert, no
+highlight, no shadow, no lamps. A thing at the far plane is out of range of
+every lamp and behind every shadow, so each of those was a term that could
+only ever put the sky in patches.
+
+**Which mesh that is, is not asked for twice.** A game says a mesh is water
+when it hands the vertices over, per spec 0075, and says a mesh is the sky by
+handing it to `Scene::backdrop`. The renderer takes the mark there. It is
+never taken off: a mesh that was ever the sky is the sky, and a game wanting
+the same shape as a solid wants a second mesh.
+
+**What this moves in a game.** The colour handed to `backdrop` is now what
+lands rather than what the light multiplies, which is what `aim::SKY`'s own
+note in capriccio already claimed it was and the arithmetic was not. capriccio
+divides its fill out through `garden::gives_off`, the same way its moon and
+its runestone already did. Nothing else in the project draws a backdrop.
+
 ## Acceptance criteria
 
 - A backdrop is scaled so its furthest corner sits inside the far plane. — `renderer::tests::a_backdrop_is_scaled_to_sit_inside_the_far_plane`
 - Measured from the mesh's own origin, which for a dome sprung from its rim is a fifth further than half its box's diagonal. — `renderer::tests::a_dome_is_measured_from_its_rim_and_not_from_the_middle_of_its_box`
 - A mesh with no size is scaled to nothing rather than to infinity. — `renderer::tests::a_backdrop_with_no_size_is_scaled_to_nothing`
+- A backdrop is drawn the same whichever way the sun points. — `renderer::asked::the_sun_does_not_move_the_sky`
 
 **And three in the arcade that this spec cannot cite.** `check-specs` reads
 one repo, so a criterion naming a test in another is a criterion nothing

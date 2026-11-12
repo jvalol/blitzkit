@@ -888,6 +888,31 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     return vec4<f32>(surface.shaded, surface.base.a);
 }
 
+// Spec 0086: what stands behind everything is not a surface the sun falls on.
+//
+// A backdrop is the sky, and the sun is in it rather than on it. Drawn
+// through `fs_main` a dome takes the directional light like a solid, so the
+// half of it turned toward the sun is brighter, and where `max(dot(N, L), 0)`
+// clips at nought there is a hard edge across the sky in the shape of the
+// dome's own terminator. capriccio had that edge over its garden and it was
+// read as a fault in the storm's picture four times before anybody turned the
+// sun off and watched it go.
+//
+// So: the colour, what the picture says, and the fill. No lambert, no
+// highlight, no shadow, no lamps. A thing at the far plane is out of range of
+// every lamp and behind every shadow, and each of those terms was another way
+// for a sky to come out in patches.
+//
+// Which mesh this is, is not the game's to say twice: it is whichever one was
+// handed to `Scene::backdrop`, and the renderer marks it there.
+@fragment
+fn fs_sky(in: VertexOutput) -> @location(0) vec4<f32> {
+    let sampled = textureSample(surface_texture, surface_sampler, in.uv);
+    let base = in.color * sampled;
+
+    return vec4<f32>(base.rgb * uniforms.ambient.rgb, base.a);
+}
+
 // Spec 0075: water, which answers the angle you look at it and how much of it
 // the ray goes through.
 //
