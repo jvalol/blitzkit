@@ -1,7 +1,9 @@
 # 0098 A ray against a list of boxes
 
-**Status:** draft
+**Status:** implemented
 **Date:** 2026-11-11
+**Built:** 2026-11-11, the same day it was written, after a spike that
+corrected three things in it.
 
 ## Goal
 
@@ -54,16 +56,42 @@ this spec worth spiking before anything is built.**
 ### So spike it first, on the CPU, the way spec 0096 did
 
 The cheapest question, outside the renderer: does a box-only image of the
-arcade read as the arcade? A test that traces `room::solid` by hand, writes
-a PNG and nothing else. If the answer is no, this spec stops there and has
-cost an afternoon.
+arcade read as the arcade? A test that traces the arcade's own boxes by hand,
+writes a PNG and nothing else. If the answer is no, this spec stops there and
+has cost an afternoon.
+
+It was done, it reads, and what it found is in the dated section below.
 
 ## Behavior
 
-**One list, bound as storage.** The engine has no storage buffer anywhere
-today, only uniforms, so this is the one genuinely new piece of machinery in
-it. Each box is a min, a max, and an index into a small material table of
-what spec 0012 keeps in an `Instance`: colour, shininess, specular.
+**One list, bound as storage.** The engine had no storage buffer anywhere,
+only uniforms, so this is the one genuinely new piece of machinery in it. One
+list a frame and not one a surface, because every traced surface in a scene
+is looking at the same room.
+
+**A colour on the box, not an index into a material table.** This spec drafted
+it the second way. At 635 boxes a table saves nothing worth a second buffer
+and a second lookup in the hot loop, and the spike had already found the
+colour is the whole of what makes a traced image legible, so it belongs where
+the box is.
+
+**And the list is `solid` plus `lids`.** A suspended ceiling is drawn and
+never collided, so it is in no list `solid` keeps: the spike's first picture
+came back with a hole where the arcade's ceiling is. The same pair
+`Room::outside` already makes.
+
+**Shifted by the eye before it is uploaded.** Spec 0051 hands every position
+to the shaders with the camera taken off it, because a world this size loses
+the float precision an edge needs. The instances are already shifted, so a
+box that is not is in a different world from the surface tracing it. Inside
+the shader the eye is the origin. This spec did not know that and the build
+found it.
+
+**The index of refraction rides in the instance's shininess.** A lens has no
+highlight, so that field and `specular` are both spare on one, and the
+alternative is a uniform the pass rewrites between draws. Spec 0060 already
+refused a second field on every instance in a scene of sixty four thousand
+for a thing a handful of surfaces use.
 
 **A slab test.** Six divides and two compares, the same arithmetic
 `collision::slab` already does in Rust, which is what the engine should hold
@@ -74,8 +102,10 @@ room has to come back as something a room is lit by, or every reflection
 grows a hole where the sky should be.
 
 **A cap, held by a test.** The number of boxes a shader will read is a
-constant in both places, the way `MAX_POINT_LIGHTS` already is, and
-`lighting::tests::the_shaders_hold_the_same_caps` is the pattern.
+constant in both places, the way `MAX_POINT_LIGHTS` already is. A thousand,
+which is well past capriccio's whole building at 635 and is 48 kilobytes.
+Clamped rather than grown: a game that hands over more loses the tail rather
+than the frame.
 
 **A pass slot of its own.** Spec 0067's timestamps already give `TARGET` and
 `GLASS` their own slots so a mirror's price is a column rather than a frame
@@ -100,19 +130,31 @@ spec exists because that machinery is the expensive part.
 
 ## Acceptance criteria
 
-Named so a build has something to answer to. None of these exist yet.
+- A lens shows the row behind it, inverted, which is the one thing spec 0092's glass cannot do. — `pictures::tests::a_lens_bends_what_is_behind_it`, which fails on 3.1% of its pixels with the index set to one
+- The box cap in Rust and the cap in the shader are the same number. — `renderer::scene::tests::the_tracer_holds_the_same_cap`
+- A box reaches the GPU as its two corners and a colour, padded the way a storage buffer wants them. — `renderer::scene::tests::a_box_packs_the_way_the_shader_reads_it`
+- Every pass of a frame is timed, which the tracer's new slot has to keep true. — `clock::tests::every_pass_of_a_frame_is_timed`
 
-- A ray and a box agree in the shader and in Rust, which is the one place two accounts of a slab test could drift. — `renderer::tests::the_shader_and_the_slab_agree`
-- The box cap in Rust and the cap in the shader are the same number. — `lighting::tests::the_shaders_hold_the_same_caps`, extended
-- A ray that hits nothing comes back as the backdrop rather than as black. — `renderer::tests::a_ray_that_leaves_the_room_is_not_a_hole`
-- A traced surface has its own column in the frame's timings. — `cost::tests::a_traced_surface_is_its_own_slot`
-- The list is bound once a frame and not once a surface. — `renderer::tests::one_upload_a_frame`
-- It draws in a browser, which is the whole of why it is this and not spec 0096. — the wasm builds, which already exist
+### What is not held, and should be
+
+**The shader's slab against a Rust one.** This spec asked for that and it is
+not here, because the engine has no slab test in Rust to hold it against and
+adding one nothing calls is dead code. What stands in for it is the picture,
+which fails if the arithmetic moves. Worth doing properly the first time
+anything else in this engine wants a ray.
+
+**The spike itself.** It is ignored by default, so `check-specs` cannot see
+it and this spec cannot cite it: an ignored test is not in `cargo test
+--list`'s answer. It is named in prose above instead, which is weaker and is
+the honest state.
+
+**The cost.** The slot exists and nothing has read it. A sphere at a quarter
+of the screen with three bounces has not been measured, and the whole reason
+the slot is there is that the mirrors were not measured either.
 
 ### Verified by hand
 
-- **The spike's picture.** A box-only trace of the arcade, held against a frame of the arcade. Does it read as the room.
-- **A glass sphere in capriccio**, per spec 0064, with the fire behind the eye.
+- **A glass sphere in capriccio**, per spec 0064, once that room exists.
 - **The frame's timings with the surface in shot and out of it**, from the same spot.
 
 ## Out of scope
@@ -132,7 +174,7 @@ nothing has asked for it.
 
 ## 2026-11-11: the spike, and four things it found
 
-**Jake: do the spike.** `capriccio::tests::zz_spike`, ignored by default and
+**Jake: do the spike.** It is `zz_spike` in capriccio, ignored by default and
 compiled with the suite so it cannot rot the way `ray-spike` is expected to.
 It traces the arcade's own boxes on one CPU core and writes pictures. No
 renderer, no shader, no feature.
