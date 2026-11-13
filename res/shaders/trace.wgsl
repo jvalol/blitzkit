@@ -24,8 +24,18 @@ const BOUNCES: u32 = 3u;
 // of the ball.
 const MAX_TRACED_LAMPS: u32 = 32u;
 
-// How tight that highlight is. A mirror's is a point, not a sheen.
-const SHINE: f32 = 220.0;
+// What a lamp looks like on a polished surface: a small white hot core
+// with a soft halo round it, which is two lobes and not one.
+//
+// **One middling lobe reads as a smudge.** That is what was here, at 220,
+// and Jake called the result soft. A real glint is far tighter than that
+// and far brighter, bright enough to clip, because what a mirror shows of
+// a lamp is the lamp. The halo is what says the surface is polished rather
+// than painted, and on its own it is the smudge again.
+const SHINE: f32 = 900.0;
+const GLINT: f32 = 7.0;
+const SHEEN: f32 = 32.0;
+const SHEEN_LIT: f32 = 0.22;
 
 // **Everything here is relative to the eye, per spec 0051.** The engine
 // hands every position over with the camera taken off it, because a world
@@ -354,17 +364,40 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             continue;
         }
 
-        let left = 1.0 - away / where_it_is.w;
         let to_light = offset / away;
+
+        // a lamp behind the surface lights nothing on it, which the half
+        // vector alone does not say
+        if (dot(normal, to_light) <= 0.0) {
+            continue;
+        }
+
+        let left = 1.0 - away / where_it_is.w;
         let half_way = normalize(to_light + to_viewer);
+        let square = max(dot(normal, half_way), 0.0);
 
         shine = shine
             + what_it_is.rgb
                 * what_it_is.a
                 * left
                 * left
-                * pow(max(dot(normal, half_way), 0.0), SHINE);
+                * (pow(square, SHINE) * GLINT + pow(square, SHEEN) * SHEEN_LIT);
     }
 
-    return vec4<f32>(got * in.color.rgb + shine, 1.0);
+    // **How much it reflects depends on how square on you are to it**,
+    // which is what makes a ball read as a ball rather than as a disc with
+    // a picture on it. Straight on, a surface gives back its own colour;
+    // at a grazing angle every surface there is gives back nearly all of
+    // the light, so the rim of a sphere is a bright ring and the face is
+    // not. Jake, 2026-11-12: it reads more like a reflective circle, I'm
+    // looking for the kind of lighting that reads as a sphere.
+    //
+    // Schlick's, which is the cheap form everybody uses: the tint is what
+    // it gives back face on and the fifth power carries it to all of it at
+    // the edge.
+    let facing = clamp(dot(normal, -way), 0.0, 1.0);
+    let edge = pow(1.0 - facing, 5.0);
+    let mirrored = in.color.rgb + (vec3<f32>(1.0) - in.color.rgb) * edge;
+
+    return vec4<f32>(got * mirrored + shine, 1.0);
 }

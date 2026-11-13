@@ -224,6 +224,38 @@ nothing can see.
 What a body walks into is still the box. A round collider buys nothing a
 box does not already give, and the walk has never wanted one.
 
+## What makes it read as a ball, 2026-11-12
+
+Jake: *the reflective sphere reads more like a reflective circle. I'm
+looking for the kind of lighting that reads as a sphere.*
+
+A mirror that gives back the same share of the light wherever you look at
+it is a flat mirror, however it is shaped. What tells an eye it is looking
+at a ball is that the share climbs toward the silhouette: straight on a
+surface gives back its own colour, and at a grazing angle every surface
+there is gives back nearly all of the light. So a sphere has a bright ring
+at its rim and a darker face, and the ring is the shape.
+
+Schlick's approximation, which is the cheap form: the tint a game hands
+over is what the surface gives back face on, and a fifth power carries it
+to all of it at the edge. That makes the tint mean something it did not
+before, so a game that wants a ring has to ask for less than one.
+
+### And the glint is two lobes, not one
+
+A lamp on a polished surface is a small white hot core with a soft halo
+round it. One middling lobe is neither, and reads as a smudge: that is what
+was here at a power of 220, and Jake called it soft.
+
+So the tight one is 900 and is multiplied up until it clips, because what a
+mirror shows of a lamp is the lamp. The halo is 32 at a fifth of the
+strength and is what says the surface is polished rather than painted; on
+its own it is the smudge again.
+
+A lamp behind the surface also lit it, because a half vector alone does not
+say which side of a surface a lamp is on. It is asked now, the way the mesh
+pass asks it.
+
 ## Acceptance criteria
 
 - A traced box can be a cylinder standing in it, which covers less of a mirror than the box does. — `renderer::asked::a_traced_box_can_be_round`
