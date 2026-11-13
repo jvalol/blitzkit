@@ -256,8 +256,53 @@ A lamp behind the surface also lit it, because a half vector alone does not
 say which side of a surface a lamp is on. It is asked now, the way the mesh
 pass asks it.
 
+### A lamp the traced thing cannot see, 2026-11-13
+
+Jake, looking at capriccio's ball: *there are lights being reflected on the
+ball that have no obvious source.* The source was a storey down. There is
+no shadow in `shade`, so every lamp within range reached every surface
+through walls and floors, and the ball wore highlights from the lamps under
+its own floor.
+
+The renderer asks once a frame, from the middle of the traced thing against
+the same boxes it shades with, which is thirty two rays rather than one for
+every fragment. A lamp it cannot see is marked with a negative range.
+
+**Marked, not dropped, and the difference is the whole of it.** Taking them
+out of the list was the first go and it put the reflected room out
+altogether: a wall is lit by the lamp beside it whether or not a mirror
+across the room has a clear line to that lamp. So `shade` takes every lamp
+and reads the range's size; only the highlight on the traced surface itself
+reads its sign.
+
+A lamp half behind a pier is in or out whole, which is what asking from one
+point costs, and a ball an arm's length across can live with it.
+
+### And the sun does not reach a traced thing under a roof
+
+Jake: *the lightning from the garden and field shows up in the sphere's
+reflections.*
+
+capriccio rides its storm's flash on the sun rather than on the ambient,
+and its spec 0016 says why in as many words: the ambient is added
+everywhere and a flash riding on it would light the cellar, while the sun
+is shadowed by the roof and so is the one light in the building that cannot
+get indoors. That is true of a pass with shadow maps. `shade` has none, so
+the sun reached every traced surface through every roof, and the storm
+outside flashed in a ball two floors in.
+
+Asked the way the lamps are asked and pointed the other way: can the traced
+thing see the sky along the light's own line, far enough out to leave any
+building. If not, the tracer is handed no sun at all.
+
+This is the third fault of one shape, and they are worth naming together: a
+traced surface has no shadow, so anything that relies on being shadowed
+arrives where it should not. The lamps came through a floor, the sun
+through a roof, and the flash rode in on the sun.
+
 ## Acceptance criteria
 
+- The sun does not reach a traced thing under a roof, so a storm outside does not flash in a room indoors. — `renderer::asked::the_sun_does_not_reach_a_traced_thing_under_a_roof`
 - A traced box can be a cylinder standing in it, which covers less of a mirror than the box does. — `renderer::asked::a_traced_box_can_be_round`
 - An index at or under nought draws a mirror, which shows what is behind the eye, and not a lens. — `renderer::asked::a_lens_with_no_index_is_a_mirror`
 - A lens shows the row behind it, inverted, which is the one thing spec 0092's glass cannot do. — `pictures::tests::a_lens_bends_what_is_behind_it`, which fails on 3.1% of its pixels with the index set to one

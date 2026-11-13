@@ -252,14 +252,17 @@ fn shade(hit: Hit, on: vec3<f32>) -> vec3<f32> {
         let what_it_is = tracing.lamps[n * 2u + 1u];
         let offset = where_it_is.xyz - on;
         let away = length(offset);
+        // a negative range is a lamp this surface's own mirror cannot see,
+        // which is nothing to do with what the lamp lights
+        let reach = abs(where_it_is.w);
 
-        if (away > where_it_is.w || away <= 0.0) {
+        if (away > reach || away <= 0.0) {
             continue;
         }
 
         // the engine's own falloff, which is `(1 - d/range)` squared and
         // reaches exactly nothing at the range, the same as the mesh pass
-        let left = 1.0 - away / where_it_is.w;
+        let left = 1.0 - away / reach;
 
         got = got
             + what_it_is.rgb
@@ -357,6 +360,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     for (var n: u32 = 0u; n < lamps; n = n + 1u) {
         let where_it_is = tracing.lamps[n * 2u];
         let what_it_is = tracing.lamps[n * 2u + 1u];
+        // **Only the lamps this thing can see.** There is no shadow in a
+        // traced surface, so a lamp behind a floor put a highlight on
+        // capriccio's ball from a storey down, with nothing in the room to
+        // account for it. The renderer marks those with a negative range.
+        if (where_it_is.w <= 0.0) {
+            continue;
+        }
+
         let offset = where_it_is.xyz - on;
         let away = length(offset);
 

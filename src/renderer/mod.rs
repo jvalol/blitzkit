@@ -3789,6 +3789,42 @@ impl Renderer {
             .first()
             .map(|lens| glam::Vec3::from(lens.instance.model[3]))
             .unwrap_or(self.camera.position);
+        // **And a lamp the traced thing cannot see does not light it.**
+        // There is no shadow in `shade`, so every lamp within range reached
+        // every surface, through walls and floors: capriccio's ball stood
+        // over the room below and wore four highlights from lamps under its
+        // own floor. Jake, looking at it: there are lights being reflected
+        // on the ball that have no obvious source. The source was a storey
+        // down.
+        //
+        // Asked once a frame from the middle of the traced thing against
+        // the same boxes it shades with, which is thirty two rays rather
+        // than one for every fragment of it. A lamp half behind a pier is
+        // in or out whole, and that is a thing a ball an arm's length
+        // across can live with.
+        let open = |lamp: glam::Vec3| {
+            let way = lamp - watching;
+            let far = way.length();
+
+            if far < 1e-4 {
+                return true;
+            }
+
+            let way = way / far;
+
+            !shifted.iter().any(|box_| {
+                let least = glam::Vec3::from(box_.least);
+                let most = glam::Vec3::from(box_.most);
+                let one = (least - (watching - self.camera.position)) / way;
+                let two = (most - (watching - self.camera.position)) / way;
+                let near = one.min(two);
+                let away = one.max(two);
+                let into = near.x.max(near.y).max(near.z);
+                let out = away.x.min(away.y).min(away.z);
+
+                out >= into && into > 1e-3 && into < far - 1e-3
+            })
+        };
         let mut near: Vec<&crate::lighting::PointLight> = scene.point_lights().iter().collect();
 
         near.sort_by(|one, two| {
@@ -3801,13 +3837,45 @@ impl Renderer {
         });
         near.truncate(crate::renderer::scene::MAX_TRACED_LAMPS);
 
+        // **And the sun does not reach a traced thing under a roof.**
+        // `shade` has no shadow, so the one light the mesh pass keeps out of
+        // every room by shadowing it reached every traced surface through
+        // the roof. capriccio's storm rides its lightning on the sun for
+        // exactly that reason, per its spec 0016: the sun is the light that
+        // cannot get indoors. It got into the ball. Jake: the lightning from
+        // the garden and field shows up in the sphere's reflections.
+        //
+        // The same question the lamps are asked, pointed the other way: can
+        // the traced thing see the sky along the light's own line. Far
+        // enough out to leave any building, and the list is the room's own
+        // boxes, so outdoors there is nothing to stop it.
+        let under_the_sky = if light.intensity > 0.0
+            && !open(watching - light.direction.normalize_or_zero() * 1_000.0)
+        {
+            0.0
+        } else {
+            1.0
+        };
         let lamps_used = near.len() as u32;
         let mut lamps = [[0.0f32; 4]; 64];
 
         for (n, lamp) in near.iter().enumerate() {
             let at = lamp.position - self.camera.position;
+            // **A negative range marks a lamp the traced thing cannot see.**
+            // It still lights the room: a wall is lit by the lamp beside it
+            // whether or not a mirror across the room has a clear line to
+            // that lamp. Taking them out of the list altogether was the
+            // first go and put capriccio's whole reflected room out. What a
+            // lamp behind a floor may not do is put a highlight on the
+            // mirror's own surface, which is the thing with no visible
+            // source.
+            let reach = if open(lamp.position) {
+                lamp.range
+            } else {
+                -lamp.range
+            };
 
-            lamps[n * 2] = at.extend(lamp.range).to_array();
+            lamps[n * 2] = at.extend(reach).to_array();
             lamps[n * 2 + 1] = lamp.color.extend(lamp.intensity).to_array();
         }
 
@@ -3819,7 +3887,10 @@ impl Renderer {
                 camera: [0.0, 0.0, 0.0, used as f32],
                 ambient: [ambient.x, ambient.y, ambient.z, 0.0],
                 light_direction: light.direction.extend(0.0).to_array(),
-                light_color: light.color.extend(light.intensity).to_array(),
+                light_color: light
+                    .color
+                    .extend(light.intensity * under_the_sky)
+                    .to_array(),
                 lamps_used: [lamps_used, 0, 0, 0],
                 lamps,
             }),
@@ -7040,6 +7111,91 @@ mod asked {
             round > 100,
             "round it covers {} pixels, so it is not being traced at all",
             round
+        );
+    }
+
+    /// Spec 0098: the sun does not reach a traced thing under a roof.
+    ///
+    /// **`shade` has no shadow**, so the one light the mesh pass keeps out
+    /// of every room by shadowing it reached every traced surface through
+    /// the roof. capriccio rides its lightning on the sun for exactly that
+    /// reason, its spec 0016 being that the sun is the light that cannot
+    /// get indoors, and the storm outside flashed in a ball two floors in.
+    ///
+    /// The ambient is nought here, so the sun is the only light there is: a
+    /// wall the mirror can see is its colour or it is black.
+    #[test]
+    fn the_sun_does_not_reach_a_traced_thing_under_a_roof() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(128, 128)) else {
+            return;
+        };
+
+        let ball = renderer.add_mesh(&crate::mesh::MeshData::sphere(20, 20));
+        let geometry = Geometry::new();
+        let text = TextRenderer::new();
+
+        let mut eye = Camera::new();
+        eye.position = glam::Vec3::ZERO;
+        eye.target = -glam::Vec3::Z;
+        renderer.set_camera(eye);
+
+        let red = |renderer: &mut Renderer, roofed: bool| {
+            let mut scene = Scene::new();
+            scene.light.ambient = glam::Vec3::ZERO;
+            scene.light.color = glam::Vec3::ONE;
+            scene.light.intensity = 1.0;
+            // down and away, so it falls on the face of the wall the
+            // mirror can see rather than on the wall's top
+            scene.light.direction = glam::vec3(0.0, -1.0, 1.0).normalize();
+
+            let wall =
+                crate::collision::Aabb::new(glam::vec3(-9.0, -9.0, 4.0), glam::vec3(9.0, 9.0, 5.0));
+            let mut boxes = vec![crate::renderer::scene::Traced::new(
+                wall,
+                glam::vec4(1.0, 0.0, 0.0, 1.0),
+            )];
+
+            if roofed {
+                boxes.push(crate::renderer::scene::Traced::new(
+                    crate::collision::Aabb::new(
+                        glam::vec3(-9.0, 6.0, -9.0),
+                        glam::vec3(9.0, 7.0, 9.0),
+                    ),
+                    glam::vec4(0.0, 0.0, 1.0, 1.0),
+                ));
+            }
+
+            scene.traces(&boxes);
+            scene.lens(
+                ball,
+                &crate::mesh::Transform::at(glam::vec3(0.0, 0.0, -3.0))
+                    .with_scale(glam::Vec3::splat(2.0)),
+                glam::Vec4::ONE,
+                -1.0,
+            );
+
+            let shot = renderer.picture(&scene, &geometry, &text);
+
+            shot.pixels
+                .chunks(4)
+                .filter(|pixel| pixel[0] > 90 && pixel[1] < 70 && pixel[2] < 70)
+                .count()
+        };
+
+        let open = red(&mut renderer, false);
+        let roofed = red(&mut renderer, true);
+
+        assert!(
+            open > 200,
+            "with the sky open the sun lights {} pixels of the wall, which is \
+             too few to be measuring anything",
+            open
+        );
+        assert!(
+            roofed < open / 10,
+            "under a roof the sun still lights {} pixels against {} open",
+            roofed,
+            open
         );
     }
 
