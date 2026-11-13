@@ -136,6 +136,9 @@ pub struct Renderer {
     /// Spec 0086: the same pass with the sun taken out of it, for whatever
     /// the game handed to `Scene::backdrop`.
     sky_pipeline: wgpu::RenderPipeline,
+    /// And the same shader on the translucent states, for a cloud deck.
+    /// Spec 0099.
+    sky_translucent_pipelines: [wgpu::RenderPipeline; 2],
     /// The prepass again for anything whose texture has holes in it, with the
     /// texture bound so the holes can be cut before the depth is written.
     /// Spec 0047.
@@ -991,6 +994,28 @@ impl Renderer {
             "fs_sky",
         );
 
+        // and the same for a sky that is see-through, per spec 0099. A
+        // cloud deck is a sky and it is blended, and the pair above is
+        // `fs_main`, so without these a deck handed to the translucent runs
+        // would be shaded as a solid and wear the terminator spec 0086 took
+        // off the backdrop.
+        let sky_translucent_pipelines = [wgpu::Face::Front, wgpu::Face::Back].map(|cull| {
+            create_mesh_pipeline(
+                &device,
+                drawn,
+                MeshLayouts {
+                    camera: &camera_bind_group_layout,
+                    texture: &texture_bind_group_layout,
+                    shadow: &shadow_bind_group_layout,
+                    scene_depth: &scene_depth_layout,
+                },
+                depth::translucent_primitive_state(cull),
+                depth::translucent_state(),
+                samples,
+                "fs_sky",
+            )
+        });
+
         // and spec 0098's tracer, which shares none of the above: its own
         // bind group, because the camera's carries sixty four lamps and four
         // spots and a tracer reads none of them, and its own shader.
@@ -1124,6 +1149,7 @@ impl Renderer {
             colour,
             mesh_pipeline,
             sky_pipeline,
+            sky_translucent_pipelines,
             cutout_prepass_pipeline,
             outline_pipeline,
             outline_buffer,
@@ -1623,6 +1649,33 @@ impl Renderer {
     pub fn add_water_mesh(&mut self, data: &MeshData) -> MeshId {
         let id = self.add_mesh(data);
         self.meshes[id.0].water = true;
+
+        id
+    }
+
+    /// The same, for a sky that is not the thing behind everything. Spec
+    /// 0099.
+    ///
+    /// **Because a sky is more than one layer.** Spec 0086 marks the
+    /// backdrop as sky where it is handed over, and that covers the one
+    /// thing at the far plane. A cloud deck is nearer than that, so that
+    /// the sun and the moon can stand between the two, and it is pushed
+    /// with a transform like anything else: there is nowhere on that path
+    /// for the renderer to take the mark, so the game says it at the
+    /// upload, where water already says its own.
+    ///
+    /// What the mark buys is `fs_sky`: the colour, the picture and the
+    /// fill, with no lambert, no highlight and no shadow. A dome shaded as
+    /// a solid carries its own terminator across the sky as a hard edge,
+    /// which is the whole of spec 0086's finding and is no less true of a
+    /// dome at a hundred and fifty metres than of one at the far plane.
+    ///
+    /// A sky mesh may be see-through, and a cloud deck is: its alpha puts
+    /// it in the translucent runs, which have sky pipelines of their own.
+    /// Nothing else about it changes.
+    pub fn add_sky_mesh(&mut self, data: &MeshData) -> MeshId {
+        let id = self.add_mesh(data);
+        self.meshes[id.0].sky = true;
 
         id
     }
@@ -2653,7 +2706,13 @@ impl Renderer {
                     // pipeline: it has no texture bound and would fill in the
                     // holes. It goes in the second run below instead, which
                     // binds the surface and cuts them. Spec 0047.
+                    //
+                    // And a sky writes no depth at all, per spec 0099. It is
+                    // the thing behind everything and it occludes nothing;
+                    // what the prepass is for is a cut-out thing occluding
+                    // what is behind it.
                     if mesh.index_count == 0
+                        || mesh.sky
                         || self.holed.get(texture_id.0).copied().unwrap_or(false)
                     {
                         continue;
@@ -2682,7 +2741,17 @@ impl Renderer {
                     let (mesh_id, texture_id, first, count) =
                         (&batch.mesh, &batch.texture, &batch.first, &batch.count);
                     let mesh = &self.meshes[mesh_id.0];
+                    // Spec 0099: and no sky here either, which is the run
+                    // that was actually hurting. A cloud deck's picture is
+                    // mostly alpha, so it lands here, and this cuts at
+                    // `CUTOUT` and writes depth in a hard binary mask. That
+                    // mask then rejected the backdrop behind every cloud, so
+                    // the cloud blended over the clear colour instead of over
+                    // the sky and wore the threshold as an outline. Jake
+                    // played it and said the sky reads like an atlas of
+                    // continents; the coastline was this.
                     if mesh.index_count == 0
+                        || mesh.sky
                         || !self.holed.get(texture_id.0).copied().unwrap_or(false)
                     {
                         continue;
@@ -2796,25 +2865,34 @@ impl Renderer {
                 // beside the ordinary one, and a batch takes whichever its own
                 // mesh asked for. The solid run has no water in it: a body of
                 // water is see-through or it is a blue floor.
+                //
+                // Spec 0099: and its own sky pipeline beside those, for the
+                // same reason. A sky mesh in a see-through run is a cloud
+                // deck, and the one at the far plane is opaque, so each run
+                // carries the sky shader on its own states rather than
+                // every run reaching for the opaque one.
                 let runs = [
                     (
                         &self.mesh_pipeline,
                         &self.mesh_pipeline,
+                        &self.sky_pipeline,
                         &drawn.picture().opaque,
                     ),
                     (
                         &self.translucent_pipelines[0],
                         &self.water_pipelines[0],
+                        &self.sky_translucent_pipelines[0],
                         &drawn.picture().translucent,
                     ),
                     (
                         &self.translucent_pipelines[1],
                         &self.water_pipelines[1],
+                        &self.sky_translucent_pipelines[1],
                         &drawn.picture().translucent,
                     ),
                 ];
 
-                for (pipeline, for_water, batches) in runs {
+                for (pipeline, for_water, for_sky, batches) in runs {
                     if batches.is_empty() {
                         continue;
                     }
@@ -2832,13 +2910,13 @@ impl Renderer {
                         // loop, because which one this batch wants is the
                         // mesh's own answer.
                         //
-                        // The sky first, per spec 0086. A backdrop is opaque
-                        // and so only ever reaches this through the first
-                        // run, where the water slot holds the ordinary
-                        // pipeline anyway; the order is written down rather
-                        // than relied on.
+                        // The sky first, per spec 0086. The backdrop is
+                        // opaque and reaches this through the first run; a
+                        // cloud deck is see-through and reaches it through
+                        // the other two, and `for_sky` is whichever of the
+                        // three states this run is drawn on. Spec 0099.
                         let wanted: &wgpu::RenderPipeline = if mesh.sky {
-                            &self.sky_pipeline
+                            for_sky
                         } else if mesh.water {
                             for_water
                         } else {
@@ -3412,6 +3490,9 @@ impl Renderer {
                 hidden: false,
                 round: None,
                 home: None,
+                // a sky a game pushed is a layer, and a layer is
+                // see-through whatever alpha it was handed. Spec 0099.
+                sky: self.meshes[mesh.0].sky,
             });
         }
 
@@ -3452,16 +3533,32 @@ impl Renderer {
         });
 
         if let Some((behind, bounds, held)) = &behind {
-            pushed.push(culling::Pushed {
-                mesh: behind.mesh,
-                texture: behind.texture,
-                bounds: *bounds,
-                instances: held,
-                quarters: None,
-                hidden: false,
-                round: None,
-                home: None,
-            });
+            // **First in the list and not last.** Spec 0099. It was
+            // appended, and that worked only because everything else in the
+            // opaque run writes depth in the prepass and so holds it off:
+            // the thing behind everything was being drawn over everything
+            // and relying on the depth test to undo it.
+            //
+            // A sky writes no depth now, so a cloud deck drawn before this
+            // was painted straight over. Drawn first it is what it says it
+            // is, and the prepass still keeps it out of the solid world.
+            pushed.insert(
+                0,
+                culling::Pushed {
+                    mesh: behind.mesh,
+                    texture: behind.texture,
+                    bounds: *bounds,
+                    instances: held,
+                    quarters: None,
+                    hidden: false,
+                    round: None,
+                    home: None,
+                    // and the backdrop is the one sky that is not a layer.
+                    // It is opaque and it belongs in the solid run, or it
+                    // is drawn over the world instead of behind it.
+                    sky: false,
+                },
+            );
         }
 
         // and what the game handed over once rather than this frame, per
@@ -6886,6 +6983,270 @@ mod asked {
             r,
             g,
             b
+        );
+    }
+
+    /// Spec 0099: and a sky layer is see-through at a full alpha too.
+    ///
+    /// **The moment the moon clipped through the cloud.** This engine reads
+    /// translucency off an instance's own alpha, which is right for
+    /// everything a game tints and wrong for a cloud deck: a deck's tint is
+    /// its colour and its holes are in its picture. capriccio hands the
+    /// deck the share of the weather it is drawing, and for every second
+    /// outside a turn that share is exactly one, so the deck was sorted
+    /// solid. In the solid run the batches go out in the order their meshes
+    /// were uploaded, and the deck's mesh was made before the moon's, so
+    /// the sky was drawn and then a body seventy metres further off was
+    /// drawn over it. For the two and a half seconds of a turn the share
+    /// was short of one, the deck went see-through, and the moon went back
+    /// behind the cloud. Jake saw it flip.
+    ///
+    /// So: the deck's mesh is uploaded first here, which is what puts it
+    /// earlier in the solid run, and the wall behind it is pushed with a
+    /// full alpha like the moon's. The wall has to end up veiled.
+    #[test]
+    fn a_sky_layer_at_a_full_alpha_is_still_see_through() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(64, 64)) else {
+            return;
+        };
+
+        let up = [0.0, 1.0, 0.0];
+        let wall = |z: f32| {
+            crate::mesh::MeshData::new(
+                vec![
+                    crate::mesh::Vertex::new([-1.0, -1.0, z], up, [0.0, 1.0]),
+                    crate::mesh::Vertex::new([1.0, -1.0, z], up, [1.0, 1.0]),
+                    crate::mesh::Vertex::new([1.0, 1.0, z], up, [1.0, 0.0]),
+                    crate::mesh::Vertex::new([-1.0, 1.0, z], up, [0.0, 0.0]),
+                ],
+                vec![0, 1, 2, 0, 2, 3],
+            )
+        };
+        // the deck first, so it is earlier in the solid run than the thing
+        // it has to cover. That is the arrangement capriccio had by
+        // accident and it is the whole of what this holds.
+        let deck = renderer.add_sky_mesh(&wall(-1.0));
+        let beyond = renderer.add_mesh(&wall(-3.0));
+
+        let picture = crate::texture::TextureData::from_pixels(
+            4,
+            1,
+            vec![
+                255, 255, 255, 0, 255, 255, 255, 153, 255, 255, 255, 153, 255, 255, 255, 153,
+            ],
+        );
+        let picture = renderer.add_texture(&picture);
+        let geometry = Geometry::new();
+        let text = TextRenderer::new();
+
+        let mut eye = Camera::new();
+        eye.position = glam::Vec3::ZERO;
+        eye.target = -glam::Vec3::Z;
+        renderer.set_camera(eye);
+
+        let mut scene = Scene::new();
+        scene.light.intensity = 0.0;
+        scene.light.ambient = glam::Vec3::ONE;
+        // a full alpha on both: the deck's see-through-ness is its picture's
+        scene.push_textured(
+            deck,
+            picture,
+            &crate::mesh::Transform::default(),
+            glam::vec4(0.0, 0.0, 0.0, 1.0),
+            32.0,
+        );
+        scene.push_textured(
+            beyond,
+            TextureId::WHITE,
+            &crate::mesh::Transform::default(),
+            glam::Vec4::ONE,
+            32.0,
+        );
+
+        let shot = renderer.picture(&scene, &geometry, &text).pixels;
+        let got = shot[(((32 * 64) + 48) * 4) as usize];
+
+        assert!(
+            got < 200,
+            "the wall beyond came back at {}, so the sky in front of it was \
+             sorted solid and drawn before it",
+            got
+        );
+        assert!(got > 20, "nothing of the wall beyond survived: {}", got);
+    }
+
+    /// Spec 0099: a sky does not hide what is behind it.
+    ///
+    /// **The fault that made the whole thing look like a map.** A cloud
+    /// deck's picture is mostly alpha, so the renderer calls its texture
+    /// holed and sends it to spec 0047's cut-out depth prepass. That
+    /// prepass discards below `CUTOUT` and writes depth for everything
+    /// above, which is a hard binary mask at 0.35, and the mask then
+    /// rejected the backdrop behind every cloud: the cloud blended over
+    /// the clear colour instead of over the sky, and wore the threshold
+    /// as a coastline. Jake played it and said the sky reads like an
+    /// atlas of continents.
+    ///
+    /// A sky occludes nothing. What the prepass is for is a cut-out thing
+    /// occluding what is behind it, and there is nothing behind a sky.
+    ///
+    /// A backdrop of white, a deck of black at six tenths alpha over it,
+    /// and the question is whether the white is still there to blend
+    /// with. Six tenths is above `CUTOUT`, so under the fault it wrote
+    /// depth and the white was gone.
+    #[test]
+    fn a_sky_does_not_hide_what_is_behind_it() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(64, 64)) else {
+            return;
+        };
+
+        let up = [0.0, 1.0, 0.0];
+        let wall = |z: f32| {
+            crate::mesh::MeshData::new(
+                vec![
+                    crate::mesh::Vertex::new([-1.0, -1.0, z], up, [0.0, 1.0]),
+                    crate::mesh::Vertex::new([1.0, -1.0, z], up, [1.0, 1.0]),
+                    crate::mesh::Vertex::new([1.0, 1.0, z], up, [1.0, 0.0]),
+                    crate::mesh::Vertex::new([-1.0, 1.0, z], up, [0.0, 0.0]),
+                ],
+                vec![0, 1, 2, 0, 2, 3],
+            )
+        };
+        let behind = renderer.add_mesh(&wall(-2.0));
+        let deck = renderer.add_sky_mesh(&wall(-1.0));
+
+        // holed, because one texel is clear: that is what sends a texture
+        // to the cut-out run at all. The other is six tenths, which the
+        // cut keeps.
+        // Four across rather than two, so there is a stretch of plain six
+        // tenths to measure in. At two, the only place to sample was the
+        // seam, where the filter lands near three tenths and the cut lets
+        // it through anyway: the test passed its own control.
+        let picture = crate::texture::TextureData::from_pixels(
+            4,
+            1,
+            vec![
+                255, 255, 255, 0, 255, 255, 255, 153, 255, 255, 255, 153, 255, 255, 255, 153,
+            ],
+        );
+        let picture = renderer.add_texture(&picture);
+        let geometry = Geometry::new();
+        let text = TextRenderer::new();
+
+        let mut eye = Camera::new();
+        eye.position = glam::Vec3::ZERO;
+        eye.target = -glam::Vec3::Z;
+        renderer.set_camera(eye);
+
+        let shot = |renderer: &mut Renderer, over: bool| {
+            let mut scene = Scene::new();
+            scene.light.intensity = 0.0;
+            scene.light.ambient = glam::Vec3::ONE;
+            scene.backdrop(behind, TextureId::WHITE, glam::Vec4::ONE, 32.0);
+
+            if over {
+                scene.push_textured(
+                    deck,
+                    picture,
+                    &crate::mesh::Transform::default(),
+                    glam::vec4(0.0, 0.0, 0.0, 1.0),
+                    32.0,
+                );
+            }
+
+            renderer.picture(&scene, &geometry, &text).pixels
+        };
+
+        let plain = shot(&mut renderer, false);
+        let under = shot(&mut renderer, true);
+
+        // three quarters across, which is plain six tenths and well clear
+        // of the seam. Dimmer than the bare backdrop, because black is
+        // blended over it, and not black, because four tenths of the white
+        // has to survive.
+        let at = ((32 * 64) + 48) * 4;
+        let (bare, got) = (plain[at], under[at]);
+
+        assert!(bare > 200, "the backdrop alone came back at {}", bare);
+        assert!(
+            got > bare / 4 && got < bare,
+            "under a six tenths deck the backdrop reads {} against {} bare: \
+             at nothing the sky behind the cloud is being thrown away",
+            got,
+            bare
+        );
+    }
+
+    /// Spec 0099: nor does it move a cloud deck.
+    ///
+    /// **The same claim one layer down.** Spec 0086's backdrop takes its sky
+    /// mark where it is handed over and is opaque, so it only ever meets the
+    /// opaque run. A deck is pushed like any other mesh and is see-through,
+    /// so it goes through the translucent runs, and those were `fs_main`:
+    /// without a sky pipeline on the translucent states it would wear the
+    /// terminator the backdrop had taken off it.
+    ///
+    /// The same wall, half transparent, pushed rather than handed over.
+    #[test]
+    fn the_sun_does_not_move_a_cloud_deck() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(64, 64)) else {
+            return;
+        };
+
+        let up = [0.0, 1.0, 0.0];
+        let wall = crate::mesh::MeshData::new(
+            vec![
+                crate::mesh::Vertex::new([-1.0, -1.0, -1.0], up, [0.0, 1.0]),
+                crate::mesh::Vertex::new([1.0, -1.0, -1.0], up, [1.0, 1.0]),
+                crate::mesh::Vertex::new([1.0, 1.0, -1.0], up, [1.0, 0.0]),
+                crate::mesh::Vertex::new([-1.0, 1.0, -1.0], up, [0.0, 0.0]),
+            ],
+            vec![0, 1, 2, 0, 2, 3],
+        );
+        let deck = renderer.add_sky_mesh(&wall);
+        let geometry = Geometry::new();
+        let text = TextRenderer::new();
+
+        let mut eye = Camera::new();
+        eye.position = glam::Vec3::ZERO;
+        eye.target = -glam::Vec3::Z;
+        renderer.set_camera(eye);
+
+        // half alpha, so it lands in the translucent runs rather than the
+        // opaque one. That is the whole point of the test and it is worth
+        // saying out loud: at a full alpha this would pass on the backdrop's
+        // own pipeline and prove nothing.
+        let shot = |renderer: &mut Renderer, from: Option<glam::Vec3>| {
+            let mut scene = Scene::new();
+            scene.light.intensity = 0.5;
+            scene.light.ambient = glam::Vec3::splat(0.2);
+
+            if let Some(from) = from {
+                scene.light.direction = from;
+                scene.push_textured(
+                    deck,
+                    TextureId::WHITE,
+                    &crate::mesh::Transform::default(),
+                    glam::vec4(1.0, 1.0, 1.0, 0.5),
+                    32.0,
+                );
+            }
+
+            renderer.picture(&scene, &geometry, &text).pixels
+        };
+
+        let lit = shot(&mut renderer, Some(glam::Vec3::NEG_Y));
+        let away = shot(&mut renderer, Some(glam::Vec3::Y));
+        let none = shot(&mut renderer, None);
+
+        assert_ne!(
+            lit, none,
+            "the deck drew nothing, so this test is testing nothing"
+        );
+        assert_eq!(
+            lit, away,
+            "the sky changed when the sun did, so a see-through sky is still \
+             being shaded like a solid"
         );
     }
 

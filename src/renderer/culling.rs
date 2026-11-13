@@ -167,6 +167,20 @@ pub(crate) struct Pushed<'a> {
     pub(crate) round: Option<Round>,
     /// Where this run already lies, for a kept one. Spec 0063.
     pub(crate) home: Option<Home>,
+    /// Whether this run is a sky layer, which is see-through whatever its
+    /// instances say. Spec 0099.
+    ///
+    /// **Because a deck's see-through-ness is in its picture.** The engine
+    /// reads translucency off the instance's own alpha, which is right for
+    /// everything a game tints and wrong for a cloud deck: the deck's tint
+    /// is its colour and its holes are in its texture. Handed a full alpha
+    /// it was sorted solid, which put it in the run before the moon and
+    /// drew the sky over a body that is seventy metres further off.
+    ///
+    /// Not the backdrop, which is a sky and is genuinely opaque: it has to
+    /// be in the solid run or it is drawn over the world. The renderer sets
+    /// this where it knows which of the two a run is.
+    pub(crate) sky: bool,
 }
 
 /// Where a kept run already lies, and which entry of the standing table
@@ -204,6 +218,7 @@ pub(crate) fn of_a_keeping<'a>(
         bounds,
         instances: &keeping.instances,
         quarters: keeping.quarters,
+        sky: false,
         hidden: false,
         round: Some(keeping.round),
         home,
@@ -266,7 +281,8 @@ pub(crate) fn pick(
                 None => {
                     sorted.clear();
                     sorted.extend(one.instances.iter().filter(|instance| {
-                        instance.is_translucent() == see_through && instance.glows() == glowing
+                        (one.sky || instance.is_translucent()) == see_through
+                            && instance.glows() == glowing
                     }));
 
                     sorted.as_slice()
@@ -700,6 +716,7 @@ mod tests {
             bounds,
             instances: &instances,
             quarters: None,
+            sky: false,
             hidden: false,
             round: None,
             home: None,
@@ -749,6 +766,7 @@ mod tests {
             bounds,
             instances: &instances,
             quarters: None,
+            sky: false,
             hidden: false,
             round: None,
             home: None,
@@ -806,6 +824,7 @@ mod tests {
             bounds,
             instances: &instances,
             quarters: None,
+            sky: false,
             hidden: false,
             round: None,
             home: None,
@@ -830,6 +849,7 @@ mod tests {
             bounds,
             instances: &instances,
             quarters: None,
+            sky: false,
             hidden: false,
             round: None,
             home: None,
@@ -879,6 +899,7 @@ mod tests {
             bounds,
             instances: &instances,
             quarters: None,
+            sky: false,
             hidden: false,
             round: None,
             home: None,
@@ -889,6 +910,7 @@ mod tests {
             bounds,
             instances: &instances,
             quarters: None,
+            sky: false,
             hidden: false,
             home: None,
             round: Some(keeping_at(&bounds, &instances)),
@@ -942,6 +964,7 @@ mod tests {
             bounds,
             instances: &instances,
             quarters: None,
+            sky: false,
             hidden: false,
             home: None,
             round: Some(keeping_at(&bounds, &instances)),
@@ -970,6 +993,7 @@ mod tests {
             bounds,
             instances: &instances,
             quarters: crate::renderer::scene::quarters_of(&instances),
+            sky: false,
             hidden: true,
             home: None,
             round: Some(keeping_at(&bounds, &instances)),
@@ -1015,6 +1039,7 @@ mod tests {
             bounds,
             instances: &instances,
             quarters: None,
+            sky: false,
             hidden: false,
             home: None,
             round: Some(keeping_at(&bounds, &instances)),
@@ -1043,6 +1068,7 @@ mod tests {
             bounds,
             instances: &instances,
             quarters: None,
+            sky: false,
             hidden: false,
             home: None,
             round: Some(keeping_at(&bounds, &instances)),
@@ -1139,6 +1165,7 @@ mod tests {
             bounds,
             instances: &instances,
             quarters: crate::renderer::scene::quarters_of(&instances),
+            sky: false,
             hidden: false,
             home: Some(Home {
                 base: 7,
@@ -1180,6 +1207,7 @@ mod tests {
             bounds,
             instances: &instances,
             quarters: crate::renderer::scene::quarters_of(&instances),
+            sky: false,
             hidden: false,
             home: Some(Home {
                 base: 0,
