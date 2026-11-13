@@ -171,6 +171,43 @@ mistake made again: a two second pair read as one pixel and was written up as
 if it said something about the seven second clip. It did not. The numbers above
 are each stated with the length they were taken at for that reason.
 
+## 2026-11-13: it is the text, and it is not what the text says
+
+`load` only. menger was not retested.
+
+**It is the text.** Two films of `load` with the readout not drawn at all
+are byte-identical. Two with it drawn are not. That is the whole of it: no
+other part of the picture moves.
+
+**It is not what the text says.** Every line of the readout was printed per
+frame across two runs and diffed: identical, all 240 frames, including the
+draws and triangles, which was the obvious suspect. The ms figures are
+nought in a film anyway, as the section below says.
+
+**So the previous entry's conclusion was wrong.** It said the difference
+was "most of the picture and not a line of text", reasoning from a worst
+frame differing by 5.31%. Five percent of a frame is about what this
+readout covers. The number was right and what was read off it was not.
+
+**Five lines are stable and six are not.** Drawing the first five of the
+readout gives two identical films; the first six do not. The sixth line's
+own content is constant, so it is not that line. Nor is it the count of
+sections: one section holding all seven lines joined by newlines is not
+stable either.
+
+**It is not glyph_brush's random section hasher**, which was the best
+guess and is wrong. That crate's `DefaultSectionHasher` is
+`twox_hash::xxhash64::RandomState`, seeded per process, and it pins a
+deterministic one on wasm. Patched to the deterministic one here, three
+films still gave three streams.
+
+**What is left.** Something in the glyph path that is neither the section
+hashing nor the content. The draw cache below it hashes with `FxHasher`
+and keeps its rows in a `LinkedHashMap`, so it is insertion ordered and
+deterministic for a fixed insertion sequence. That leaves what feeds that
+sequence, and an atlas whose unwritten texels are sampled at a glyph's
+edge, neither of which was tested.
+
 ## A run with no clock cannot say what a frame took
 
 `load` puts up what a frame cost in milliseconds, and in a film those three
