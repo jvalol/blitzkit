@@ -3777,6 +3777,40 @@ impl Renderer {
         let light = &scene.light;
         let ambient = light.ambient;
 
+        // **The lamps nearest what is being traced, which is not the eye.**
+        // The first go sorted by distance to the camera, copying the mesh
+        // pass, and the mesh pass is right to: what it draws is where the
+        // eye is looking. A traced surface is somewhere else. A mirror
+        // shows the room round itself, so the lamps that matter are the
+        // ones round it, and sorting by the eye dropped them the moment you
+        // walked away from it.
+        let watching = scene
+            .lenses()
+            .first()
+            .map(|lens| glam::Vec3::from(lens.instance.model[3]))
+            .unwrap_or(self.camera.position);
+        let mut near: Vec<&crate::lighting::PointLight> = scene.point_lights().iter().collect();
+
+        near.sort_by(|one, two| {
+            let (a, b) = (
+                one.position.distance_squared(watching),
+                two.position.distance_squared(watching),
+            );
+
+            a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        near.truncate(crate::renderer::scene::MAX_TRACED_LAMPS);
+
+        let lamps_used = near.len() as u32;
+        let mut lamps = [[0.0f32; 4]; 64];
+
+        for (n, lamp) in near.iter().enumerate() {
+            let at = lamp.position - self.camera.position;
+
+            lamps[n * 2] = at.extend(lamp.range).to_array();
+            lamps[n * 2 + 1] = lamp.color.extend(lamp.intensity).to_array();
+        }
+
         self.queue.write_buffer(
             &self.seen_buffer,
             0,
@@ -3786,6 +3820,8 @@ impl Renderer {
                 ambient: [ambient.x, ambient.y, ambient.z, 0.0],
                 light_direction: light.direction.extend(0.0).to_array(),
                 light_color: light.color.extend(light.intensity).to_array(),
+                lamps_used: [lamps_used, 0, 0, 0],
+                lamps,
             }),
         );
 
@@ -4509,6 +4545,11 @@ struct Tracing {
     ambient: [f32; 4],
     light_direction: [f32; 4],
     light_color: [f32; 4],
+    /// x is how many lamps are real, the rest is spare
+    lamps_used: [u32; 4],
+    /// Two rows a lamp: where it is and how far it reaches, then what colour
+    /// it is and how hard it burns. Spec 0098.
+    lamps: [[f32; 4]; 64],
 }
 
 unsafe impl bytemuck::Pod for Tracing {}
@@ -6861,6 +6902,144 @@ mod asked {
             lit, away,
             "the sky changed when the sun did, so a backdrop is still being \
              shaded like a solid"
+        );
+    }
+
+    /// Spec 0098: an index at or under nought is a mirror and not a lens.
+    ///
+    /// **A mirror shows what is behind you and a lens shows what is in
+    /// front**, so the two are told apart by putting something behind the
+    /// eye and nothing in front. capriccio's ball was a lens and read as a
+    /// smear of bands in the room's floor colour; what its spec 0064 wants
+    /// is the room, the right way up.
+    #[test]
+    fn a_lens_with_no_index_is_a_mirror() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(128, 128)) else {
+            return;
+        };
+
+        let cube = renderer.add_mesh(&crate::mesh::MeshData::cube());
+        let ball = renderer.add_mesh(&crate::mesh::MeshData::sphere(20, 20));
+        let geometry = Geometry::new();
+        let text = TextRenderer::new();
+
+        let mut eye = Camera::new();
+        eye.position = glam::Vec3::ZERO;
+        eye.target = -glam::Vec3::Z;
+        renderer.set_camera(eye);
+
+        let shot = |renderer: &mut Renderer, index: f32| {
+            let mut scene = Scene::new();
+            scene.light.intensity = 0.0;
+            scene.light.ambient = glam::Vec3::ONE;
+            // a red wall behind the eye, and nothing at all in front of the
+            // ball for a lens to find
+            scene.traces(&[crate::renderer::scene::Traced::new(
+                crate::collision::Aabb::new(glam::vec3(-9.0, -9.0, 4.0), glam::vec3(9.0, 9.0, 5.0)),
+                glam::vec4(1.0, 0.0, 0.0, 1.0),
+            )]);
+            scene.lens(
+                ball,
+                &crate::mesh::Transform::at(glam::vec3(0.0, 0.0, -3.0))
+                    .with_scale(glam::Vec3::splat(2.0)),
+                glam::Vec4::ONE,
+                index,
+            );
+
+            let shot = renderer.picture(&scene, &geometry, &text);
+            let at = ((shot.height / 2) * shot.width + shot.width / 2) as usize * 4;
+
+            (shot.pixels[at], shot.pixels[at + 1], shot.pixels[at + 2])
+        };
+
+        let _ = cube;
+        let mirror = shot(&mut renderer, -1.0);
+        let lens = shot(&mut renderer, 1.52);
+
+        assert!(
+            mirror.0 > 100 && mirror.1 < 60 && mirror.2 < 60,
+            "the middle of the mirror is {:?}, which is not the wall behind the eye",
+            mirror
+        );
+        assert_ne!(
+            mirror, lens,
+            "a lens and a mirror drew the same pixel, so the index is not \
+             choosing between them"
+        );
+    }
+
+    /// Spec 0098: a traced box can be a cylinder standing in it.
+    ///
+    /// **Measured as how much of the mirror it covers.** A cylinder is
+    /// pi over four of the square it stands in, so the same bounds traced
+    /// round must take visibly less of the ball than traced square. That is
+    /// the whole claim: a corner is gone.
+    #[test]
+    fn a_traced_box_can_be_round() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(200, 200)) else {
+            return;
+        };
+
+        let ball = renderer.add_mesh(&crate::mesh::MeshData::sphere(24, 24));
+        let geometry = Geometry::new();
+        let text = TextRenderer::new();
+
+        let mut eye = Camera::new();
+        eye.position = glam::Vec3::ZERO;
+        eye.target = -glam::Vec3::Z;
+        renderer.set_camera(eye);
+
+        let covered = |renderer: &mut Renderer, round: bool| {
+            let mut scene = Scene::new();
+            scene.light.intensity = 0.0;
+            scene.light.ambient = glam::Vec3::ONE;
+
+            // a red post behind the eye, which only the mirror can find
+            let post =
+                crate::collision::Aabb::new(glam::vec3(-1.0, -4.0, 3.0), glam::vec3(1.0, 4.0, 5.0));
+            let red = glam::vec4(1.0, 0.0, 0.0, 1.0);
+
+            scene.traces(&[if round {
+                crate::renderer::scene::Traced::round(post, red)
+            } else {
+                crate::renderer::scene::Traced::new(post, red)
+            }]);
+            scene.lens(
+                ball,
+                &crate::mesh::Transform::at(glam::vec3(0.0, 0.0, -3.0))
+                    .with_scale(glam::Vec3::splat(2.0)),
+                glam::Vec4::ONE,
+                -1.0,
+            );
+
+            let shot = renderer.picture(&scene, &geometry, &text);
+
+            shot.pixels
+                .chunks(4)
+                .filter(|pixel| pixel[0] > 120 && pixel[1] < 70 && pixel[2] < 70)
+                .count()
+        };
+
+        let square = covered(&mut renderer, false);
+        let round = covered(&mut renderer, true);
+
+        assert!(
+            square > 200,
+            "the square post covers {} pixels of the ball, which is too few \
+             to be measuring anything",
+            square
+        );
+        assert!(
+            round < square * 9 / 10,
+            "round it covers {} pixels and square {}, which is not a corner \
+             gone",
+            round,
+            square
+        );
+        assert!(
+            round > 100,
+            "round it covers {} pixels, so it is not being traced at all",
+            round
         );
     }
 

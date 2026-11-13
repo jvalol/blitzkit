@@ -155,8 +155,79 @@ back at its colours times the ambient alone. capriccio's room multiplies the
 whole thing by five to make up for it, which is a fudge in a game making up
 for a gap in an engine. Point lights in the tracer are their own spec.
 
+## A mirror as well as a lens, 2026-11-12
+
+Jake, standing in capriccio's room over the nook: *the reflections aren't
+accurate, and the colour of the ball could look a lot more like a mirror
+like reflective surface instead of the blue, which isn't accurate for the
+room either.*
+
+**An index at or under nought is a mirror.** It is not a refractive index,
+every real one being over one, so it is free in the field the index already
+rides in, which is the instance's shininess.
+
+The difference is a question about the room and not about physics. A solid
+glass sphere is a lens: it bends the world twice, turns it over and squeezes
+it into a disc. That is true and it reads as a smear of bands. A mirror
+shows the room the right way up and in its own colours, and a room is what
+that spec built one of these to show.
+
+**The blue was this spec's own arithmetic showing through.** `shade` has the
+ambient and the one directional light and nothing else, and the ambient a
+game hands it is the sky's: at capriccio's night that is three hundredths
+red against nine hundredths blue, so everything the ball showed came back
+blue over a room of warm stone. A game can divide that out in the tint, and
+capriccio does, but it is worth saying here that the tint is where the
+world's own colour has to be undone until the tracer has lamps.
+
+## And the lamps, for the highlight, 2026-11-12
+
+Jake, looking at capriccio's ball: *there should be specular highlights on
+the sphere from the lighting in the room as well.*
+
+**This spec said the tracer reads none of the camera's lamps and that was
+right while it was a lens.** A lens shows what is behind it and has no
+surface worth lighting. A mirror does: the glint off it is the one thing
+that says the ball is a solid object in a lit room rather than a hole with
+a picture in it.
+
+So `Tracing` carries the nearest `MAX_TRACED_LAMPS` of them, which is
+sixteen against the mesh pass's sixty four. This is not lighting a room with
+them. It is the handful near enough to glint off a mirror, and each one is
+another loop over every fragment of the ball.
+
+**The lamps are not in the box list and could not be.** A lamp is a point
+and the list is boxes. What is in the list is whatever the game draws round
+them, which is why capriccio's bays show up in the ball as the lit panels
+they are, and this is the glint that no panel can give.
+
+## A round shape in the list, 2026-11-12
+
+Jake went up to capriccio's ball: *this is not a faithful reflection. The
+columns are wrong. The shape isn't true.*
+
+It was not, and no arrangement of boxes was going to make it so. A turned
+column stood in for by boxes is a tube with corners, and the closer you get
+the more it is one. Three passes were spent making the stand-in better
+before the stand-in was the problem.
+
+**A box in the list can be a cylinder standing in it**, on the y axis, as
+wide as the box and as tall, said by a float that rides in the padding a
+`vec3<f32>` already costs. So a round shape is free in the list and the
+only question is the test, which is a quadratic in two dimensions and a
+check that the hit is between the two ends.
+
+**The side and not the ends.** A column's ends are covered by the blocks
+above and below it, so the caps would be two more tests for something
+nothing can see.
+
+What a body walks into is still the box. A round collider buys nothing a
+box does not already give, and the walk has never wanted one.
+
 ## Acceptance criteria
 
+- A traced box can be a cylinder standing in it, which covers less of a mirror than the box does. — `renderer::asked::a_traced_box_can_be_round`
+- An index at or under nought draws a mirror, which shows what is behind the eye, and not a lens. — `renderer::asked::a_lens_with_no_index_is_a_mirror`
 - A lens shows the row behind it, inverted, which is the one thing spec 0092's glass cannot do. — `pictures::tests::a_lens_bends_what_is_behind_it`, which fails on 3.1% of its pixels with the index set to one
 - The box cap in Rust and the cap in the shader are the same number. — `renderer::scene::tests::the_tracer_holds_the_same_cap`
 - A box reaches the GPU as its two corners and a colour, padded the way a storage buffer wants them. — `renderer::scene::tests::a_box_packs_the_way_the_shader_reads_it`

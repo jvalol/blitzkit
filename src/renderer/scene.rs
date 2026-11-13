@@ -68,7 +68,12 @@ unsafe impl bytemuck::Pod for Instance {}
 #[derive(Debug, Copy, Clone)]
 pub struct Traced {
     pub least: [f32; 3],
-    pub _least_pad: f32,
+    /// Nought for a box and one for a cylinder standing in it, on the y
+    /// axis, as wide as the box and as tall. Spec 0098.
+    ///
+    /// **It costs nothing**, because a `vec3<f32>` aligns to sixteen and
+    /// this is the float that padding was already paying for.
+    pub kind: f32,
     pub most: [f32; 3],
     pub _most_pad: f32,
     pub color: [f32; 4],
@@ -84,6 +89,15 @@ unsafe impl bytemuck::Pod for Traced {}
 /// capriccio's whole building at 635 and is 48 kilobytes of storage, which is
 /// nothing beside what a frame of instances costs.
 pub const MAX_TRACED: usize = 1024;
+
+/// And how many lamps a traced surface takes a highlight from, per spec
+/// 0098.
+///
+/// **Half the mesh pass's sixty four.** Sixteen was the first go and the
+/// glass room has eighteen of its own, so the cap was what the reflection
+/// was lit by rather than the room. Each one is still another loop over
+/// every fragment of the ball, which is why this is not simply sixty four.
+pub const MAX_TRACED_LAMPS: usize = 32;
 
 impl Traced {
     pub const SIZE: wgpu::BufferAddress = std::mem::size_of::<Self>() as wgpu::BufferAddress;
@@ -115,10 +129,21 @@ impl Traced {
     pub fn new(box_: crate::collision::Aabb, color: glam::Vec4) -> Self {
         Self {
             least: box_.min.to_array(),
-            _least_pad: 0.0,
+            kind: 0.0,
             most: box_.max.to_array(),
             _most_pad: 0.0,
             color: color.to_array(),
+        }
+    }
+
+    /// The same, as a cylinder standing in that box rather than the box.
+    ///
+    /// For anything turned: capriccio's colonnade is, and a stack of boxes
+    /// standing in for one read as a tube with corners.
+    pub fn round(box_: crate::collision::Aabb, color: glam::Vec4) -> Self {
+        Self {
+            kind: 1.0,
+            ..Self::new(box_, color)
         }
     }
 }
@@ -840,6 +865,12 @@ impl Scene {
     /// fourth column and its own radius in the length of the first, so the
     /// fragment knows where the far side of the glass is without being told
     /// twice.
+    /// **An index at or under nought is a mirror and not a lens.** It is
+    /// not a refractive index, every real one being over one, so it is a
+    /// free sentinel in the field the index already rides in. A solid glass
+    /// sphere bends the world twice and turns it over; a mirror shows it the
+    /// right way up and in its own colours, and which of the two a game
+    /// wants is a question about the room and not about physics.
     pub fn lens(&mut self, mesh: MeshId, transform: &Transform, tint: Vec4, index: f32) {
         // **The index rides in the instance's shininess.** A lens has no
         // highlight, so that field and `specular` are both spare on one, and
@@ -1602,7 +1633,7 @@ impl Round {
 
 #[cfg(test)]
 mod tests {
-    use super::{Traced, MAX_TRACED};
+    use super::{Traced, MAX_TRACED, MAX_TRACED_LAMPS};
 
     /// Spec 0098: the cap in Rust and the cap in the shader are one number.
     #[test]
@@ -1610,6 +1641,11 @@ mod tests {
         use crate::shaders::{says, TRACE};
 
         assert_eq!(says::<usize>(TRACE, "MAX_TRACED"), MAX_TRACED);
+        assert_eq!(
+            says::<usize>(TRACE, "MAX_TRACED_LAMPS"),
+            MAX_TRACED_LAMPS,
+            "the tracer's lamp cap is two numbers"
+        );
     }
 
     /// Spec 0098: a box goes to the GPU as its two corners and a colour,
