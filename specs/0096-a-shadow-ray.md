@@ -374,3 +374,53 @@ before one shadow or one mirror improves.
 
 **Still a draft, and still not in the gate.** `./list-repos` does not find
 the project root, so `./check-all` never builds this.
+
+## 2026-11-14: what it costs, which was the next untried thing
+
+**Jake: the reflections.** The section above says what is left is cost, a
+structure over a building that moves, and what an adapter-dependent path does
+to every picture test. The first two are numbers. `ray-spike`'s second
+binary, `cost`, is them: 351 instances of a cube and a ball scattered through
+a volume the size of this building, 40 of them moved every pass, and a
+screen's worth of rays at 1920 by 1080. Apple M5 Max, Metal, wgpu 30.0.1.
+
+```
+the shapes, once             2.12 ms
+the building, all of it      0.72 ms
+the building, 40 moved       0.32 ms
+one ray a pixel              0.46 ms      4.5 billion rays a second
+```
+
+Against a sixteen and a half millisecond frame: a reflection ray a pixel is
+2.8 per cent of it, keeping the structure up is 1.9, and the shadow path this
+spec was written about is 19.5, because it is a ray per casting lamp and
+there are seven of those.
+
+**Which is the opposite of what this spec assumed.** Out of scope says a
+reflection ray per pixel is not a shadow ray per casting lamp, meaning
+reflections are the expensive one. Measured, shadows cost seven times what
+reflections do, for the same reason: one is one ray a pixel and the other is
+seven. And reflections are cheaper still than their own number says, because
+only the pixels showing a mirror cast one, where every lit pixel wants its
+shadow rays.
+
+**A room, because a scatter of boxes is not a building.** The first run of
+this said 7 billion rays a second and it was measuring the wrong thing: three
+rays in four left through a gap between two boxes and never came back, and a
+ray that leaves costs a walk down the top of the structure and nothing else.
+With a floor, a ceiling and four walls round it, every ray finds something
+and the rate is 4.5 billion. The spike prints the share that hit, so the next
+person can see at once whether the number means anything.
+
+**What this still does not measure**, and it is the half that decides it.
+Shading the hit: a reflection has to light what it found, which is a texture
+fetch, the lamps, and possibly shadow rays of its own, and none of that is
+here. The geometry is boxes and balls rather than the arcade's own meshes.
+And the timing is wall clock around pipelined submits, so it is throughput
+rather than the latency of one frame.
+
+So the cost question is answered well enough to stop asking it: at these
+numbers neither the rays nor the structure is what would stop this. What is
+left is the one that was never a measurement, which is what happens to every
+picture test in this project when a renderer turns a path on by asking the
+adapter.
