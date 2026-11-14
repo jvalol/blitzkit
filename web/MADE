@@ -11,8 +11,8 @@
 # and replaced the first time anything is remade.
 #
 # file	engine	made
-capriccio.js	321ba98	capriccio@b87c374	2026-11-14T11:15	7b568671
-capriccio_bg.wasm	321ba98	capriccio@b87c374	2026-11-14T11:15	7b568671
+capriccio.js	7a5d8b4	capriccio@68aa6fd	2026-11-14T13:57	7b568671
+capriccio_bg.wasm	7a5d8b4	capriccio@68aa6fd	2026-11-14T13:57	7b568671
 chain.js	5ac1a17	-	2026-11-14T04:14	-
 chain_bg.wasm	5ac1a17	-	2026-11-14T04:14	-
 cubes.js	5ac1a17	-	2026-11-14T04:14	-
