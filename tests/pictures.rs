@@ -760,6 +760,138 @@ mod pictures {
             );
         }
 
+        /// Spec 0024: an image on a 2D quad, drawn the right way up.
+        ///
+        /// **No reference file, because a corner is enough.** The spec said
+        /// how the GPU samples cannot be tested on the CPU and put the right
+        /// way up on the by-hand list. It can be tested: a texture bright in
+        /// one quadrant and dark in the other three says where that quadrant
+        /// landed, and a mirror, a flip or a transpose each move it somewhere
+        /// this can see. What stays by hand is whether a picture looks good,
+        /// which is not this.
+        ///
+        /// Three quads, because each answers something the others cannot.
+        #[test]
+        fn a_quad_wears_its_image_the_right_way_up() {
+            let Some(mut renderer) = pollster::block_on(Renderer::offscreen(WIDE, TALL)) else {
+                eprintln!("no adapter here, so nothing was drawn");
+                return;
+            };
+
+            // 64 by 64: bright top-left, half-lit top-right, dark below.
+            //
+            // **Three values and not two**, which the first version of this
+            // got wrong. One bright quadrant at the top left is symmetric
+            // about the diagonal, so sampling the image transposed moves
+            // nothing and the test passed with `uv.yx` in the shader. A
+            // third value in one of the other quadrants is what tells a
+            // transpose from the truth.
+            let mut pixels = Vec::with_capacity(64 * 64 * 4);
+
+            for y in 0..64 {
+                for x in 0..64 {
+                    let shade = match (x < 32, y < 32) {
+                        (true, true) => 255,
+                        (false, true) => 128,
+                        _ => 0,
+                    };
+
+                    pixels.extend_from_slice(&[shade, shade, shade, 255]);
+                }
+            }
+
+            let image =
+                renderer.add_texture(&blitzkit::texture::TextureData::from_pixels(64, 64, pixels));
+
+            let mut geometry = Geometry::new();
+            let quad = 100.0;
+            let whole = glam::vec2(quad * 0.5, quad * 0.5);
+            let part = glam::vec2(quad * 1.5, quad * 0.5);
+            let flat = glam::vec2(quad * 2.5, quad * 0.5);
+
+            geometry.push_quad(&blitzkit::geometry::quad::Quad::textured(
+                whole,
+                glam::Vec2::splat(quad),
+                image,
+            ));
+            // the bright quadrant alone, stretched over the whole face, so
+            // the uv rectangle has to have reached the corners it claims
+            geometry.push_quad(&blitzkit::geometry::quad::Quad::part_of(
+                part,
+                glam::Vec2::splat(quad),
+                image,
+                glam::Vec2::ZERO,
+                glam::Vec2::splat(0.5),
+            ));
+            // and one that asked for no image at all, which samples the one
+            // white pixel and is its own colour exactly
+            geometry.push_quad(&blitzkit::geometry::quad::Quad::colored(
+                flat,
+                glam::Vec2::splat(quad),
+                glam::vec4(1.0, 1.0, 1.0, 1.0),
+            ));
+
+            let scene = Scene::new();
+            renderer.set_camera(Camera::new());
+
+            let shot = renderer.picture(&scene, &geometry, &TextRenderer::new());
+
+            // the average of the three colour channels, which says nothing
+            // about whether they arrive as RGBA or BGRA and is all this asks
+            let shade = |at: glam::Vec2| {
+                let (x, y) = (at.x as u32, at.y as u32);
+                let on = ((y * shot.width + x) * 4) as usize;
+                let rgb: u32 = shot.pixels[on..on + 3].iter().map(|c| *c as u32).sum();
+
+                rgb as f32 / 3.0
+            };
+
+            let quarter = quad * 0.25;
+            let corners = |middle: glam::Vec2| {
+                [
+                    glam::vec2(-quarter, -quarter),
+                    glam::vec2(quarter, -quarter),
+                    glam::vec2(-quarter, quarter),
+                    glam::vec2(quarter, quarter),
+                ]
+                .map(|off| shade(middle + off))
+            };
+
+            let [top_left, top_right, bottom_left, bottom_right] = corners(whole);
+
+            // **Compared with each other rather than with numbers.** The
+            // three come back through whatever colour space the target is
+            // in, and which of the quadrants is which does not depend on
+            // knowing that.
+            assert!(
+                top_left > top_right + 30.0,
+                "the brightest quadrant is not at the quad's top left: {}, {}, {}, {}",
+                top_left,
+                top_right,
+                bottom_left,
+                bottom_right
+            );
+            assert!(
+                top_right > bottom_left + 20.0 && top_right > bottom_right + 20.0,
+                "the half-lit quadrant is not at the top right: {}, {}, {}, {}",
+                top_left,
+                top_right,
+                bottom_left,
+                bottom_right
+            );
+
+            assert!(
+                corners(part).iter().all(|shade| *shade >= top_left),
+                "a quad given the bright quadrant alone is not bright all over: {:?}",
+                corners(part)
+            );
+            assert!(
+                corners(flat).iter().all(|shade| *shade >= top_left),
+                "a quad that asked for no image is not its own colour: {:?}",
+                corners(flat)
+            );
+        }
+
         /// Spec 0062: drawing the same thing twice gives the same pixels,
         /// which is what makes a reference worth keeping at all.
         #[test]

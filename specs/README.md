@@ -31,7 +31,7 @@ not a priority, and it never changes once a spec exists.
 | [0021](0021-spot-lights.md) | Cones that cast, one shadow map each |
 | [0022](0022-point-light-shadows.md) | Lamps that cast, six projections each |
 | [0023](0023-menu-text.md) | Which lines can be chosen, and which one is |
-| [0024](0024-textured-quads.md) | An image on a 2D quad (draft) |
+| [0024](0024-textured-quads.md) | An image on a 2D quad, and the part of it to use |
 | [0025](0025-cursor-rays.md) | A cursor position as a ray into the world |
 | [0026](0026-sierpinski-tetrahedron.md) | Four copies of itself, each half the size |
 | [0027](0027-menger-sponge.md) | Twenty copies of itself, each a third the size |

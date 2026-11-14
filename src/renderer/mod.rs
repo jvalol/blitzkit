@@ -606,8 +606,6 @@ impl Renderer {
         );
         let kept_buffer = create_buffer(&device, 0, wgpu::BufferUsages::VERTEX);
 
-        let pipeline = create_render_pipeline(&device, drawn, &screen_bind_group_layout);
-
         let vertex_buffer = create_buffer(&device, 0, wgpu::BufferUsages::VERTEX);
         let index_buffer = create_buffer(&device, 0, wgpu::BufferUsages::INDEX);
 
@@ -670,6 +668,16 @@ impl Renderer {
                     },
                 ],
             });
+        // **After the texture layout and not before it**, because an
+        // overlay quad wears an image now and binds it in the same group,
+        // with the same layout, that the mesh pass does. Spec 0024.
+        let pipeline = create_render_pipeline(
+            &device,
+            drawn,
+            &screen_bind_group_layout,
+            &texture_bind_group_layout,
+        );
+
         // linear and repeating, with mips, per spec 0011
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Texture Sampler"),
@@ -3130,15 +3138,21 @@ impl Renderer {
                 multiview_mask: None,
             });
 
-            let num_indices = geometry.index_data().len() as u32;
-            if num_indices != 0 {
+            // **A draw per run of one texture**, in the order the quads
+            // were pushed, because that order is what decides which quad
+            // covers which: there is no depth buffer here. Spec 0024.
+            if !geometry.runs().is_empty() {
                 render_pass.set_pipeline(&self.pipeline);
                 render_pass.set_bind_group(0, &self.screen_bind_group, &[]);
                 render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
                 render_pass
                     .set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                counted.saw(num_indices, 1);
-                render_pass.draw_indexed(0..num_indices, 0, 0..1);
+
+                for run in geometry.runs() {
+                    render_pass.set_bind_group(1, &self.textures[run.texture.0], &[]);
+                    counted.saw(run.count, 1);
+                    render_pass.draw_indexed(run.first..(run.first + run.count), 0, 0..1);
+                }
             }
 
             self.text_brush.draw(&mut render_pass);
@@ -5206,12 +5220,16 @@ fn create_render_pipeline(
     device: &wgpu::Device,
     color_format: wgpu::TextureFormat,
     screen_bind_group_layout: &wgpu::BindGroupLayout,
+    texture_bind_group_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::include_wgsl!("../../res/shaders/quad.wgsl"));
 
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Pipeline Layout"),
-        bind_group_layouts: &[Some(screen_bind_group_layout)],
+        bind_group_layouts: &[
+            Some(screen_bind_group_layout),
+            Some(texture_bind_group_layout),
+        ],
         immediate_size: 0,
     });
 
