@@ -288,7 +288,8 @@ own vertices, weighting them `1 - u - v`, `u`, `v`. Against
 
 Exact, both of them. What `hit_vertex_return` saves is the lookup, not the
 information: with the vertices in hand a shader interpolates the normal and
-the uv the same way, `object_to_world` carries the normal into the world,
+the uv the same way, `object_to_world` carries the normal into the world
+(which is wrong, and 2026-11-14 below is where it was measured),
 `front_face` says which side, and `instance_index` or `instance_custom_data`
 says whose material to use.
 
@@ -307,3 +308,69 @@ looks as right as the one that is there.
 
 What is settled is that the reason written in Out of scope above was not the
 real obstacle, and that it was never measured. The obstacle is work.
+
+## 2026-11-14: the tables, and the one thing this spec had wrong
+
+**Jake: 0096.** Asked which half, the tables rather than the shadow ray,
+which is the question the section above left open: the vertex, index and
+instance tables bound beside an acceleration structure and read at the hit.
+`ray-spike` is that now. A quad of two triangles with a different normal at
+every corner, two instances of it, the second scaled three times in y, a
+table of materials, and five rays. The shader rebuilds the surface out of the
+buffers; `main.rs` does the same arithmetic from the same constants and
+prints how far apart they are.
+
+**One buffer can feed the structure and be read beside it.** Positions at a
+stride of 32 into the BLAS, and the same buffer bound as storage so the
+shader can reach the normals and uvs sitting between them.
+`BLAS_INPUT | STORAGE` on one buffer is accepted, so a renderer tracing its
+own geometry does not keep a second copy of every vertex it draws. That was
+the question that mattered most and nothing in the spec had asked it.
+
+**The surface comes back exact.** Five rays, worst disagreement between the
+shader and the CPU `0.000000`, over the struck point, the interpolated
+normal, the interpolated uv, and the material. `primitive_index` picks the
+right triangle of the two, `front_face` is false for the ray that arrives
+from behind, `instance_index` is the row of the material table and
+`instance_custom_data` arrives beside it as the identity the builder set. An
+interleaved buffer is read as `array<f32>` at a stride, because an
+interleaved buffer has no struct to declare.
+
+**And `object_to_world` does not carry a normal**, which this spec says four
+sections up and is the one thing in it that was wrong. A normal takes the
+inverse transpose of the linear part. On the instance scaled three times in
+y, the naive transform leans the interpolated normal 27.1 degrees off, which
+is not a subtlety: it is every unevenly scaled instance in the building
+shading as though it were a different shape. The fix is free, because a hit
+hands over `world_to_object`, which is the inverse already, so the right
+matrix is `transpose(mat3x3(w2o[0], w2o[1], w2o[2]))` and there is no
+inversion anywhere. `object_to_world` and `world_to_object` are both
+`mat4x3<f32>`, at offsets 48 and 112 of a 176 byte struct, read off naga
+30.0.1's `src/front/type_gen.rs`.
+
+**The engine itself was never wrong about this.** `mesh.wgsl`'s `normals`
+builds the adjugate of the model's upper three by three and says in its own
+comment that this is the inverse transpose without the division, with
+`renderer::scene::tests::a_rebuilt_normal_is_the_normal` holding the Rust
+against it. So what the spike corrected is a sentence in this spec, not a
+fault in the raster path. It is still worth having corrected, because the
+ray path reaches for a different matrix out of the hit and the obvious one
+there is the wrong one.
+
+**What the checking does, because a count that cannot fail is not one.**
+Rotating the barycentric weights by one place made four of the five rays
+disagree, by up to 1.5 units, and the summary line still read "5 of 5": it
+was counting whether a ray hit what it should and not whether the answer was
+right. It counts every field now, and the same break reads 1 of 5. The spike
+is five minutes of work and that was still worth finding.
+
+**What is still untried, and it is most of the cost.** Nothing here says
+what a reflection ray per pixel costs, against a shadow ray per casting
+lamp. Nothing here builds a structure over a building: the arcade keeps 351
+instances, and the doors, the people, the gate and the water refit or
+rebuild per frame. And the picture tests are untouched, which the spike
+section above names as the thing the first engine commit has to answer
+before one shadow or one mirror improves.
+
+**Still a draft, and still not in the gate.** `./list-repos` does not find
+the project root, so `./check-all` never builds this.
