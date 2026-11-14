@@ -338,6 +338,10 @@ pub fn one_argument(_name: &str) -> Option<String> {
 
 /// The reading itself, over whatever was said rather than over the real
 /// command line, so a test can hand it one.
+///
+/// Off on wasm with the caller, or every browser build warns that it is
+/// never used.
+#[cfg(not(target_arch = "wasm32"))]
 fn one_of(said: impl Iterator<Item = String>, name: &str) -> Option<String> {
     let mut said = said;
     let joined = format!("{}=", name);
