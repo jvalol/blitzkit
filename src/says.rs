@@ -16,7 +16,6 @@
 ///
 /// `--name value` and `--name=value` are both read, so the list says neither.
 pub const OPTIONS: &str = "\
-[COPY - Jake]
 Every game built on blitzkit takes these:
 
   --help, -h               print this and stop
