@@ -171,10 +171,18 @@ if [ -n "$behind" ]; then
   echo
   echo "$behind"
   echo
-  echo "  ./build-web             to bring them all up"
-  echo "  ./build-web capriccio   for one"
+  # **With the `cd`, because this has one and the reader does not.** git runs
+  # a hook from the top of the worktree and this script then cd'd to the
+  # project root above it, so `./build-web` is a path that resolves here and
+  # nowhere the person reading it is standing. On 2026-11-14 Jake ran exactly
+  # what this printed, from the repo, and got "no such file or directory".
+  echo "build-web is a directory above this repo, so it wants its path."
+  echo "It takes a game's name to do one rather than all eighteen:"
   echo
-  echo "then commit web/ and push again. git push --no-verify skips this."
+  echo "  (cd $root && ./build-web)"
+  echo "  (cd $root && ./build-web capriccio)"
+  echo
+  echo "then commit web/ here and push again. git push --no-verify skips this."
   exit 1
 fi
 
