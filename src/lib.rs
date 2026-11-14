@@ -70,6 +70,12 @@ pub trait Game {
     /// meshes with `Renderer::add_mesh`. Games with nothing 3D ignore it.
     #[allow(unused_variables)]
     fn load(&mut self, renderer: &mut Renderer) {}
+    /// This game's own options, for `--help` to print above the engine's.
+    ///
+    /// Nothing, for a game whose only options are the engine's. Spec 0100.
+    fn options(&self) -> &'static str {
+        ""
+    }
     /// Called at the start of every frame, for anything that needs the
     /// renderer: locking the cursor, or uploading a mesh mid-game.
     #[allow(unused_variables)]
@@ -181,6 +187,17 @@ pub fn start(title: &str, game: Box<dyn Game>) {
     // whatever encodes them has to be told one, and a second place saying
     // 1200 by 948 is a second place to get it wrong: the two have to agree
     // or the film comes out as diagonal mush. Spec 0084.
+    // **Before the window, beside the other questions that are answered
+    // and not played.** Spec 0100: the game's own options first, because
+    // they are what whoever typed this came for, and the engine's under
+    // them.
+    #[cfg(not(target_arch = "wasm32"))]
+    if asked_for("--help") || asked_for("-h") {
+        println!("{}\n{}{}", title, game.options(), OPTIONS);
+
+        return;
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     if std::env::args().any(|arg| arg == "--film-size") {
         println!("{} {}", PICTURE_SIZE.0, PICTURE_SIZE.1);
@@ -297,22 +314,77 @@ fn asked_to_play() -> Option<std::path::PathBuf> {
 }
 
 /// `--name value` or `--name=value`, whichever was written.
+///
+/// **Public, because it is the project's argument parser and it was already
+/// written.** Spec 0100: while this was private, a game that wanted an option
+/// of its own reached for `std::env::var`, which needs no parser at all, and
+/// the arcade ended up with half its options as flags and half as variables
+/// with nothing deciding which was which. One parser is one convention.
+///
+/// Nothing on wasm, where there is no command line to read.
 #[cfg(not(target_arch = "wasm32"))]
-fn one_argument(name: &str) -> Option<String> {
-    let mut args = std::env::args();
+pub fn one_argument(name: &str) -> Option<String> {
+    one_of(std::env::args(), name)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn one_argument(_name: &str) -> Option<String> {
+    None
+}
+
+/// The reading itself, over whatever was said rather than over the real
+/// command line, so a test can hand it one.
+fn one_of(said: impl Iterator<Item = String>, name: &str) -> Option<String> {
+    let mut said = said;
     let joined = format!("{}=", name);
 
-    while let Some(arg) = args.next() {
+    while let Some(arg) = said.next() {
         if let Some(value) = arg.strip_prefix(&joined) {
             return Some(value.to_string());
         }
         if arg == name {
-            return args.next();
+            return said.next();
         }
     }
 
     None
 }
+
+/// Whether a flag carrying nothing was given.
+///
+/// The other half of [`one_argument`], and the half the environment
+/// variables were standing in for.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn asked_for(name: &str) -> bool {
+    std::env::args().any(|arg| arg == name)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn asked_for(_name: &str) -> bool {
+    false
+}
+
+/// What the engine's own flags are, for `--help`.
+///
+/// **Written here and not in each game.** They are the engine's flags, so
+/// twelve copies of this list is twelve copies to get wrong, and a game with
+/// its own would be describing somebody else's argument parser. A game adds
+/// its own lines through [`Game::options`].
+///
+/// `--name value` and `--name=value` are both read, so the list says neither.
+pub const OPTIONS: &str = "\
+[COPY - Jake]
+Every game built on blitzkit takes these:
+
+  --help, -h               print this and stop
+  --record <file>          write the keys of this run to a file
+  --play <file>            play a run back from one
+  --picture-to <file>      take one picture, write it there, and stop
+  --picture-for <seconds>  how far into the run that picture is, default 5
+  --film-to <folder>       write the run out as numbered frames, and stop
+  --film-for <seconds>     how long a film to write, which --film-to needs
+  --film-size              print the frame size and stop
+";
 
 /// A key going down or coming up, at a time.
 ///
@@ -1220,6 +1292,106 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    fn said(args: &[&str]) -> impl Iterator<Item = String> + use<> {
+        args.iter()
+            .map(|one| one.to_string())
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
+    /// Spec 0100: `--name value` and `--name=value` are the same thing.
+    #[test]
+    fn an_argument_is_read_either_way() {
+        assert_eq!(
+            one_of(said(&["game", "--film-to", "/tmp/out"]), "--film-to"),
+            Some(String::from("/tmp/out"))
+        );
+        assert_eq!(
+            one_of(said(&["game", "--film-to=/tmp/out"]), "--film-to"),
+            Some(String::from("/tmp/out"))
+        );
+        // and an empty one is a value, not an absence
+        assert_eq!(
+            one_of(said(&["game", "--film-to="]), "--film-to"),
+            Some(String::new())
+        );
+    }
+
+    /// Spec 0100: an option nobody gave reads as nothing.
+    #[test]
+    fn an_argument_nobody_gave_is_nothing() {
+        assert_eq!(one_of(said(&["game"]), "--film-to"), None);
+        // including one whose name is the tail of another's
+        assert_eq!(
+            one_of(said(&["game", "--no-film-to", "x"]), "--film-to"),
+            None
+        );
+        // and one written last with nothing after it
+        assert_eq!(one_of(said(&["game", "--film-to"]), "--film-to"), None);
+    }
+
+    /// Spec 0100: a flag is there or it is not.
+    #[test]
+    fn a_flag_is_asked_for_or_it_is_not() {
+        let has = |args: &[&str], name: &str| said(args).any(|arg| arg == name);
+
+        assert!(has(&["game", "--help"], "--help"));
+        assert!(has(&["game", "-h"], "-h"));
+        assert!(!has(&["game"], "--help"));
+        // and a flag is a whole word, not a prefix of one
+        assert!(!has(&["game", "--help-me"], "--help"));
+    }
+
+    /// Spec 0100: every flag the engine reads is named in `OPTIONS`.
+    ///
+    /// **Because a help text is a second list of the first list.** The
+    /// whole of spec 0100 is that there is one place to look, and a help
+    /// text that has fallen behind the parser is worse than none: it says
+    /// the list is complete and it is not.
+    ///
+    /// Read out of this file rather than written down again here, and only
+    /// the half of it that runs: a flag named in a test is not a flag the
+    /// engine takes.
+    #[test]
+    fn the_help_names_every_flag_the_engine_takes() {
+        let whole = include_str!("lib.rs");
+        let running = match whole.find("\n#[cfg(test)]\nmod tests {") {
+            Some(end) => &whole[..end],
+            None => whole,
+        };
+
+        let mut found = Vec::new();
+        let mut rest = running;
+
+        while let Some(at) = rest.find("\"--") {
+            rest = &rest[at + 1..];
+
+            if let Some(end) = rest.find('"') {
+                let flag = &rest[..end];
+
+                // the help's own lines are in this file too, and the list
+                // cannot be asked to name itself
+                if !flag.contains(' ') && !found.contains(&flag) {
+                    found.push(flag);
+                }
+            }
+        }
+
+        assert!(
+            found.len() > 4,
+            "found only {} flags in this file, so the reading is wrong",
+            found.len()
+        );
+
+        for flag in found {
+            assert!(
+                OPTIONS.contains(flag),
+                "the engine reads {} and --help does not name it",
+                flag
+            );
+        }
+    }
+
     /// Spec 0081: what a recording writes is what a replay reads.
     ///
     /// **The two halves are written apart and have to agree.**
