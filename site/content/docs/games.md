@@ -30,6 +30,12 @@ solar system behind one of its walls.
 
 [github.com/jvalol/capriccio](https://github.com/jvalol/capriccio)
 
+[COPY - Jake]
+
+There is a village out in the field, with people living in it.
+
+![A dirt street of beaten earth between timber cabins, wheel ruts curving away down it, three figures walking off up the middle and a wagon wheel leaning against a wall on the right](https://raw.githubusercontent.com/jvalol/capriccio/main/media/village.png)
+
 ![Saturn, its rings open, with Titan a speck nine metres off and a galaxy above them both](https://raw.githubusercontent.com/jvalol/capriccio/main/media/screenshot.png)
 
 ![The Earth, nine centimetres of it, coastlines and all, on a lit line running away into stars](https://raw.githubusercontent.com/jvalol/capriccio/main/media/earth.png)
