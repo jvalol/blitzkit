@@ -40,6 +40,14 @@ answer `--help` with the engine's list.
 each game. A game with its own copy would be describing somebody else's
 argument parser.
 
+**And it sits in `src/says.rs`**, not beside the code that reads the
+arguments. `check-voice` holds a copy file to the hash of its bytes, so copy
+that shares a file with code is copy that comes unsigned the next time
+anything else in that file changes, and signing `lib.rs` would mean signing it
+again after every change to the renderer. The repo had no `.copy-files` at
+all, so a marker in `src` was invisible to the gate and would have shipped
+unread. capriccio's own `says.rs` is the same answer to the same question.
+
 ## Acceptance criteria
 
 - `--name value` and `--name=value` are read the same. — `tests::an_argument_is_read_either_way`

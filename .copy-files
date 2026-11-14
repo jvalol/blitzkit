@@ -1,0 +1,10 @@
+# What `check-voice` and `sign-copy` read in this repo.
+#
+# Naming this file turns the default off, so everything the default found
+# has to be listed as well: the readme and the site, which are copy too.
+# `src/says.rs` is the addition. The engine's `--help` text lives there and
+# not in `src/lib.rs`, because the gate signs a whole file's bytes and
+# `lib.rs` changes whenever the engine does.
+README.md
+site/content/*.md
+src/says.rs

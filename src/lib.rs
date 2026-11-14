@@ -20,6 +20,10 @@ pub mod text;
 pub mod texture;
 pub mod water;
 
+mod says;
+
+pub use says::OPTIONS;
+
 /// The shaders as text, and the one parser that reads a constant out of one.
 #[cfg(test)]
 pub(crate) mod shaders;
@@ -363,28 +367,6 @@ pub fn asked_for(name: &str) -> bool {
 pub fn asked_for(_name: &str) -> bool {
     false
 }
-
-/// What the engine's own flags are, for `--help`.
-///
-/// **Written here and not in each game.** They are the engine's flags, so
-/// twelve copies of this list is twelve copies to get wrong, and a game with
-/// its own would be describing somebody else's argument parser. A game adds
-/// its own lines through [`Game::options`].
-///
-/// `--name value` and `--name=value` are both read, so the list says neither.
-pub const OPTIONS: &str = "\
-[COPY - Jake]
-Every game built on blitzkit takes these:
-
-  --help, -h               print this and stop
-  --record <file>          write the keys of this run to a file
-  --play <file>            play a run back from one
-  --picture-to <file>      take one picture, write it there, and stop
-  --picture-for <seconds>  how far into the run that picture is, default 5
-  --film-to <folder>       write the run out as numbered frames, and stop
-  --film-for <seconds>     how long a film to write, which --film-to needs
-  --film-size              print the frame size and stop
-";
 
 /// A key going down or coming up, at a time.
 ///
