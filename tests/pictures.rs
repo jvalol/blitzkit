@@ -469,6 +469,67 @@ fn drawn_with_a_floor(floor: glam::Vec4) -> Option<Picture> {
     })
 }
 
+/// Spec 0102: the pool shot again, with one lamp put where you say, for
+/// asking what a light under a water surface does to the surface itself.
+///
+/// **The sun off and nothing behind the water that a lamp can touch.** A
+/// black floor is not enough: a highlight is light reflected and does not
+/// care what colour the thing reflecting it is, so a lamp under the water
+/// put a bright plume on a floor of pure black and that arrived through
+/// the surface. Black *and* no shininess, and the only thing in the scene
+/// a lamp can change is the water.
+fn pool_lit_from(lamp: Option<Vec3>) -> Option<Picture> {
+    thread_local! {
+        static LAMP: std::cell::Cell<[f32; 4]> = const { std::cell::Cell::new([0.0; 4]) };
+    }
+
+    LAMP.with(|held| {
+        held.set(match lamp {
+            Some(at) => [at.x, at.y, at.z, 1.0],
+            None => [0.0; 4],
+        })
+    });
+
+    let shots = shots();
+    let shot = shots
+        .iter()
+        .find(|shot| shot.name == "a-pool-answers-the-angle")
+        .expect("the pool shot");
+
+    drawn(&Shot {
+        name: shot.name,
+        scene: |scene, meshes| {
+            scene.light.intensity = 0.0;
+            scene.light.ambient = Vec3::splat(0.03);
+
+            let said = LAMP.with(|held| held.get());
+
+            if said[3] > 0.5 {
+                scene.push_light(PointLight::new(
+                    vec3(said[0], said[1], said[2]),
+                    vec3(0.9, 0.95, 1.0),
+                    3.0,
+                    9.0,
+                ));
+            }
+
+            scene.push_material(
+                meshes.floor,
+                &Transform::at(Vec3::ZERO).with_scale(vec3(40.0, 1.0, 40.0)),
+                vec4(0.0, 0.0, 0.0, 1.0),
+                0.0,
+            );
+            scene.push_material(
+                meshes.pool,
+                &Transform::at(vec3(0.0, 1.4, 0.0)).with_scale(vec3(20.0, 1.0, 20.0)),
+                vec4(0.16, 0.45, 0.6, 0.12),
+                220.0,
+            );
+        },
+        camera: shot.camera,
+    })
+}
+
 /// Draws a scene of its own with the camera of a named shot, and says what
 /// share of the pixels differ from that shot's reference. `None` when there is
 /// no adapter.
@@ -550,6 +611,75 @@ mod pictures {
         #[test]
         fn a_pool_answers_the_angle() {
             looks_right("a-pool-answers-the-angle");
+        }
+
+        /// Spec 0102: a lamp under a water surface lights it from beneath.
+        ///
+        /// **The whole of what the spec adds.** Before it, a light below a
+        /// surface lit nothing of it: the lambert on the face you can see
+        /// is negative and `point_light` returns nought on a negative
+        /// lambert, so a pool light was a lamp shining at the back of a
+        /// sheet of glass.
+        ///
+        /// Measured against the same scene with no lamp at all rather than
+        /// against a lamp above the water, because a lamp above it always
+        /// lit it and would pass this whether or not anything changed.
+        ///
+        /// **The floor this is measured over is black and has no
+        /// shininess.** Black alone was not enough and the first version of
+        /// this test passed with the whole feature reverted: a highlight is
+        /// light reflected and does not care what colour the thing
+        /// reflecting it is, so a lamp under the water put a bright plume
+        /// on a floor of pure black, and that arrived through the surface
+        /// and read as the surface being lit.
+        #[test]
+        fn a_lamp_under_water_lights_the_surface() {
+            let Some(dark) = pool_lit_from(None) else {
+                return;
+            };
+            let Some(under) = pool_lit_from(Some(vec3(0.0, 0.5, 0.0))) else {
+                return;
+            };
+
+            // the middle of the water, well inside both edges at this
+            // camera, which puts the far edge at row 105 and the near one
+            // at 200
+            let was = brightness(&dark, 80, 130, 240, 180);
+            let now = brightness(&under, 80, 130, 240, 180);
+
+            assert!(
+                now > was + 6.0,
+                "a lamp under the water left the surface at {:.1} against {:.1} with no lamp \
+                 at all, so nothing came through it",
+                now,
+                was
+            );
+        }
+
+        /// Spec 0102: and a lamp that cannot reach it does not.
+        ///
+        /// **The near miss is a term that does not fall off.** What comes
+        /// through is `point_light`'s own falloff, so a lamp past its range
+        /// gives nothing, and a transmission added flat would light a pool
+        /// from a lamp in the next room.
+        #[test]
+        fn a_lamp_out_of_range_lights_nothing_through_the_water() {
+            let Some(dark) = pool_lit_from(None) else {
+                return;
+            };
+            let Some(far_off) = pool_lit_from(Some(vec3(0.0, -40.0, 0.0))) else {
+                return;
+            };
+
+            let was = brightness(&dark, 80, 130, 240, 180);
+            let now = brightness(&far_off, 80, 130, 240, 180);
+
+            assert!(
+                (now - was).abs() < 0.5,
+                "a lamp forty metres under the water moved the surface from {:.1} to {:.1}",
+                was,
+                now
+            );
         }
 
         /// Spec 0075: the far end of a pool shows less of its floor than the

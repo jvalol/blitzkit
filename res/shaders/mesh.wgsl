@@ -642,6 +642,63 @@ fn point_shadow_slot(index: u32) -> i32 {
 // The falloff is (1 - d/range) squared rather than inverse square: it reaches
 // exactly nothing at the range, and it does not go to infinity at the lamp. See
 // spec 0020. No ambient here, because the sun owns that.
+/// Every lamp reaching a point, added up, for one normal. Spec 0102.
+///
+/// **Taken out of `lit_surface` so that it can be asked twice.** Water is
+/// lit on the side you are looking at and lit again on the side you are
+/// not, because what comes through a surface is light that fell on its far
+/// face. Nothing else in this engine asks twice, and nothing else pays for
+/// it: `lit_surface` calls this exactly where the loop used to be.
+fn lamps_on(
+    world_position: vec3<f32>,
+    normal: vec3<f32>,
+    to_viewer: vec3<f32>,
+    base: vec3<f32>,
+    shininess: f32,
+    specular_strength: f32,
+) -> vec3<f32> {
+    var out = vec3<f32>(0.0);
+    let lamps = min(uniforms.point_light_count.x, MAX_POINT_LIGHTS);
+
+    for (var index = 0u; index < lamps; index++) {
+        let lamp = uniforms.point_lights[index];
+
+        // a lamp whose range does not reach here contributes exactly nothing,
+        // because the falloff is zero at the range rather than merely small.
+        // Skipped before any work rather than inside `point_light` after the
+        // shadow lookups, so a building's worth of lamps costs what the few
+        // reaching this pixel cost. Compared squared, to save the root.
+        let offset = lamp.position_range.xyz - world_position;
+        let range = lamp.position_range.w;
+        if range <= 0.0 || dot(offset, offset) >= range * range {
+            continue;
+        }
+
+        let slot = point_shadow_slot(index);
+        var reaching = 1.0;
+        if slot >= 0 {
+            let towards = normalize(lamp.position_range.xyz - world_position);
+            reaching = min(
+                point_shadow(lamp, u32(slot), world_position, normal),
+                contact_shadow(world_position, normal, towards),
+            );
+        }
+
+        out += point_light(
+            lamp,
+            reaching,
+            world_position,
+            normal,
+            to_viewer,
+            base,
+            shininess,
+            specular_strength,
+        );
+    }
+
+    return out;
+}
+
 fn point_light(
     lamp: PointLight,
     reaching: f32,
@@ -826,42 +883,14 @@ fn lit_surface(in: VertexOutput) -> Lit {
     // the lamps on top of the sun. The sun's own `lit` does not touch them: a
     // lamp inside a shadow still lights what is next to it. A lamp that asked
     // to cast carries its own shadow instead, per spec 0022.
-    let lamps = min(uniforms.point_light_count.x, MAX_POINT_LIGHTS);
-    for (var index = 0u; index < lamps; index++) {
-        let lamp = uniforms.point_lights[index];
-
-        // a lamp whose range does not reach here contributes exactly nothing,
-        // because the falloff is zero at the range rather than merely small.
-        // Skipped before any work rather than inside `point_light` after the
-        // shadow lookups, so a building's worth of lamps costs what the few
-        // reaching this pixel cost. Compared squared, to save the root.
-        let offset = lamp.position_range.xyz - in.world_position;
-        let range = lamp.position_range.w;
-        if range <= 0.0 || dot(offset, offset) >= range * range {
-            continue;
-        }
-
-        let slot = point_shadow_slot(index);
-        var reaching = 1.0;
-        if slot >= 0 {
-            let towards = normalize(lamp.position_range.xyz - in.world_position);
-            reaching = min(
-                point_shadow(lamp, u32(slot), in.world_position, normal),
-                contact_shadow(in.world_position, normal, towards),
-            );
-        }
-
-        shaded += point_light(
-            lamp,
-            reaching,
-            in.world_position,
-            normal,
-            to_viewer,
-            base.rgb,
-            in.shininess,
-            in.specular,
-        );
-    }
+    shaded += lamps_on(
+        in.world_position,
+        normal,
+        to_viewer,
+        base.rgb,
+        in.shininess,
+        in.specular,
+    );
 
     // and the spots, which do cast, so each carries its own shadow
     let spots = min(uniforms.spot_light_count.x, MAX_SPOT_LIGHTS);
@@ -950,6 +979,18 @@ fn fs_glass(in: VertexOutput) -> @location(0) vec4<f32> {
     return vec4<f32>(reflected.rgb * in.color.rgb, in.color.a);
 }
 
+/// What share of the light falling on the far side of a water surface comes
+/// out of the near side. Spec 0102.
+///
+/// **Past one, and it is not a share.** The light that comes through is
+/// multiplied by the water's own colour on the way, which for the arcade's
+/// pool is a fifth of the red and half the green, so a number under one
+/// leaves a lamp a hand's breadth under the surface making no mark on it at
+/// all. At 0.55 the term was there and nobody could see it. What keeps the
+/// far end of a pool from washing out is the falloff, which is already in
+/// `point_light`: a lens at the bottom lights the surface barely at all.
+const COMES_THROUGH: f32 = 2.2;
+
 @fragment
 fn fs_water(in: VertexOutput) -> @location(0) vec4<f32> {
     let surface = lit_surface(in);
@@ -986,8 +1027,28 @@ fn fs_water(in: VertexOutput) -> @location(0) vec4<f32> {
     // reflected.
     let given_back = uniforms.ambient.rgb + surface.light * ROOM + surface.highlight;
 
+    // **And what fell on the other side comes through.** Spec 0102. A lamp
+    // under the surface is behind it from the room, so none of the above
+    // reaches it: the lambert on the face you can see is negative and a
+    // light behind a surface lights nothing. What a pool light actually
+    // does is send light up through the water, and that is this term, taken
+    // with the normal turned round and no highlight, because a highlight is
+    // the source reflected and this one is not reflected at all.
+    //
+    // The lamps only, not the sun. The sun is on the same side as the eye
+    // for every body of water in this building, and asking for it would be
+    // a second shadow lookup for a number that is nought.
+    let through_it = lamps_on(
+        in.world_position,
+        -normalize(in.normal),
+        surface.to_viewer,
+        in.color.rgb,
+        0.0,
+        0.0,
+    ) * COMES_THROUGH;
+
     return vec4<f32>(
-        mix(surface.shaded, given_back, glance),
+        mix(surface.shaded, given_back, glance) + through_it,
         mix(through, 1.0, glance),
     );
 }
