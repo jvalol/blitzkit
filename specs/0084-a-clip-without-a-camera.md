@@ -208,6 +208,46 @@ deterministic for a fixed insertion sequence. That leaves what feeds that
 sequence, and an atlas whose unwritten texels are sampled at a glyph's
 edge, neither of which was tested.
 
+## 2026-11-15: menger is not the text, and the lead that is left
+
+menger, retested with `load`'s answer in hand, which is the one thing nobody
+had done. Jake asked for menger.
+
+**It is not the text.** Four films with the readout not drawn gave four
+different streams, where the same change makes `load` byte-identical. So the
+two were never one fault, and the glyph path owns `load` alone.
+
+**The runs, because a pair says nothing here.** Twelve films of menger at
+its own seven seconds, every one of them 1,911,168,000 bytes, so nothing is
+dropping or duplicating a frame. Four distinct streams in the first six, and
+three in a later four. An early pair matched, which is how this looked like
+a one-in-four thing in 2026-11-04's entry: at this rate a matching pair is
+a coin landing the same way twice and means nothing at all.
+
+**Where the difference actually lives.** A film and a picture share the loop
+and differ in one line: a film calls `Renderer::picture` every frame, which
+is `drew` and then `read_back`; a picture calls `drew` every frame and reads
+back once at the end. Pictures of menger are byte-identical and films are
+not, so whatever this is, reading a frame back is what provokes it.
+
+**And the readback is not racing.** `read_back` copies the texture to a
+buffer, submits, maps, and polls with `PollType::Wait` before it touches the
+pixels. There is no missing fence to find there, which was the obvious guess
+once the difference was named.
+
+**So what is left** is what else `picture` changes about a run that `drew`
+does not: the staging texture and buffer kept in `picture_into` across
+frames, and the pacing, since a readback a frame is a wait a frame. The
+pacing is the uncomfortable one, because this spec's own claim is that a run
+on fixed steps has no wall clock in it. If something in the engine still
+reads one, a film is where it would show and a picture is where it would
+not. Neither has been tested.
+
+**What this costs, still.** `stamp` cannot become a real check for menger. A
+refilmed clip and a changed clip look the same in a diff, and every refresh
+commits a menger that differs from the one before it for no reason anybody
+can state.
+
 ## A run with no clock cannot say what a frame took
 
 `load` puts up what a frame cost in milliseconds, and in a film those three
