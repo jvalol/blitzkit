@@ -165,6 +165,21 @@ pub struct Water {
     pub damping: f32,
     /// How rough the surface shades, per `CHOP`.
     pub chop: f32,
+    /// How far above still the surface may stand, in metres. Spec 0103.
+    ///
+    /// **The lip of whatever holds it, which only the game knows.** A
+    /// basin's walls reflect, so the rim of a heightfield is an antinode
+    /// and moves further than anything else on it: the one part of the
+    /// surface that stands highest is the part lying against the wall.
+    /// Left to itself it rises over the coping, and what you see is water
+    /// standing above the thing holding it with a gap under its edge.
+    ///
+    /// Set it to the freeboard, meaning how far the still surface sits
+    /// below the lip, and a wave laps against the wall instead of climbing
+    /// over it. Left alone it is [`BRIM`] of the depth, which is the bound
+    /// that was always here and is about a runaway rather than about a
+    /// container.
+    pub rises_to: f32,
     /// How long it has been running, which the chop moves with.
     since: f32,
     /// Nodes along x and along z, which is one more than the cells each way.
@@ -203,6 +218,7 @@ impl Water {
             speed: SPEED,
             damping: DAMPING,
             chop: CHOP,
+            rises_to: deep.max(0.0) * BRIM,
             since: 0.0,
             across,
             along,
@@ -315,13 +331,19 @@ impl Water {
         // and the brim, which is what stops a heightfield that has started to
         // run away from taking the whole frame with it
         let brim = (self.deep * BRIM).max(1e-3);
+        // **And the lip above it, which is a smaller number.** Spec 0103.
+        // The brim is about a runaway and is a share of the depth; this one
+        // is where the water would go over the side, and a basin's rim is a
+        // long way under a tenth of its depth. Never above the brim, so a
+        // game that leaves it alone gets what it always got.
+        let lip = self.rises_to.max(0.0).min(brim);
         for n in 0..self.height.len() {
-            self.height[n] = (self.height[n] + self.rate[n] * dt).clamp(-brim, brim);
+            self.height[n] = (self.height[n] + self.rate[n] * dt).clamp(-brim, lip);
 
-            // a node held at the brim has nowhere left to go, so its speed goes
-            // with it: left alone it would push against the lid for ever and
-            // the water would stay there.
-            if self.height[n].abs() >= brim - 1e-6 {
+            // a node held at either bound has nowhere left to go, so its
+            // speed goes with it: left alone it would push against the lid
+            // for ever and the water would stay there.
+            if self.height[n] >= lip - 1e-6 || self.height[n] <= -brim + 1e-6 {
                 self.rate[n] = 0.0;
             }
         }
@@ -876,6 +898,57 @@ mod tests {
             water.off_still(),
             off_the_mesh,
             "the cheap read and the mesh do not agree about how far off still it is"
+        );
+    }
+
+    /// Spec 0103: the surface never stands above the lip it is given.
+    ///
+    /// **Pushed far harder than anything a game does.** The question is not
+    /// whether an ordinary ripple clears the rim, it is whether anything
+    /// can: a bound that holds for gentle water and not for a cannonball
+    /// is not a bound. So this drops a push ten times the freeboard into
+    /// it, over and over, and watches the rim.
+    ///
+    /// The rim nodes and not the middle, because a reflecting wall makes an
+    /// antinode of them: the highest point on a basin of water is the part
+    /// lying against the side, which is the part that shows over a coping.
+    #[test]
+    fn the_surface_never_stands_above_its_lip() {
+        let mut water = pool();
+        let lip = 0.06;
+
+        water.rises_to = lip;
+
+        let mut highest = f32::MIN;
+
+        for n in 0..600 {
+            if n % 7 == 0 {
+                water.push(vec3(1.4, 0.0, -0.9), 0.7, 0.6);
+            }
+            if n % 11 == 0 {
+                water.ring(vec3(-1.6, 0.0, 1.2), 0.4, 0.9, 0.5);
+            }
+
+            water.step(STEP);
+            // the upward side only, because the lip is one-sided: a trough
+            // is water away from the rim, and nothing goes over a coping
+            // downwards
+            highest = highest.max(water.height.iter().copied().fold(f32::MIN, f32::max));
+        }
+
+        assert!(
+            highest <= lip + 1e-5,
+            "the surface reached {:.4} above still with a lip of {:.4}, so it stood over \
+             the side of what holds it",
+            highest,
+            lip
+        );
+        assert!(
+            highest > lip * 0.5,
+            "the surface only ever reached {:.4} of a {:.4} lip, so this never pushed it \
+             hard enough to find out",
+            highest,
+            lip
         );
     }
 
