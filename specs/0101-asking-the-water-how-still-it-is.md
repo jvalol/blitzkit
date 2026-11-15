@@ -12,11 +12,11 @@ picture tests at all, it ran in 62 seconds.
 
 One test was the whole of it:
 
-| test, run on its own | |
+| capriccio's own test, run on its own | |
 | --- | --- |
-| `spa::tests::the_pool_settles_with_somebody_in_it` | 57.1 s |
-| `spa::tests::the_pool_settles_rather_than_building_up` | 15.9 s |
-| `spa::tests::the_tub_settles_rather_than_building_up` | 1.6 s |
+| `the_pool_settles_with_somebody_in_it` | 57.1 s |
+| `the_pool_settles_rather_than_building_up` | 15.9 s |
+| `the_tub_settles_rather_than_building_up` | 1.6 s |
 | the other 34 tests in that module, together | 0.2 s |
 
 Those three wade somebody up and down a pool for five minutes of simulated
@@ -34,7 +34,7 @@ straight off the height field. That field is the simulation, and the mesh's
 own height is the field unchanged, because the chop is in the normals and
 not in the position, per spec 0053.
 
-**And `tests::off_still_is_what_the_surface_says` holds the two together**,
+**And `water::tests::off_still_is_what_the_surface_says` holds the two together**,
 on a surface with something happening on it, because a still pool agrees
 about nought whatever is wrong with it. If the chop ever moves from the
 normal into the position, that is where it will be said.

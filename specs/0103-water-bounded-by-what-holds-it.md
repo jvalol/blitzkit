@@ -8,9 +8,10 @@
 Jake, 2026-11-15: water should be bounded by its container, so its ripples
 lap against it rather than up and above it showing a gap at its edges.
 
-A basin's walls reflect, which spec 0043 wanted and `tests::the_walls_hold_it_in`
-holds. What a reflecting wall does to a wave is make an antinode of it: the
-part of the surface that stands highest is the part lying against the side.
+A basin's walls reflect, which spec 0043 wanted and
+`water::tests::the_walls_hold_it_in` holds. What a reflecting wall does to a
+wave is make an antinode of it: the part of the surface that stands highest
+is the part lying against the side.
 So the rim is where a heightfield rises furthest, and the rim is also where
 it is seen against the coping.
 
