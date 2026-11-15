@@ -222,6 +222,35 @@ impl Water {
         self.step
     }
 
+    /// The furthest the surface stands off still anywhere on it, in metres.
+    /// Spec 0101.
+    ///
+    /// **Because asking the mesh costs a mesh.** The one thing a test of
+    /// this wants to know is whether the water is running away with itself,
+    /// and the only way to ask it was [`Water::surface`], which walks every
+    /// node working out a slope, six chop waves and a normalize, and hands
+    /// back an allocated [`MeshData`]. Asked once a frame for five minutes
+    /// of simulated wading at four frame rates, that was fifty-seven
+    /// seconds of capriccio's sixty-two second suite.
+    ///
+    /// The height field is the simulation, and the mesh's own height is
+    /// that field unchanged: the chop is in the normals and not in the
+    /// position, per spec 0053. So this is the same number without the
+    /// mesh, and `tests::off_still_is_what_the_surface_says` is what holds
+    /// the two together.
+    ///
+    /// **And the field has no skirt.** The mesh hangs one from the rim down
+    /// to the basin floor, per spec 0043, so a caller asking the whole of
+    /// it how far off still the water is gets the depth of the pool
+    /// instead. Every one of capriccio's three callers sliced the vertices
+    /// by hand to dodge that, and the slice is the sort of thing that is
+    /// right until somebody adds a vertex.
+    pub fn off_still(&self) -> f32 {
+        self.height
+            .iter()
+            .fold(0.0f32, |most, high| most.max(high.abs()))
+    }
+
     /// The longest substep that stays stable, which is the Courant condition.
     pub fn longest_step(&self) -> f32 {
         COURANT * self.step / (self.speed.max(1e-4) * std::f32::consts::SQRT_2)
@@ -800,16 +829,54 @@ mod tests {
 
     /// How far off still the whole surface is, which is one number for whether
     /// anything is happening at all.
+    ///
+    /// **[`Water::off_still`] now, which this used to be.** Spec 0101: it
+    /// sat here private while capriccio's pool tests asked the same
+    /// question of a freshly built mesh, once a frame for five minutes.
     fn stirring(water: &Water) -> f32 {
-        water
-            .height
-            .iter()
-            .fold(0.0f32, |most, h| most.max(h.abs()))
+        water.off_still()
     }
 
     /// How much water there is, up to a constant. Reflecting walls conserve it.
     fn level(water: &Water) -> f32 {
         water.height.iter().sum()
+    }
+
+    /// Spec 0101: the cheap read of how far off still the water is agrees
+    /// with the mesh, which is where that number used to be read from.
+    ///
+    /// **The whole of what makes the cheap one safe.** `off_still` reads
+    /// the height field and the mesh carries the chop as well, so if the
+    /// chop ever moved from the normal into the position the two would
+    /// come apart and every caller would be reading a stiller pool than
+    /// there is. Taken on a surface with something happening on it, since
+    /// a still pool agrees about nought whatever is wrong.
+    #[test]
+    fn off_still_is_what_the_surface_says() {
+        let mut water = pool();
+
+        water.push(vec3(0.7, 0.0, -0.4), 0.8, 0.22);
+        water.ring(vec3(-1.1, 0.0, 0.9), 0.3, 0.5, 0.14);
+
+        for _ in 0..40 {
+            water.step(STEP);
+        }
+
+        let (across, along) = water.nodes();
+        let level = water.at.y;
+        let off_the_mesh = water.surface().vertices[..across * along]
+            .iter()
+            .fold(0.0f32, |most, v| most.max((v.position[1] - level).abs()));
+
+        assert!(
+            off_the_mesh > 0.001,
+            "nothing is happening on this surface, so it agrees about nothing"
+        );
+        assert_eq!(
+            water.off_still(),
+            off_the_mesh,
+            "the cheap read and the mesh do not agree about how far off still it is"
+        );
     }
 
     /// Spec 0043: a frame that wanders does not pump the surface.
