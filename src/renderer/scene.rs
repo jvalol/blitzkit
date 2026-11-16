@@ -49,6 +49,20 @@ pub struct Instance {
     /// This is the other knob: one multiplies the lobe's width, this one its
     /// height.
     pub specular: f32,
+    /// How much of its own colour this one gives off, with nothing shining
+    /// on it. Spec 0105.
+    ///
+    /// **Because a light source could not be drawn as one.** The shader is
+    /// `base * (ambient + diffuse * lit) + specular * lit`, so a colour
+    /// past one glows only in so far as the ambient lifts it: capriccio's
+    /// lamps read as lit glass under a bright sky and as grey boxes under
+    /// a dim one, and the day it pinned its indoor fill they went out. A
+    /// fitting is not a surface that happens to be bright. It is the thing
+    /// the light is coming from.
+    ///
+    /// Nought for everything this engine drew before the term arrived, so
+    /// not one pixel of any game moved when it did.
+    pub glow: f32,
 }
 
 unsafe impl bytemuck::Pod for Instance {}
@@ -161,7 +175,8 @@ impl Instance {
             6 => Float32x3,
             7 => Float32x4,
             8 => Float32,
-            9 => Float32
+            9 => Float32,
+            10 => Float32
         ],
     };
 
@@ -174,6 +189,10 @@ impl Instance {
     /// Every push but `push_surface` hands this out, so nothing drawn by any
     /// game moved when the term arrived.
     pub const DEFAULT_SPECULAR: f32 = 1.0;
+
+    /// A surface with no light of its own, which is all of them unless a
+    /// game says otherwise. Spec 0105.
+    pub const DEFAULT_GLOW: f32 = 0.0;
 
     /// Whether this one is drawn see-through. Any alpha short of full is, so a
     /// game asks for translucency by dimming the alpha of its color and nothing
@@ -248,6 +267,7 @@ impl Instance {
             color: color.to_array(),
             shininess,
             specular: Self::DEFAULT_SPECULAR,
+            glow: Self::DEFAULT_GLOW,
         }
     }
 
@@ -755,6 +775,32 @@ impl Scene {
         instance.specular = specular;
 
         into.entry((mesh, texture)).or_default().push(instance);
+    }
+
+    /// Draws `mesh` as a thing with light of its own: a lamp's glass, a
+    /// sconce, a window with something burning behind it. Spec 0105.
+    ///
+    /// `glow` is how much of `color` it gives off before anything shines on
+    /// it, so one is the colour itself and past one is a colour that clips,
+    /// which on an eight bit canvas is the whole of what a glow is.
+    pub fn push_glowing(
+        &mut self,
+        mesh: MeshId,
+        transform: &Transform,
+        color: Vec4,
+        shininess: f32,
+        glow: f32,
+    ) {
+        let into = if self.into_reflections {
+            &mut self.reflected
+        } else {
+            &mut self.instances
+        };
+
+        let mut instance = Instance::new(transform, color, shininess);
+        instance.glow = glow;
+
+        into.entry((mesh, TextureId::WHITE)).or_default().push(instance);
     }
 
     /// Everything pushed from here until [`and_everywhere`] goes in
@@ -2367,18 +2413,22 @@ mod tests {
     /// megabytes more than they did.
     #[test]
     fn an_instance_is_small() {
-        // four tightly packed columns, a color, a shininess, a strength
-        assert_eq!(std::mem::size_of::<Instance>(), 48 + 16 + 4 + 4);
-        assert!(std::mem::size_of::<Instance>() <= 72);
+        // four tightly packed columns, a color, a shininess, a strength and
+        // a glow. Spec 0105 added the last one: four bytes on every instance
+        // in the engine, against a cap this still sits well inside.
+        assert_eq!(std::mem::size_of::<Instance>(), 48 + 16 + 4 + 4 + 4);
+        assert!(std::mem::size_of::<Instance>() <= 80);
         assert_eq!(std::mem::offset_of!(Instance, color), 48);
         assert_eq!(std::mem::offset_of!(Instance, shininess), 64);
         assert_eq!(std::mem::offset_of!(Instance, specular), 68);
+        assert_eq!(std::mem::offset_of!(Instance, glow), 72);
 
         let attributes = Instance::DESC.attributes;
         assert_eq!(attributes[3].offset, 36);
         assert_eq!(attributes[4].offset, 48);
         assert_eq!(attributes[5].offset, 64);
         assert_eq!(attributes[6].offset, 68);
+        assert_eq!(attributes[7].offset, 72);
         assert_eq!(Instance::DESC.array_stride, Instance::SIZE);
     }
 

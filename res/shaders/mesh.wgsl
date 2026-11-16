@@ -325,6 +325,8 @@ struct VertexOutput {
     @location(3) world_position: vec3<f32>,
     @location(4) shininess: f32,
     @location(6) specular: f32,
+    /// How much of its own colour this one gives off. Spec 0105.
+    @location(7) glow: f32,
     /// The same clip position again, as a varying, for spec 0092.
     ///
     /// `@builtin(position)` arrives at a fragment already divided through and
@@ -348,6 +350,7 @@ fn vs_main(
     @location(7) color: vec4<f32>,
     @location(8) shininess: f32,
     @location(9) specular: f32,
+    @location(10) glow: f32,
 ) -> VertexOutput {
     // **The eye comes off here and not on the CPU.** An instance is written
     // where it stands, so a kept run can be written once and drawn for as
@@ -366,6 +369,7 @@ fn vs_main(
     out.world_position = world.xyz;
     out.shininess = shininess;
     out.specular = specular;
+    out.glow = glow;
     out.clip = out.clip_position;
     return out;
 }
@@ -878,7 +882,13 @@ fn lit_surface(in: VertexOutput) -> Lit {
 
     let base = in.color * sampled;
 
-    var shaded = base.rgb * (uniforms.ambient.rgb + diffuse * lit) + specular * lit;
+    // **And whatever light it has of its own, which owes nothing to the
+    // room.** Spec 0105. Before this, a lamp's glass was a surface with a
+    // colour past one and it glowed only in so far as the ambient lifted
+    // it, so the same fitting read as lit glass under a bright sky and as
+    // a grey box under a dim one. `glow` is nought for everything that
+    // does not ask, so nothing drawn before the term moved.
+    var shaded = base.rgb * (in.glow + uniforms.ambient.rgb + diffuse * lit) + specular * lit;
 
     // the lamps on top of the sun. The sun's own `lit` does not touch them: a
     // lamp inside a shadow still lights what is next to it. A lamp that asked
