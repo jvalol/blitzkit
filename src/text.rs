@@ -25,6 +25,42 @@ use crate::texture::TextureData;
 /// font twice over in anything that links this.
 pub(crate) const FONT_BYTES: &[u8] = include_bytes!("../res/fonts/PressStart2P-Regular.ttf");
 
+/// The other one, for sentences. Spec 0106.
+///
+/// **Two faces in one building, on purpose this time.** The stencilling test
+/// below names that as a fault, and it is one for a sign and the readout
+/// above it: those are the same object seen twice and have to match. A
+/// marquee and a sentence are not. `PressStart2P` is eight by eight with no
+/// descenders and no lower case worth the name, which is right over a
+/// cabinet and wrong under a crosshair, where the arcade asks you to read a
+/// line about which key does what.
+///
+/// Monospaced, so `room_for`'s note about advances and kerning still holds
+/// for both. It is the face the engine's own site is set in, and its bytes
+/// were already in this repo as a `woff`: this is that file with its tables
+/// decompressed, which is why nothing was fetched to add it.
+pub(crate) const PLAIN_BYTES: &[u8] = include_bytes!("../res/fonts/RobotoMono-Regular.ttf");
+
+/// Which of the two faces a line is set in.
+///
+/// Arcade everywhere by default, so every game that never heard of this
+/// draws exactly what it drew before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub enum Face {
+    #[default]
+    Arcade,
+    Plain,
+}
+
+impl Face {
+    pub(crate) fn bytes(self) -> &'static [u8] {
+        match self {
+            Face::Arcade => FONT_BYTES,
+            Face::Plain => PLAIN_BYTES,
+        }
+    }
+}
+
 /// How much room a line is given above and below the letters themselves, as a
 /// fraction of the line.
 ///
@@ -160,6 +196,15 @@ fn lettered(words: &str, tall: f32) -> (u32, u32, Vec<u8>) {
 /// Newlines already in the string are kept, and each of their lines is
 /// wrapped on its own.
 pub fn wrapped(words: &str, size: f32, width: f32) -> String {
+    wrapped_in(words, size, width, Face::default())
+}
+
+/// Wraps a line to a width in one of the two faces.
+///
+/// The face has to come in here as well as into the drawing. A line measured
+/// in one face and drawn in another wraps somewhere else, which is the plate
+/// being the wrong shape all over again.
+pub fn wrapped_in(words: &str, size: f32, width: f32, face: Face) -> String {
     let mut out = String::with_capacity(words.len());
 
     for (n, line) in words.split('\n').enumerate() {
@@ -176,7 +221,7 @@ pub fn wrapped(words: &str, size: f32, width: f32) -> String {
                 format!("{} {}", room, word)
             };
 
-            if !room.is_empty() && room_for(&longer, size).x > width {
+            if !room.is_empty() && room_for_in(&longer, size, face).x > width {
                 out.push_str(&room);
                 out.push('\n');
                 room = String::from(word);
@@ -192,7 +237,12 @@ pub fn wrapped(words: &str, size: f32, width: f32) -> String {
 }
 
 pub fn room_for(words: &str, size: f32) -> glam::Vec2 {
-    let font = FontRef::try_from_slice(FONT_BYTES).expect("the font is in this binary");
+    room_for_in(words, size, Face::default())
+}
+
+/// How much room a line takes in one of the two faces.
+pub fn room_for_in(words: &str, size: f32, face: Face) -> glam::Vec2 {
+    let font = FontRef::try_from_slice(face.bytes()).expect("the font is in this binary");
     let scaled = font.as_scaled(PxScale::from(size));
 
     let lines = words.split('\n');
@@ -298,11 +348,66 @@ mod tests {
         assert!(inked > 0, "no texel is a letter");
     }
 
+    /// Spec 0106: there are two faces, and the one nobody asks for is the
+    /// one every game already drew.
+    ///
+    /// **The default is the whole of the compatibility claim.** Six games
+    /// push `RenderText` without naming a face and six games' screenshots
+    /// are checked in, so the day `Face::default` stops being the arcade
+    /// one, every one of them silently changes typeface.
+    ///
+    /// The widths are measured rather than the bytes compared, because what
+    /// matters is that a line laid out in one face is not laid out right in
+    /// the other: that is the fault `wrapped_in` exists to prevent.
+    #[test]
+    fn the_two_faces_are_two_faces_and_the_arcade_one_is_the_default() {
+        let words = "Left or right turns this face.";
+        let size = 15.0;
+
+        assert_eq!(Face::default(), Face::Arcade, "the default face moved");
+        assert_eq!(
+            room_for(words, size),
+            room_for_in(words, size, Face::Arcade),
+            "the unnamed face is not the arcade one"
+        );
+
+        let arcade = room_for_in(words, size, Face::Arcade);
+        let plain = room_for_in(words, size, Face::Plain);
+
+        assert!(arcade.x > 0.0 && plain.x > 0.0, "a face measured nothing");
+        assert!(
+            plain.x < arcade.x * 0.8,
+            "the plain face is {:.0} wide against the arcade's {:.0}, which is \
+             not a sentence face",
+            plain.x,
+            arcade.x
+        );
+
+        // and a width that fits one does not fit the other, which is why the
+        // face goes into the wrapping and not only into the drawing
+        let width = plain.x + 1.0;
+
+        assert!(
+            !wrapped_in(words, size, width, Face::Plain).contains('\n'),
+            "the plain face wrapped a line it fits"
+        );
+        assert!(
+            wrapped_in(words, size, width, Face::Arcade).contains('\n'),
+            "the arcade face did not wrap a line it cannot fit"
+        );
+    }
+
     /// Spec 0047: and the letters themselves are the ones `drawn` draws.
     ///
     /// The two share their glyph work, so this is here to catch the day they
     /// stop: a stencil whose letters have drifted from the sign's is two
     /// fonts in one building.
+    ///
+    /// **Which spec 0106 then put there on purpose, and this still holds.**
+    /// A sign and the readout above it are one object seen twice and have to
+    /// match; a marquee and a sentence are two things. Both of these draw in
+    /// the arcade face and neither takes a `Face`, so what this guards is
+    /// untouched by there being a second one.
     #[test]
     fn stencilling_moves_nothing_but_the_alpha() {
         let sign = drawn("Middlemarch", 24.0);

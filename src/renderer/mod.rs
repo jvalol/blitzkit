@@ -52,7 +52,7 @@ use wgpu_text::glyph_brush::{HorizontalAlign, Layout, Section, Text};
 use wgpu_text::{BrushBuilder, TextBrush};
 use winit::window::Window;
 
-use crate::text::FONT_BYTES;
+use crate::text::{Face, FONT_BYTES, PLAIN_BYTES};
 
 /// How many fighting pairs a coplanar check writes into the log, biggest
 /// first, per spec 0048. The rest are in [`Renderer::fights`] to be outlined.
@@ -123,6 +123,13 @@ pub struct Renderer {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     text_brush: TextBrush<FontRef<'static>>,
+    /// The second brush, for the plain face. Spec 0106.
+    ///
+    /// `wgpu_text` builds a brush round one font and its own atlas, so two
+    /// faces on one screen is two brushes. They are queued and drawn in turn
+    /// and the plain one goes last, which is the order the plate wants: a
+    /// line of keys over the name of the thing, never under it.
+    plain_brush: TextBrush<FontRef<'static>>,
     /// Built here and resized with the surface. The pass that attaches it
     /// arrives with meshes in spec 0010; quads and text never use it.
     depth: depth::DepthTexture,
@@ -610,6 +617,12 @@ impl Renderer {
         let index_buffer = create_buffer(&device, 0, wgpu::BufferUsages::INDEX);
 
         let text_brush = BrushBuilder::using_font_bytes(FONT_BYTES).unwrap().build(
+            &device,
+            config.width,
+            config.height,
+            drawn,
+        );
+        let plain_brush = BrushBuilder::using_font_bytes(PLAIN_BYTES).unwrap().build(
             &device,
             config.width,
             config.height,
@@ -1153,6 +1166,7 @@ impl Renderer {
             vertex_buffer,
             index_buffer,
             text_brush,
+            plain_brush,
             depth,
             colour,
             mesh_pipeline,
@@ -2035,6 +2049,8 @@ impl Renderer {
         self.camera.set_viewport(self.width(), self.height());
         self.text_brush
             .resize_view(self.width(), self.height(), &self.queue);
+        self.plain_brush
+            .resize_view(self.width(), self.height(), &self.queue);
     }
 
     pub fn render(&mut self, scene: &Scene, geometry: &Geometry, text_renderer: &TextRenderer) {
@@ -2488,13 +2504,22 @@ impl Renderer {
         self.upload_geometry(geometry);
 
         if let Frame::Screen(text_renderer) = frame {
-            let sections: Vec<Section> = text_renderer
-                .render_texts
-                .iter()
-                .map(text_section)
-                .collect();
-            if let Err(e) = self.text_brush.queue(&self.device, &self.queue, sections) {
-                log::error!("Failed to queue text: {}", e);
+            // One brush a face, each given only its own lines. A brush handed
+            // nothing still has to be queued, or it keeps last frame's.
+            for (face, brush) in [
+                (Face::Arcade, &mut self.text_brush),
+                (Face::Plain, &mut self.plain_brush),
+            ] {
+                let sections: Vec<Section> = text_renderer
+                    .render_texts
+                    .iter()
+                    .filter(|text| text.face == face)
+                    .map(text_section)
+                    .collect();
+
+                if let Err(e) = brush.queue(&self.device, &self.queue, sections) {
+                    log::error!("Failed to queue text: {}", e);
+                }
             }
         }
 
@@ -3156,7 +3181,8 @@ impl Renderer {
             }
 
             self.text_brush.draw(&mut render_pass);
-            counted.draws += 1;
+            self.plain_brush.draw(&mut render_pass);
+            counted.draws += 2;
         }
 
         // the queries into a buffer, and that buffer into one that can be

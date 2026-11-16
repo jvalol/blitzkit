@@ -1,0 +1,24 @@
+RobotoMono-Regular.ttf
+
+Licence
+-------
+
+Copyright 2015 Google Inc. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0. The full text is in
+LICENSE-APACHE at the root of this repository, and the font itself names
+the same licence at http://www.apache.org/licenses/LICENSE-2.0
+
+Both of those lines are read out of the file's own name table rather than
+remembered: nameID 0 is the copyright above, and nameID 14 is that URL. The
+file is Roboto Mono version 2.000985, 2015, built with ttfautohint v1.3,
+from before the project moved to the SIL Open Font License, which is why
+the terms here are Apache and not OFL like PressStart2P beside it.
+
+Where it came from
+------------------
+
+This file was made in this repository, from this repository, by taking
+site/public/fonts/roboto-mono-v6-latin-regular.woff and decompressing its
+sfnt tables. Nothing was downloaded to add it. The output is byte for byte
+the size the woff header declares for the font it wraps, 31596.

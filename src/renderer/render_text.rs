@@ -12,6 +12,9 @@ pub struct RenderText {
     pub selectable: bool,
     pub focused: bool,
     pub centered: bool,
+    /// Which face it is set in. Arcade unless something says otherwise, so a
+    /// game that never heard of this draws what it always drew.
+    pub face: crate::text::Face,
 }
 
 impl Default for RenderText {
@@ -25,6 +28,7 @@ impl Default for RenderText {
             selectable: false,
             focused: false,
             centered: false,
+            face: crate::text::Face::default(),
         }
     }
 }
