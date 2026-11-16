@@ -800,7 +800,9 @@ impl Scene {
         let mut instance = Instance::new(transform, color, shininess);
         instance.glow = glow;
 
-        into.entry((mesh, TextureId::WHITE)).or_default().push(instance);
+        into.entry((mesh, TextureId::WHITE))
+            .or_default()
+            .push(instance);
     }
 
     /// Everything pushed from here until [`and_everywhere`] goes in
