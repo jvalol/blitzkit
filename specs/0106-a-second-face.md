@@ -34,8 +34,20 @@ both times it was the measurement disagreeing with the drawing.
 
 **Two faces on a screen is two brushes.** `wgpu_text` builds a brush round
 one font and its own atlas. Each is queued with only the lines in its own
-face and each is drawn, the plain one second. A brush handed nothing still
-has to be queued, or it keeps the frame before.
+face, and a brush handed nothing still has to be queued, or it keeps the
+frame before.
+
+**The plain one is only drawn when it has something**, and it was not at
+first. The claim above is that a game which never names a face draws what it
+always drew, and for a day that was wrong by one: an empty brush still
+issues a draw call, so every game in the project paid one a frame for a face
+it never asked for.
+
+Nothing in a test said so. What said so was the engine's own `load` example,
+which reports its draw count on screen, and whose clip came back reading
+"5 draws" where it had read 4. That is a refresh of a derived thing
+catching a fault in the source, which is the opposite of the direction these
+usually run.
 
 **And the stencilling test still says what it said.** Its note calls two
 fonts in one building a fault, and for what it guards it is: a sign and the
@@ -46,8 +58,9 @@ things. Both of those draw in the arcade face and neither takes a `Face`.
 
 - There are two faces, the unnamed one is the arcade one, the plain one is narrower, and a width that fits a line in one wraps it in the other. — `text::tests::the_two_faces_are_two_faces_and_the_arcade_one_is_the_default`
 
-The default is the whole of the compatibility claim, and it is asserted
-directly: six games push `RenderText` without naming a face and their
+A draw call is not among the things that test can see, which is how the
+extra one lived long enough to reach a clip. The default is the rest of the
+compatibility claim, and it is asserted directly: six games push `RenderText` without naming a face and their
 screenshots are checked in, so the day `Face::default` moves, every one of
 them silently changes typeface.
 

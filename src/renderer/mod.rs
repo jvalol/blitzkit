@@ -2503,6 +2503,14 @@ impl Renderer {
         );
         self.upload_geometry(geometry);
 
+        // Whether anything is set in the plain face this frame, so a game
+        // that never names one does not pay a draw call for it. Spec 0106
+        // claims such a game draws what it always drew, and the engine's own
+        // `load` example reports its draw count on screen: it went from four
+        // to five the day the second brush went in, which is that claim
+        // being wrong by one.
+        let mut plain_wanted = false;
+
         if let Frame::Screen(text_renderer) = frame {
             // One brush a face, each given only its own lines. A brush handed
             // nothing still has to be queued, or it keeps last frame's.
@@ -2516,6 +2524,10 @@ impl Renderer {
                     .filter(|text| text.face == face)
                     .map(text_section)
                     .collect();
+
+                if face == Face::Plain {
+                    plain_wanted = !sections.is_empty();
+                }
 
                 if let Err(e) = brush.queue(&self.device, &self.queue, sections) {
                     log::error!("Failed to queue text: {}", e);
@@ -3181,8 +3193,12 @@ impl Renderer {
             }
 
             self.text_brush.draw(&mut render_pass);
-            self.plain_brush.draw(&mut render_pass);
-            counted.draws += 2;
+            counted.draws += 1;
+
+            if plain_wanted {
+                self.plain_brush.draw(&mut render_pass);
+                counted.draws += 1;
+            }
         }
 
         // the queries into a buffer, and that buffer into one that can be
