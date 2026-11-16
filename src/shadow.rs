@@ -260,7 +260,26 @@ pub fn is_lit(recorded_depth: f32, fragment_depth: f32, bias: f32) -> bool {
 
 /// How wide one face of a lamp's shadow map is. Six of these per lamp, so it is
 /// the smallest of the three.
-pub const POINT_MAP_SIZE: u32 = 512;
+///
+/// **1024, which is 512 doubled because 512 was soft.** Spec 0104. A face is
+/// a right angle across, so a texel is twice its own distance over this: at
+/// 512 one landed 6.8 millimetres wide on a plinth under a lamp 1.7 metres
+/// over it, and the nine taps below spread that to about fourteen. Jake read
+/// it off the screen in the arcade's gallery as fuzzy where the sun's
+/// shadows are sharp, and the sun's map is this one's four times over with
+/// one face rather than six.
+///
+/// The cost is memory and not time. Twelve faces of `Depth32Float` is 12.6
+/// megabytes at 512 and 50.3 at 1024, allocated by every game whether it
+/// casts or not, and the shadow pass is geometry bound rather than fill
+/// bound: measured in the arcade's gallery with both of its lamps casting,
+/// twenty nine seconds of play goes 7.67 seconds to 7.94, where turning the
+/// lamps off altogether is 7.27.
+///
+/// 2048 was built and looked at. It quarters the blur rather than halving
+/// it and costs 201 megabytes, which is not a number to hand a browser tab,
+/// and this engine's games are served as one.
+pub const POINT_MAP_SIZE: u32 = 1024;
 
 /// Distance as a fraction of the lamp's range, written straight into a depth
 /// buffer by the fragment stage.
