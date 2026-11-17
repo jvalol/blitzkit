@@ -248,6 +248,82 @@ refilmed clip and a changed clip look the same in a diff, and every refresh
 commits a menger that differs from the one before it for no reason anybody
 can state.
 
+## 2026-11-16: it is multisampling, and the refresh has a gate
+
+Jake asked for it to be chased down, after capriccio's clip started drifting
+too and made it two.
+
+**Reproduced in minutes rather than gigabytes.** Films go to `/dev/stdout`
+through a reader that hashes each 1200 by 948 frame as it passes, so a run is
+a list of 420 hashes instead of 1.9 GB on the disc. Everything below is off
+that.
+
+**It is far smaller than this spec had it.** Four films at the clip's own
+seven seconds: 420 frames each, four distinct streams, and only three frames
+that ever differ, at 16, 253 and 262. In frame 253 exactly one pixel differs,
+in one channel, by three. The earlier figures were against clips committed on
+other days, which is a different engine as well as a different run.
+
+**It is one multisample of coverage.** At that pixel the row reads
+
+    run a:  114 114 114 117 100 100 100
+    run b:  114 114 114 114 100 100 100
+
+and the row under it reads 117 in both. It is the top pixel of a vertical
+edge, where a bright sliver catches one sample of four or does not. Not
+garbage, not a wrong instance, not a readout: one sample's coverage.
+
+**And multisampling is the whole of it.** Forced to one sample a pixel, eight
+films at seven seconds are byte-identical, one stream. At four samples, four
+runs give four streams. That is the thing nobody had tried, and it was two
+lines to try.
+
+**So 2026-11-15's conclusion is wrong, and here is why it looked right.** It
+said reading a frame back provokes this, resting on pictures being
+byte-identical. Pictures are not stable; they are sticky. From the exact
+committed source, one batch of thirty pictures at frame 253 gave
+`d6315bad08100b65`, and three later batches totalling fifty-four gave
+`499dd367f95715dc`. A wait a frame with no copy also leaves a picture stable.
+So the copy is not the mechanism and neither is the wait: a film samples the
+tie 420 times where a picture samples it once, and the tie itself is decided
+by something that drifts slowly with load rather than rolling per run.
+
+**What is left unexplained** is why the hardware resolves an exact coverage
+tie differently from one run to the next. That is below anything this engine
+can see, and it stops mattering once a refilmed clip is not a new file.
+
+### The gate
+
+`picture::clips_apart` reads two streams of raw rgba frames and answers with
+this crate's own `CHANNEL` and `SHARE` rather than a second account of them.
+`clips-apart` is a binary over it, so a shell can use it as a condition, and
+`refresh-examples` encodes to a temporary path, decodes both sides and keeps
+the committed clip when the new one is the same clip.
+
+Decoded on both sides, never drawn against decoded. A fresh frame differs
+from a decoded one everywhere from the compression alone, which would answer
+yes to everything.
+
+**So `stamp` still cannot check a clip, and no longer has to.** The thing it
+could not tell apart stops existing: a refilmed clip that has not changed is
+not written, so git has nothing to show.
+
+## Acceptance criteria for the gate
+
+- A clip refilmed with menger's own drift is the same clip, a frame that moved by less than a channel is the same clip, and a frame that really moved is not. — `picture::tests::a_refilmed_clip_is_the_same_clip_and_a_changed_one_is_not`
+
+Two controls, and both of them failed to fail first. Tightening `CHANNEL` to
+2 leaves the drift case passing on `SHARE`; tightening `SHARE` leaves it
+passing on `CHANNEL`. menger's drift is under both at once, so neither alone
+can move it, and the test only says something because a second case was added
+with enough pixels to pass `SHARE` and each of them under `CHANNEL`. That one
+does fail when `CHANNEL` is tightened.
+
+Checked end to end as well: refilming menger through `refresh-examples`
+leaves `media/menger.mp4` untouched in git and reports the clip it already
+was, and the same comparison between menger and teapot reads 212 of 212
+frames differing and replaces the file.
+
 ## A run with no clock cannot say what a frame took
 
 `load` puts up what a frame cost in milliseconds, and in a film those three

@@ -265,6 +265,99 @@ pub fn how_far_apart(one: &Picture, two: &Picture) -> f32 {
     count as f32 / (one.width * one.height) as f32
 }
 
+/// What two clips of the same thing came to, frame by frame.
+///
+/// `frames` is how many were compared, `differing` how many were further
+/// apart than [`SHARE`], and `worst` the largest share any single frame
+/// reached.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Apart {
+    pub frames: usize,
+    pub differing: usize,
+    pub worst: f32,
+}
+
+impl Apart {
+    /// Whether these two are the same clip as far as this tolerance can
+    /// tell, which is what decides whether a refilmed one is kept.
+    pub fn the_same(&self) -> bool {
+        self.frames > 0 && self.differing == 0
+    }
+}
+
+/// Reads two streams of raw rgba frames and says how far apart they are.
+///
+/// **Because a refilmed clip and a changed clip looked the same in a diff.**
+/// Spec 0084: menger's render has a coverage tie that multisampling decides
+/// differently from one run to the next, so every refresh wrote a different
+/// menger for no reason anybody could state, and `stamp` could not become a
+/// real check. One pixel of one frame, three levels in one channel, is what
+/// that drift measures, and it is under both tolerances at once: three is
+/// inside [`CHANNEL`] and one pixel is inside [`SHARE`], so either alone
+/// would score it at nothing.
+///
+/// Both sides have to have been through the encoder. A freshly drawn frame
+/// against a decoded one differs everywhere from the compression alone,
+/// which would make this answer yes to everything.
+///
+/// Stops at the shorter of the two: a clip that is a different length is a
+/// different clip, and the caller is told by `frames`.
+pub fn clips_apart(
+    one: &mut impl std::io::Read,
+    two: &mut impl std::io::Read,
+    width: u32,
+    height: u32,
+) -> std::io::Result<Apart> {
+    let size = (width as usize) * (height as usize) * 4;
+    let mut out = Apart::default();
+    let (mut a, mut b) = (vec![0u8; size], vec![0u8; size]);
+
+    while let (true, true) = (read_frame(one, &mut a)?, read_frame(two, &mut b)?) {
+        let far = how_far_apart(
+            &Picture {
+                width,
+                height,
+                pixels: std::mem::take(&mut a),
+            },
+            &Picture {
+                width,
+                height,
+                pixels: std::mem::take(&mut b),
+            },
+        );
+
+        // taken back, because `how_far_apart` wants owned pixels and these
+        // buffers are the whole of what this does not allocate per frame
+        a = vec![0u8; size];
+        b = vec![0u8; size];
+
+        out.frames += 1;
+        out.worst = out.worst.max(far);
+
+        if far > SHARE {
+            out.differing += 1;
+        }
+    }
+
+    Ok(out)
+}
+
+/// Fills `into` from `from`, or says there was not a whole frame left.
+fn read_frame(from: &mut impl std::io::Read, into: &mut [u8]) -> std::io::Result<bool> {
+    let mut got = 0;
+
+    while got < into.len() {
+        match from.read(&mut into[got..]) {
+            Ok(0) => return Ok(false),
+            Ok(n) => got += n,
+            Err(why) if why.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(why) => return Err(why),
+        }
+    }
+
+    Ok(true)
+}
+
 /// How many pixels differ by more than a channel's worth, and a picture of
 /// where: the difference in red over a dimmed copy of what was drawn, so
 /// that what changed can be seen against what did not.
@@ -557,5 +650,83 @@ mod tests {
 
         let back = image::open(&path).unwrap().to_rgba8();
         assert_eq!((back.width(), back.height()), (200, 100));
+    }
+
+    /// Spec 0084: the drift a refilmed clip carries scores at nothing, and a
+    /// real change does not.
+    ///
+    /// **The numbers are the ones measured off menger.** Its whole drift is
+    /// one pixel of one frame, three levels in one channel, which is under
+    /// `CHANNEL` and so is not a changed pixel at all. A test that only
+    /// checked identical against wildly different would pass whatever the
+    /// tolerance was set to, and the whole point of this gate is where the
+    /// line sits.
+    #[test]
+    fn a_refilmed_clip_is_the_same_clip_and_a_changed_one_is_not() {
+        let (wide, tall) = (100u32, 100u32);
+        let size = (wide * tall * 4) as usize;
+        let frames = 3;
+        let base: Vec<u8> = (0..size * frames).map(|n| (n % 251) as u8).collect();
+
+        // the same bytes twice
+        let same = clips_apart(&mut base.as_slice(), &mut base.as_slice(), wide, tall)
+            .expect("two streams");
+
+        assert_eq!(same.frames, frames, "it did not read every frame");
+        assert_eq!(same.differing, 0, "a clip differs from itself");
+        assert!(same.the_same(), "a clip is not the same as itself");
+
+        // menger's own drift: one pixel, three levels, in the middle frame.
+        // It is under both tolerances at once and neither alone will move
+        // it, which is why the case below exists: tightening `CHANNEL` on
+        // its own leaves this passing on `SHARE`, and tightening `SHARE` on
+        // its own leaves it passing on `CHANNEL`. Found by both controls
+        // failing to fail.
+        let mut drifted = base.clone();
+        drifted[size + 4 * 500] = drifted[size + 4 * 500].wrapping_add(3);
+
+        let drift = clips_apart(&mut base.as_slice(), &mut drifted.as_slice(), wide, tall)
+            .expect("two streams");
+
+        assert_eq!(
+            drift.differing, 0,
+            "the drift a refilm carries was called a change"
+        );
+        assert!(drift.the_same(), "a refilmed clip would be rewritten");
+
+        // and the other half of the tolerance, which the case above cannot
+        // reach: enough pixels to pass `SHARE`, each moved less than
+        // `CHANNEL`. Without the channel tolerance this is a changed frame.
+        let mut faint = base.clone();
+        for n in 0..40 {
+            faint[size + 4 * n] = faint[size + 4 * n].wrapping_add(3);
+        }
+
+        let faintly = clips_apart(&mut base.as_slice(), &mut faint.as_slice(), wide, tall)
+            .expect("two streams");
+
+        assert_eq!(
+            faintly.differing, 0,
+            "a frame that moved by less than a channel was called a change"
+        );
+
+        // and a change: `SHARE` of a 100 by 100 frame is 20 pixels, so 40 of
+        // them past `CHANNEL` is a frame that really moved
+        let mut changed = base.clone();
+        for n in 0..40 {
+            changed[size + 4 * n] = changed[size + 4 * n].wrapping_add(40);
+        }
+
+        let moved = clips_apart(&mut base.as_slice(), &mut changed.as_slice(), wide, tall)
+            .expect("two streams");
+
+        assert_eq!(moved.differing, 1, "a changed frame was called a refilm");
+        assert!(!moved.the_same(), "a changed clip would be kept");
+
+        // a clip that stops early is a different clip, and says so by length
+        let short = clips_apart(&mut base.as_slice(), &mut &base[..size * 2], wide, tall)
+            .expect("two streams");
+
+        assert_eq!(short.frames, 2, "it read past the shorter stream");
     }
 }
