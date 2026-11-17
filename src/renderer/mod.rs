@@ -188,6 +188,18 @@ pub struct Renderer {
     /// is the only kind this project has found it can trust.
     culling: bool,
     meshes: Vec<GpuMesh>,
+    /// **Every mesh's triangles in one pair of buffers.** Spec 0107: a
+    /// buffer a mesh is a buffer a shader cannot index, and the tracer has
+    /// to be able to. Each mesh keeps where its own range starts and the
+    /// passes bind these once and draw from an offset.
+    ///
+    /// The CPU copies are kept so a mesh can be added without reading the
+    /// GPU back, and because growing the buffer means writing the whole of
+    /// it again.
+    pool_vertices: wgpu::Buffer,
+    pool_indices: wgpu::Buffer,
+    pooled_vertices: Vec<crate::mesh::Vertex>,
+    pooled_indices: Vec<u32>,
     /// Whether a coplanar check is owed, and what the last one found. A game
     /// asks for one on a key press and reads the answer back the frame after.
     /// See spec 0048.
@@ -264,9 +276,14 @@ struct GpuMesh {
     /// `Scene::backdrop`. Asking for it twice would be a second account of
     /// one thing.
     sky: bool,
-    vertices: wgpu::Buffer,
-    indices: wgpu::Buffer,
+    /// Where this mesh's own vertices start in the pool, and where its
+    /// indices do. Spec 0107.
+    first_vertex: u32,
+    first_index: u32,
     index_count: u32,
+    /// And how many vertices it holds, which `update_mesh` needs to know
+    /// whether a new one still fits the range.
+    vertex_count: u32,
     /// The box the mesh fits inside, kept so the coplanar check has something
     /// to measure without reading the vertices back off the GPU. See spec
     /// 0048.
@@ -614,6 +631,9 @@ impl Renderer {
         let kept_buffer = create_buffer(&device, 0, wgpu::BufferUsages::VERTEX);
 
         let vertex_buffer = create_buffer(&device, 0, wgpu::BufferUsages::VERTEX);
+        // spec 0107's pool: one pair of buffers for every mesh in the game
+        let pool_vertices = create_buffer(&device, 0, VERTICES);
+        let pool_indices = create_buffer(&device, 0, INDICES);
         let index_buffer = create_buffer(&device, 0, wgpu::BufferUsages::INDEX);
 
         let text_brush = BrushBuilder::using_font_bytes(FONT_BYTES).unwrap().build(
@@ -1198,6 +1218,10 @@ impl Renderer {
             trace_bind_group,
             water_pipelines,
             meshes: Vec::new(),
+            pool_vertices,
+            pool_indices,
+            pooled_vertices: Vec::new(),
+            pooled_indices: Vec::new(),
             asked_fights: false,
             fights: coplanar::Fights::default(),
             body: None,
@@ -1626,23 +1650,13 @@ impl Renderer {
         // an empty mesh is a legal thing to build, a lattice of no lines for
         // one, and wgpu refuses to make a buffer with nothing in it. It gets
         // placeholder buffers and an index count of zero, which the passes skip.
-        let vertices = mesh_buffer(
-            &self.device,
-            "Mesh Vertices",
-            bytemuck::cast_slice(&data.vertices),
-            VERTICES,
-        );
-        let indices = mesh_buffer(
-            &self.device,
-            "Mesh Indices",
-            bytemuck::cast_slice(&data.indices),
-            INDICES,
-        );
+        let (first_vertex, first_index) = self.pool(data);
 
         self.meshes.push(GpuMesh {
-            vertices,
-            indices,
+            first_vertex,
+            first_index,
             index_count: data.indices.len() as u32,
+            vertex_count: data.vertices.len() as u32,
             bounds: data.bounds(),
             boxy: data.is_box(),
             water: false,
@@ -1723,26 +1737,79 @@ impl Renderer {
             return;
         };
 
+        let fits = data.indices.len() as u32 <= mesh.index_count
+            && data.vertices.len() as u32 <= mesh.vertex_count;
+        let (first_vertex, first_index) = (mesh.first_vertex, mesh.first_index);
+
+        let _ = (device, queue);
+
+        // **A mesh that no longer fits takes a new range and leaves its old
+        // one dead.** Spec 0107 says so and says why: nothing in sixteen
+        // games rebuilds a mesh per frame, so compaction is a question for
+        // the day something churns.
+        let (first_vertex, first_index) = if fits {
+            self.patch(first_vertex, first_index, data);
+            (first_vertex, first_index)
+        } else {
+            self.pool(data)
+        };
+
+        let Some(mesh) = self.meshes.get_mut(id.0) else {
+            return;
+        };
+
+        mesh.first_vertex = first_vertex;
+        mesh.first_index = first_index;
+        mesh.index_count = data.indices.len() as u32;
+        mesh.vertex_count = data.vertices.len() as u32;
+        mesh.bounds = data.bounds();
+        mesh.boxy = data.is_box();
+    }
+
+    /// Appends a mesh's triangles to the pool and says where they went.
+    fn pool(&mut self, data: &MeshData) -> (u32, u32) {
+        let at = (
+            self.pooled_vertices.len() as u32,
+            self.pooled_indices.len() as u32,
+        );
+
+        self.pooled_vertices.extend_from_slice(&data.vertices);
+        self.pooled_indices.extend_from_slice(&data.indices);
+        self.upload_pool();
+
+        at
+    }
+
+    /// Writes a mesh's triangles over a range it already holds.
+    fn patch(&mut self, first_vertex: u32, first_index: u32, data: &MeshData) {
+        let (v, i) = (first_vertex as usize, first_index as usize);
+
+        self.pooled_vertices[v..v + data.vertices.len()].copy_from_slice(&data.vertices);
+        self.pooled_indices[i..i + data.indices.len()].copy_from_slice(&data.indices);
+        self.upload_pool();
+    }
+
+    /// And puts the pool on the card, growing the buffers when it has to.
+    fn upload_pool(&mut self) {
+        let vertices: &[u8] = bytemuck::cast_slice(&self.pooled_vertices);
+        let indices: &[u8] = bytemuck::cast_slice(&self.pooled_indices);
+
         refill(
-            device,
-            queue,
-            &mut mesh.vertices,
-            "Mesh Vertices",
-            bytemuck::cast_slice(&data.vertices),
+            &self.device,
+            &self.queue,
+            &mut self.pool_vertices,
+            "Mesh Pool Vertices",
+            vertices,
             VERTICES,
         );
         refill(
-            device,
-            queue,
-            &mut mesh.indices,
-            "Mesh Indices",
-            bytemuck::cast_slice(&data.indices),
+            &self.device,
+            &self.queue,
+            &mut self.pool_indices,
+            "Mesh Pool Indices",
+            indices,
             INDICES,
         );
-
-        mesh.index_count = data.indices.len() as u32;
-        mesh.bounds = data.bounds();
-        mesh.boxy = data.is_box();
     }
 
     /// Every pair of drawn faces in this frame that share a plane and are both
@@ -2642,10 +2709,15 @@ impl Renderer {
                         &self.instance_buffer,
                         &self.kept_buffer,
                     );
-                    shadow_pass.set_vertex_buffer(0, mesh.vertices.slice(..));
-                    shadow_pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    shadow_pass.set_vertex_buffer(0, self.pool_vertices.slice(..));
+                    shadow_pass
+                        .set_index_buffer(self.pool_indices.slice(..), wgpu::IndexFormat::Uint32);
                     counted.saw(mesh.index_count, *count);
-                    shadow_pass.draw_indexed(0..mesh.index_count, 0, *first..(*first + *count));
+                    shadow_pass.draw_indexed(
+                        mesh.first_index..(mesh.first_index + mesh.index_count),
+                        mesh.first_vertex as i32,
+                        *first..(*first + *count),
+                    );
                 }
             }
 
@@ -2709,10 +2781,15 @@ impl Renderer {
                         &self.instance_buffer,
                         &self.kept_buffer,
                     );
-                    shadow_pass.set_vertex_buffer(0, mesh.vertices.slice(..));
-                    shadow_pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    shadow_pass.set_vertex_buffer(0, self.pool_vertices.slice(..));
+                    shadow_pass
+                        .set_index_buffer(self.pool_indices.slice(..), wgpu::IndexFormat::Uint32);
                     counted.saw(mesh.index_count, *count);
-                    shadow_pass.draw_indexed(0..mesh.index_count, 0, *first..(*first + *count));
+                    shadow_pass.draw_indexed(
+                        mesh.first_index..(mesh.first_index + mesh.index_count),
+                        mesh.first_vertex as i32,
+                        *first..(*first + *count),
+                    );
                 }
             }
         }
@@ -2770,10 +2847,15 @@ impl Renderer {
                         &self.instance_buffer,
                         &self.kept_buffer,
                     );
-                    prepass.set_vertex_buffer(0, mesh.vertices.slice(..));
-                    prepass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    prepass.set_vertex_buffer(0, self.pool_vertices.slice(..));
+                    prepass
+                        .set_index_buffer(self.pool_indices.slice(..), wgpu::IndexFormat::Uint32);
                     counted.saw(mesh.index_count, *count);
-                    prepass.draw_indexed(0..mesh.index_count, 0, *first..(*first + *count));
+                    prepass.draw_indexed(
+                        mesh.first_index..(mesh.first_index + mesh.index_count),
+                        mesh.first_vertex as i32,
+                        *first..(*first + *count),
+                    );
                 }
 
                 // and the cut-out things, bound to their surfaces so the holes
@@ -2810,10 +2892,15 @@ impl Renderer {
                         &self.instance_buffer,
                         &self.kept_buffer,
                     );
-                    prepass.set_vertex_buffer(0, mesh.vertices.slice(..));
-                    prepass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    prepass.set_vertex_buffer(0, self.pool_vertices.slice(..));
+                    prepass
+                        .set_index_buffer(self.pool_indices.slice(..), wgpu::IndexFormat::Uint32);
                     counted.saw(mesh.index_count, *count);
-                    prepass.draw_indexed(0..mesh.index_count, 0, *first..(*first + *count));
+                    prepass.draw_indexed(
+                        mesh.first_index..(mesh.first_index + mesh.index_count),
+                        mesh.first_vertex as i32,
+                        *first..(*first + *count),
+                    );
                 }
             }
         }
@@ -2848,13 +2935,17 @@ impl Renderer {
 
                 hiding.set_pipeline(&self.hidden_pipeline);
                 hiding.set_bind_group(0, &self.camera_bind_group, &[0]);
-                hiding.set_vertex_buffer(0, mesh.vertices.slice(..));
+                hiding.set_vertex_buffer(0, self.pool_vertices.slice(..));
                 hiding.set_vertex_buffer(1, asking.boxes.slice(..));
-                hiding.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                hiding.set_index_buffer(self.pool_indices.slice(..), wgpu::IndexFormat::Uint32);
 
                 for n in 0..self.asked_count {
                     hiding.begin_occlusion_query(n);
-                    hiding.draw_indexed(0..mesh.index_count, 0, n..(n + 1));
+                    hiding.draw_indexed(
+                        mesh.first_index..(mesh.first_index + mesh.index_count),
+                        mesh.first_vertex as i32,
+                        n..(n + 1),
+                    );
                     hiding.end_occlusion_query();
                 }
             }
@@ -2983,11 +3074,17 @@ impl Renderer {
                             &self.instance_buffer,
                             &self.kept_buffer,
                         );
-                        mesh_pass.set_vertex_buffer(0, mesh.vertices.slice(..));
-                        mesh_pass
-                            .set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                        mesh_pass.set_vertex_buffer(0, self.pool_vertices.slice(..));
+                        mesh_pass.set_index_buffer(
+                            self.pool_indices.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
                         counted.saw(mesh.index_count, *count);
-                        mesh_pass.draw_indexed(0..mesh.index_count, 0, *first..(*first + *count));
+                        mesh_pass.draw_indexed(
+                            mesh.first_index..(mesh.first_index + mesh.index_count),
+                            mesh.first_vertex as i32,
+                            *first..(*first + *count),
+                        );
                     }
                 }
             }
@@ -3082,12 +3179,16 @@ impl Renderer {
                 }
 
                 glass_pass.set_bind_group(1, texture, &[]);
-                glass_pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                glass_pass.set_vertex_buffer(0, self.pool_vertices.slice(..));
                 glass_pass.set_vertex_buffer(1, self.glass_buffer.slice(..));
-                glass_pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                glass_pass.set_index_buffer(self.pool_indices.slice(..), wgpu::IndexFormat::Uint32);
                 counted.saw(mesh.index_count, 1);
                 let at = which as u32;
-                glass_pass.draw_indexed(0..mesh.index_count, 0, at..(at + 1));
+                glass_pass.draw_indexed(
+                    mesh.first_index..(mesh.first_index + mesh.index_count),
+                    mesh.first_vertex as i32,
+                    at..(at + 1),
+                );
             }
         }
 
@@ -3142,14 +3243,18 @@ impl Renderer {
                 }
 
                 lens_pass.set_bind_group(0, &self.trace_bind_group, &[]);
-                lens_pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                lens_pass.set_vertex_buffer(0, self.pool_vertices.slice(..));
                 lens_pass.set_vertex_buffer(1, self.lens_buffer.slice(..));
-                lens_pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                lens_pass.set_index_buffer(self.pool_indices.slice(..), wgpu::IndexFormat::Uint32);
                 counted.saw(mesh.index_count, 1);
 
                 let at = which as u32;
 
-                lens_pass.draw_indexed(0..mesh.index_count, 0, at..(at + 1));
+                lens_pass.draw_indexed(
+                    mesh.first_index..(mesh.first_index + mesh.index_count),
+                    mesh.first_vertex as i32,
+                    at..(at + 1),
+                );
             }
         }
 
@@ -5731,6 +5836,75 @@ pub struct Counted {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Spec 0107: every mesh's triangles are in the pool at the offset it
+    /// recorded, and a mesh added after another does not move it.
+    ///
+    /// **A buffer a mesh is a buffer a shader cannot index.** That is the
+    /// whole reason spec 0098's tracer reads boxes instead of the meshes it
+    /// is standing in front of, and the pool is what takes the reason away.
+    /// What this holds is the claim the passes rely on: a mesh is a range,
+    /// and ranges do not move under each other.
+    #[test]
+    fn the_pool_holds_every_mesh_where_it_says() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(16, 16)) else {
+            return;
+        };
+
+        let of = |n: u32| {
+            let vertices = (0..n)
+                .map(|v| {
+                    crate::mesh::Vertex::new([v as f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0])
+                })
+                .collect::<Vec<_>>();
+            let indices = (0..n).collect::<Vec<u32>>();
+
+            MeshData::new(vertices, indices)
+        };
+
+        let (one, two, three) = (of(3), of(6), of(9));
+        let ids = [
+            renderer.add_mesh(&one),
+            renderer.add_mesh(&two),
+            renderer.add_mesh(&three),
+        ];
+
+        for (id, data) in ids.iter().zip([&one, &two, &three]) {
+            let mesh = &renderer.meshes[id.0];
+            let v = mesh.first_vertex as usize;
+            let i = mesh.first_index as usize;
+
+            assert_eq!(
+                mesh.index_count as usize,
+                data.indices.len(),
+                "a mesh of {} indices says it has {}",
+                data.indices.len(),
+                mesh.index_count
+            );
+            assert_eq!(
+                &renderer.pooled_vertices[v..v + data.vertices.len()],
+                data.vertices.as_slice(),
+                "mesh {} is not in the pool where it says it is",
+                id.0
+            );
+            assert_eq!(
+                &renderer.pooled_indices[i..i + data.indices.len()],
+                data.indices.as_slice(),
+                "mesh {}'s indices are not where it says they are",
+                id.0
+            );
+        }
+
+        // and the ranges are laid end to end rather than on top of each
+        // other, which is the fault a pool can have that a buffer a mesh
+        // cannot
+        let starts: Vec<u32> = ids
+            .iter()
+            .map(|id| renderer.meshes[id.0].first_index)
+            .collect();
+
+        assert_eq!(starts, vec![0, 3, 9], "the ranges overlap: {:?}", starts);
+    }
 
     /// Spec 0094 and spec 0095. Two mirrors facing each other, with the eye
     /// between them.
