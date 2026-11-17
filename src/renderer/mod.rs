@@ -264,9 +264,12 @@ pub struct Renderer {
     /// buffer of boxes that every such surface in a frame shares.
     lens_pipeline: wgpu::RenderPipeline,
     lens_buffer: wgpu::Buffer,
-    traced_buffer: wgpu::Buffer,
     seen_buffer: wgpu::Buffer,
     trace_bind_group: wgpu::BindGroup,
+    /// Kept so the group above can be made again, which spec 0107 needs
+    /// whenever a pool grows out of the buffer the group names.
+    trace_layout: wgpu::BindGroupLayout,
+    trace_stale: bool,
     /// Spec 0075: the same pair, shaded as water.
     water_pipelines: [wgpu::RenderPipeline; 2],
     shadow_view: wgpu::TextureView,
@@ -673,13 +676,22 @@ impl Renderer {
         let kept_buffer = create_buffer(&device, 0, wgpu::BufferUsages::VERTEX);
 
         let vertex_buffer = create_buffer(&device, 0, wgpu::BufferUsages::VERTEX);
-        // spec 0107's pool: one pair of buffers for every mesh in the game
-        let pool_vertices = create_buffer(&device, 0, VERTICES);
-        let pool_indices = create_buffer(&device, 0, INDICES);
-        let pool_nodes = create_buffer(&device, 0, STORAGE);
-        let pool_tris = create_buffer(&device, 0, STORAGE);
-        let top_nodes = create_buffer(&device, 0, STORAGE);
-        let top_placed = create_buffer(&device, 0, STORAGE);
+        // spec 0107's pool: one pair of buffers for every mesh in the game,
+        // and the two levels of the structure over them.
+        //
+        // **Made with room for one of whatever they hold and not with
+        // nought.** The others here start empty and grow, and these cannot:
+        // a storage binding of size nought is a validation error, so an
+        // empty pool would mean no bind group at all until a game pushed
+        // its first mesh. A runtime-sized array over one item's worth
+        // reads its own length as nought, which is what the tracer checks
+        // before it walks anything.
+        let pool_vertices = create_buffer(&device, Vertex::SIZE, POOL_VERTICES);
+        let pool_indices = create_buffer(&device, 4, POOL_INDICES);
+        let pool_nodes = create_buffer(&device, crate::bvh::Node::SIZE as u64, STORAGE);
+        let pool_tris = create_buffer(&device, 4, STORAGE);
+        let top_nodes = create_buffer(&device, crate::bvh::Node::SIZE as u64, STORAGE);
+        let top_placed = create_buffer(&device, scene::Placed::SIZE, STORAGE);
         let index_buffer = create_buffer(&device, 0, wgpu::BufferUsages::INDEX);
 
         let text_brush = BrushBuilder::using_font_bytes(FONT_BYTES).unwrap().build(
@@ -1106,30 +1118,37 @@ impl Renderer {
         // and spec 0098's tracer, which shares none of the above: its own
         // bind group, because the camera's carries sixty four lamps and four
         // spots and a tracer reads none of them, and its own shader.
+        // **Six storage arrays and a uniform**, which is the two levels of
+        // spec 0107's structure and the triangles under them: the top
+        // level's nodes and its instances, each mesh's nodes and the
+        // triangle order its leaves name, and the pool's own indices and
+        // vertices. The default a device will give is eight a stage, so
+        // this is inside it with one to spare.
+        let mut entries = vec![wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }];
+
+        entries.extend((1..7).map(|binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }));
+
         let trace_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Trace Bind Group Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
+            entries: &entries,
         });
 
         let seen_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1139,30 +1158,19 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
-        // **The whole cap, once, rather than grown.** It is 48 kilobytes and
-        // the alternative is remaking the bind group whenever a room gets
-        // bigger, which is a second thing to keep in step.
-        let traced_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Traced Buffer"),
-            size: scene::Traced::SIZE * scene::MAX_TRACED as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let trace_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Trace Bind Group"),
-            layout: &trace_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: seen_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: traced_buffer.as_entire_binding(),
-                },
-            ],
-        });
+        let trace_bind_group = trace_group(
+            &device,
+            &trace_layout,
+            TraceBuffers {
+                seen: &seen_buffer,
+                top_nodes: &top_nodes,
+                top_placed: &top_placed,
+                nodes: &pool_nodes,
+                tris: &pool_tris,
+                indices: &pool_indices,
+                vertices: &pool_vertices,
+            },
+        );
 
         let lens_pipeline = create_lens_pipeline(
             &device,
@@ -1259,9 +1267,10 @@ impl Renderer {
             glass_buffer,
             lens_pipeline,
             lens_buffer,
-            traced_buffer,
             seen_buffer,
             trace_bind_group,
+            trace_layout,
+            trace_stale: false,
             water_pipelines,
             meshes: Vec::new(),
             pool_vertices,
@@ -1987,31 +1996,35 @@ impl Renderer {
     }
 
     /// And puts the pool on the card, growing the buffers when it has to.
+    ///
+    /// **A pool that grew leaves the tracer's bind group naming the buffer
+    /// that is gone**, so this marks it and the lens pass makes it again.
     fn upload_pool(&mut self) {
         let vertices: &[u8] = bytemuck::cast_slice(&self.pooled_vertices);
         let indices: &[u8] = bytemuck::cast_slice(&self.pooled_indices);
 
-        refill(
+        let mut moved = refill(
             &self.device,
             &self.queue,
             &mut self.pool_vertices,
             "Mesh Pool Vertices",
             vertices,
-            VERTICES,
+            POOL_VERTICES,
         );
-        refill(
+
+        moved |= refill(
             &self.device,
             &self.queue,
             &mut self.pool_indices,
             "Mesh Pool Indices",
             indices,
-            INDICES,
+            POOL_INDICES,
         );
 
         let nodes: &[u8] = bytemuck::cast_slice(&self.pooled_nodes);
         let tris: &[u8] = bytemuck::cast_slice(&self.pooled_tris);
 
-        refill(
+        moved |= refill(
             &self.device,
             &self.queue,
             &mut self.pool_nodes,
@@ -2019,7 +2032,7 @@ impl Renderer {
             nodes,
             STORAGE,
         );
-        refill(
+        moved |= refill(
             &self.device,
             &self.queue,
             &mut self.pool_tris,
@@ -2027,6 +2040,8 @@ impl Renderer {
             tris,
             STORAGE,
         );
+
+        self.trace_stale |= moved;
     }
 
     /// Every pair of drawn faces in this frame that share a plane and are both
@@ -3419,14 +3434,15 @@ impl Renderer {
         // handful of surfaces use, is the trade spec 0060 already refused.
         let lenses = self.upload_lenses(scene);
 
-        // the boxes every lens in this frame looks at, written once
-        self.upload_traced(scene);
-
-        // and the structure over the meshes those lenses will read instead,
-        // which is built for a frame that has a lens in it and for no other
+        // the structure every lens in this frame reads, built for a frame
+        // that has a lens in it and for no other, and then the camera and
+        // the lamps that go with it
         if lenses > 0 {
             self.upload_top(scene);
         }
+
+        self.upload_traced(scene);
+        self.remake_trace_group();
 
         if lenses > 0 {
             let (into, onto) = match &self.colour {
@@ -4249,6 +4265,23 @@ impl Renderer {
             let Some(under) = meshes.get(mesh.0).filter(|under| under.node_count > 0) else {
                 return;
             };
+
+            // **And a see-through thing is not traced at all.** A ray that
+            // meets a window should go through it and come back as whatever
+            // is beyond, which here is the room's own ambient. Spec 0098's
+            // box list left the glazing out by hand and capriccio's own
+            // comment says why: a slot is what a window looks like from
+            // inside a marble.
+            //
+            // What a hit on glass ought to be was spec 0107's own out of
+            // scope, and this is the answer it names: nothing, the way it
+            // was before. **Not measured against a picture**: the glass
+            // room's reflection changed for the larger reason that it is
+            // meshes now, and leaving the panes in or out of it did not
+            // move that number either way.
+            if instance.is_translucent() {
+                return;
+            }
             let model = instance.shifted(middle).matrix();
             // the inverse's rows, which are its transpose's columns
             let rows = model.inverse().transpose().to_cols_array_2d();
@@ -4321,7 +4354,7 @@ impl Renderer {
         self.placed = order.iter().map(|n| gathered[*n as usize]).collect();
         self.gathered = gathered;
 
-        refill(
+        self.trace_stale |= refill(
             &self.device,
             &self.queue,
             &mut self.top_nodes,
@@ -4329,7 +4362,7 @@ impl Renderer {
             bytemuck::cast_slice(&self.topped),
             STORAGE,
         );
-        refill(
+        self.trace_stale |= refill(
             &self.device,
             &self.queue,
             &mut self.top_placed,
@@ -4344,11 +4377,11 @@ impl Renderer {
     /// What a ray meets in the world, nearest first, by walking both levels
     /// on the CPU: how far along the ray, and the surface's normal there.
     ///
-    /// **Here for the reason `bvh::met` is**: the walk this is for is spec
-    /// 0107's step three and lives in a shader, and a structure nothing can
-    /// read is a structure nothing can check. This is what that shader will
-    /// be held against.
-    #[cfg(test)]
+    /// **Written for the reason `bvh::met` was**: a structure nothing on
+    /// this side can read is a structure nothing can check, and the shader's
+    /// own walk is held against this. It earns its keep twice over, because
+    /// `upload_traced` asks it whether a lamp can be seen from the traced
+    /// thing, which is the question that used to walk the box list.
     fn met_in_the_world(&self, from: glam::Vec3, way: glam::Vec3) -> Option<(f32, glam::Vec3)> {
         let mut best: Option<(f32, glam::Vec3)> = None;
 
@@ -4406,7 +4439,6 @@ impl Renderer {
     }
 
     /// And what it meets inside one instance, in that instance's own space.
-    #[cfg(test)]
     fn met_in_a_mesh(
         &self,
         one: &scene::Placed,
@@ -4451,30 +4483,40 @@ impl Renderer {
         best
     }
 
-    /// This frame's boxes and the three camera fields a tracer reads, per
-    /// spec 0098.
+    /// Makes the tracer's bind group again if any pool it names has grown
+    /// out of the buffer it was made with.
     ///
-    /// **Shifted by the eye, like everything else.** Spec 0051 hands the
-    /// shaders a world with the camera taken off it, because a building this
-    /// size loses the float precision an edge needs. The instances are
-    /// already shifted, so the boxes have to be too or a traced ray and the
-    /// surface it starts from are in different worlds.
-    ///
-    /// Clamped rather than grown: the buffer is the whole cap and a game that
-    /// hands over more boxes than that loses the tail rather than the frame.
-    fn upload_traced(&mut self, scene: &Scene) -> u32 {
-        let eye = self.camera.position;
-        let used = scene.traced().len().min(scene::MAX_TRACED);
-        let shifted: Vec<scene::Traced> = scene.traced()[..used]
-            .iter()
-            .map(|one| one.from_the_eye(eye))
-            .collect();
-
-        if !shifted.is_empty() {
-            self.queue
-                .write_buffer(&self.traced_buffer, 0, bytemuck::cast_slice(&shifted));
+    /// **Checked rather than done every frame.** A bind group is cheap and
+    /// not free, and the pools stop growing once a game has pushed its
+    /// meshes: the arcade makes this once at startup and never again.
+    fn remake_trace_group(&mut self) {
+        if !self.trace_stale {
+            return;
         }
 
+        self.trace_bind_group = trace_group(
+            &self.device,
+            &self.trace_layout,
+            TraceBuffers {
+                seen: &self.seen_buffer,
+                top_nodes: &self.top_nodes,
+                top_placed: &self.top_placed,
+                nodes: &self.pool_nodes,
+                tris: &self.pool_tris,
+                indices: &self.pool_indices,
+                vertices: &self.pool_vertices,
+            },
+        );
+        self.trace_stale = false;
+    }
+
+    /// The camera, the sun and the lamps a tracer reads, per spec 0098.
+    ///
+    /// **This used to upload the boxes too**, which is the account of the
+    /// world spec 0107 took away. What it writes now is only what the
+    /// tracer needs that is not geometry.
+    fn upload_traced(&mut self, scene: &Scene) -> u32 {
+        let used = self.placed.len();
         let light = &scene.light;
         let ambient = light.ambient;
 
@@ -4499,10 +4541,14 @@ impl Renderer {
         // down.
         //
         // Asked once a frame from the middle of the traced thing against
-        // the same boxes it shades with, which is thirty two rays rather
-        // than one for every fragment of it. A lamp half behind a pier is
-        // in or out whole, and that is a thing a ball an arm's length
-        // across can live with.
+        // the very structure it shades with, which is thirty two rays
+        // rather than one for every fragment of it. A lamp half behind a
+        // pier is in or out whole, and that is a thing a ball an arm's
+        // length across can live with.
+        //
+        // **This walked the box list and now walks the meshes**, which is
+        // the whole of spec 0107: one account of the world, asked here and
+        // in the shader rather than kept twice.
         let open = |lamp: glam::Vec3| {
             let way = lamp - watching;
             let far = way.length();
@@ -4513,18 +4559,12 @@ impl Renderer {
 
             let way = way / far;
 
-            !shifted.iter().any(|box_| {
-                let least = glam::Vec3::from(box_.least);
-                let most = glam::Vec3::from(box_.most);
-                let one = (least - (watching - self.camera.position)) / way;
-                let two = (most - (watching - self.camera.position)) / way;
-                let near = one.min(two);
-                let away = one.max(two);
-                let into = near.x.max(near.y).max(near.z);
-                let out = away.x.min(away.y).min(away.z);
-
-                out >= into && into > 1e-3 && into < far - 1e-3
-            })
+            // started a little along it, since the traced thing's own
+            // geometry stands where this ray does
+            match self.met_in_the_world(watching + way * 1e-3, way) {
+                Some((at, _)) => at >= far - 1e-3,
+                None => true,
+            }
         };
         let mut near: Vec<&crate::lighting::PointLight> = scene.point_lights().iter().collect();
 
@@ -4548,8 +4588,8 @@ impl Renderer {
         //
         // The same question the lamps are asked, pointed the other way: can
         // the traced thing see the sky along the light's own line. Far
-        // enough out to leave any building, and the list is the room's own
-        // boxes, so outdoors there is nothing to stop it.
+        // enough out to leave any building, and the structure is the room's
+        // own geometry, so outdoors there is nothing to stop it.
         let under_the_sky = if light.intensity > 0.0
             && !open(watching - light.direction.normalize_or_zero() * 1_000.0)
         {
@@ -4585,7 +4625,7 @@ impl Renderer {
             0,
             bytemuck::bytes_of(&Tracing {
                 view_projection: self.camera.view_projection_from_the_eye().to_cols_array(),
-                camera: [0.0, 0.0, 0.0, used as f32],
+                camera: self.camera.position.extend(used as f32).to_array(),
                 ambient: [ambient.x, ambient.y, ambient.z, 0.0],
                 light_direction: light.direction.extend(0.0).to_array(),
                 light_color: light
@@ -5311,7 +5351,13 @@ struct MeshLayouts<'a> {
 #[derive(Debug, Copy, Clone)]
 struct Tracing {
     view_projection: [f32; 16],
-    /// xyz is nought, which is where the eye is; w is how many boxes are real
+    /// xyz is where the eye is in the world; w is how many instances the
+    /// top level holds.
+    ///
+    /// **It used to be nought, because the eye is the origin of everything
+    /// else a shader is handed.** Spec 0107's top level is in the world
+    /// instead, so that a frame which moved nothing need not build it
+    /// again, and the tracer adds this back on to the ray it starts.
     camera: [f32; 4],
     /// rgb is what a ray that leaves the room comes back as, a is unused
     ambient: [f32; 4],
@@ -5445,15 +5491,20 @@ fn create_mesh_pipeline(
 /// new vertices into a buffer already there rather than making another.
 const VERTICES: wgpu::BufferUsages = wgpu::BufferUsages::VERTEX.union(wgpu::BufferUsages::COPY_DST);
 const INDICES: wgpu::BufferUsages = wgpu::BufferUsages::INDEX.union(wgpu::BufferUsages::COPY_DST);
-/// What spec 0107's hierarchies are held in: a shader reads them by index,
-/// which a vertex or index buffer cannot be.
+
+/// And what the pool's two carry on top of that, since spec 0107's tracer
+/// reads the very triangles the mesh pass draws. Named here rather than at
+/// each use, because a buffer regrown without this is a buffer the tracer's
+/// bind group cannot take.
+const POOL_VERTICES: wgpu::BufferUsages = VERTICES.union(wgpu::BufferUsages::STORAGE);
+const POOL_INDICES: wgpu::BufferUsages = INDICES.union(wgpu::BufferUsages::STORAGE);
+
 /// Where a ray meets one triangle, and that triangle's own normal.
 ///
 /// Möller and Trumbore's, which is the one the shader will carry too: no
 /// plane equation and no division until the end. Two sided, because a
 /// reflection shows the inside of a wall and culling it would show the room
 /// behind.
-#[cfg(test)]
 fn met_a_triangle(
     a: glam::Vec3,
     b: glam::Vec3,
@@ -5487,6 +5538,51 @@ fn met_a_triangle(
     Some((two.dot(other) * back, one.cross(two).normalize()))
 }
 
+/// The seven buffers spec 0107's tracer reads, so the group can be made in
+/// two places without either saying the order.
+struct TraceBuffers<'a> {
+    seen: &'a wgpu::Buffer,
+    top_nodes: &'a wgpu::Buffer,
+    top_placed: &'a wgpu::Buffer,
+    nodes: &'a wgpu::Buffer,
+    tris: &'a wgpu::Buffer,
+    indices: &'a wgpu::Buffer,
+    vertices: &'a wgpu::Buffer,
+}
+
+/// And the group itself. Made again whenever one of the pools grew, because
+/// a bind group holds the buffer it was made with.
+fn trace_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    of: TraceBuffers,
+) -> wgpu::BindGroup {
+    let order = [
+        of.seen,
+        of.top_nodes,
+        of.top_placed,
+        of.nodes,
+        of.tris,
+        of.indices,
+        of.vertices,
+    ];
+
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Trace Bind Group"),
+        layout,
+        entries: &order
+            .iter()
+            .enumerate()
+            .map(|(binding, buffer)| wgpu::BindGroupEntry {
+                binding: binding as u32,
+                resource: buffer.as_entire_binding(),
+            })
+            .collect::<Vec<_>>(),
+    })
+}
+
+/// What spec 0107's hierarchies are held in: a shader reads them by index,
+/// which a vertex or index buffer cannot be.
 const STORAGE: wgpu::BufferUsages = wgpu::BufferUsages::STORAGE.union(wgpu::BufferUsages::COPY_DST);
 
 /// How big a buffer must become to take `want` bytes when it holds `have` now,
@@ -5568,7 +5664,13 @@ fn instance_room(have: u64, want: u64, most: u64) -> Option<u64> {
     room(have, want).map(|want| want.max(have * 2).min(most))
 }
 
-/// Puts `contents` in `buffer`, replacing it when it is too small.
+/// Puts `contents` in `buffer`, replacing it when it is too small, and says
+/// whether it had to.
+///
+/// **Whether it had to is the whole of what a caller needs to know.** A bind
+/// group holds the buffer it was made with, not the field it was read from,
+/// so a pool that grows leaves every bind group naming the old one. Spec
+/// 0107's tracer reads four of these.
 fn refill(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -5576,13 +5678,21 @@ fn refill(
     label: &str,
     contents: &[u8],
     usage: wgpu::BufferUsages,
-) {
+) -> bool {
     match room(buffer.size(), contents.len() as u64) {
         // nothing to write is not nothing to do: the mesh keeps its buffer and
         // the caller drops its index count to zero, which draws nothing
-        None if contents.is_empty() => (),
-        None => queue.write_buffer(buffer, 0, contents),
-        Some(_) => *buffer = mesh_buffer(device, label, contents, usage),
+        None if contents.is_empty() => false,
+        None => {
+            queue.write_buffer(buffer, 0, contents);
+
+            false
+        }
+        Some(_) => {
+            *buffer = mesh_buffer(device, label, contents, usage);
+
+            true
+        }
     }
 }
 
@@ -8431,6 +8541,12 @@ mod asked {
         );
     }
 
+    /// A cube instance filling a box, which is how a test says "a wall
+    /// there" now that spec 0107's tracer reads what is drawn.
+    fn standing(box_: Aabb) -> crate::mesh::Transform {
+        crate::mesh::Transform::at(box_.center()).with_scale(box_.size())
+    }
+
     /// Spec 0098: an index at or under nought is a mirror and not a lens.
     ///
     /// **A mirror shows what is behind you and a lens shows what is in
@@ -8460,10 +8576,14 @@ mod asked {
             scene.light.ambient = glam::Vec3::ONE;
             // a red wall behind the eye, and nothing at all in front of the
             // ball for a lens to find
-            scene.traces(&[crate::renderer::scene::Traced::new(
-                crate::collision::Aabb::new(glam::vec3(-9.0, -9.0, 4.0), glam::vec3(9.0, 9.0, 5.0)),
+            scene.push_colored(
+                cube,
+                &standing(Aabb::new(
+                    glam::vec3(-9.0, -9.0, 4.0),
+                    glam::vec3(9.0, 9.0, 5.0),
+                )),
                 glam::vec4(1.0, 0.0, 0.0, 1.0),
-            )]);
+            );
             scene.lens(
                 ball,
                 &crate::mesh::Transform::at(glam::vec3(0.0, 0.0, -3.0))
@@ -8478,7 +8598,6 @@ mod asked {
             (shot.pixels[at], shot.pixels[at + 1], shot.pixels[at + 2])
         };
 
-        let _ = cube;
         let mirror = shot(&mut renderer, -1.0);
         let lens = shot(&mut renderer, 1.52);
 
@@ -8494,19 +8613,33 @@ mod asked {
         );
     }
 
-    /// Spec 0098: a traced box can be a cylinder standing in it.
+    /// Spec 0107: a round thing reflects round, because the mirror reads the
+    /// mesh that is drawn.
     ///
-    /// **Measured as how much of the mirror it covers.** A cylinder is
-    /// pi over four of the square it stands in, so the same bounds traced
-    /// round must take visibly less of the ball than traced square. That is
-    /// the whole claim: a corner is gone.
+    /// **This was spec 0098's `Traced::round`**, a flag that said to trace a
+    /// cylinder standing in a box, and it existed because the tracer could
+    /// not read a turned mesh. It can, so the flag is gone and the claim is
+    /// the same one measured the same way: a cylinder is pi over four of the
+    /// square it stands in, so it must take visibly less of the ball. A
+    /// corner is gone, and nothing had to be told twice for it to go.
     #[test]
-    fn a_traced_box_can_be_round() {
+    fn a_round_mesh_reflects_round() {
         let Some(mut renderer) = pollster::block_on(Renderer::offscreen(200, 200)) else {
             return;
         };
 
         let ball = renderer.add_mesh(&crate::mesh::MeshData::sphere(24, 24));
+        let cube = renderer.add_mesh(&crate::mesh::MeshData::cube());
+        // a unit cylinder in the same bounds as that cube, so the two differ
+        // in nothing but their corners
+        let tube = renderer.add_mesh(
+            &crate::mesh::MeshData::surface(32, 2, |u, v| {
+                let round = u * std::f32::consts::TAU;
+
+                glam::vec3(round.cos() * 0.5, v - 0.5, round.sin() * 0.5)
+            })
+            .two_sided(),
+        );
         let geometry = Geometry::new();
         let text = TextRenderer::new();
 
@@ -8521,15 +8654,10 @@ mod asked {
             scene.light.ambient = glam::Vec3::ONE;
 
             // a red post behind the eye, which only the mirror can find
-            let post =
-                crate::collision::Aabb::new(glam::vec3(-1.0, -4.0, 3.0), glam::vec3(1.0, 4.0, 5.0));
+            let post = Aabb::new(glam::vec3(-1.0, -4.0, 3.0), glam::vec3(1.0, 4.0, 5.0));
             let red = glam::vec4(1.0, 0.0, 0.0, 1.0);
 
-            scene.traces(&[if round {
-                crate::renderer::scene::Traced::round(post, red)
-            } else {
-                crate::renderer::scene::Traced::new(post, red)
-            }]);
+            scene.push_colored(if round { tube } else { cube }, &standing(post), red);
             scene.lens(
                 ball,
                 &crate::mesh::Transform::at(glam::vec3(0.0, 0.0, -3.0))
@@ -8586,6 +8714,7 @@ mod asked {
         };
 
         let ball = renderer.add_mesh(&crate::mesh::MeshData::sphere(20, 20));
+        let cube = renderer.add_mesh(&crate::mesh::MeshData::cube());
         let geometry = Geometry::new();
         let text = TextRenderer::new();
 
@@ -8603,24 +8732,28 @@ mod asked {
             // mirror can see rather than on the wall's top
             scene.light.direction = glam::vec3(0.0, -1.0, 1.0).normalize();
 
-            let wall =
-                crate::collision::Aabb::new(glam::vec3(-9.0, -9.0, 4.0), glam::vec3(9.0, 9.0, 5.0));
-            let mut boxes = vec![crate::renderer::scene::Traced::new(
-                wall,
-                glam::vec4(1.0, 0.0, 0.0, 1.0),
-            )];
+            let wall = Aabb::new(glam::vec3(-9.0, -9.0, 4.0), glam::vec3(9.0, 9.0, 5.0));
+
+            scene.push_colored(cube, &standing(wall), glam::vec4(1.0, 0.0, 0.0, 1.0));
 
             if roofed {
-                boxes.push(crate::renderer::scene::Traced::new(
-                    crate::collision::Aabb::new(
-                        glam::vec3(-9.0, 6.0, -9.0),
-                        glam::vec3(9.0, 7.0, 9.0),
-                    ),
+                // **Wider than the wall, and that is not tidiness.** The
+                // roof was nine across and the ray to the sun leaves the
+                // ball at (0, 0, -3) along (0, 1, -1) normalised, so it
+                // reaches y of 6 at z of exactly -9: the roof's own corner.
+                // Spec 0098's slab test counted a corner as a hit and spec
+                // 0107's triangles are a coin toss there, so the test was
+                // standing on a coincidence. Fourteen puts the ray through
+                // the middle of it, which is what the claim is about.
+                scene.push_colored(
+                    cube,
+                    &standing(Aabb::new(
+                        glam::vec3(-14.0, 6.0, -14.0),
+                        glam::vec3(14.0, 7.0, 14.0),
+                    )),
                     glam::vec4(0.0, 0.0, 1.0, 1.0),
-                ));
+                );
             }
-
-            scene.traces(&boxes);
             scene.lens(
                 ball,
                 &crate::mesh::Transform::at(glam::vec3(0.0, 0.0, -3.0))

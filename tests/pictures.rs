@@ -96,11 +96,14 @@ fn shots() -> Vec<Shot> {
         // picture of it. A row of boxes behind a glass ball, which is the one
         // thing the glass of spec 0092 cannot do: a render to texture shows
         // what a second camera could see, and this shows the row inverted.
+        //
+        // **Spec 0107 is what this shot shows now.** Every box here used to
+        // be pushed twice, once to be drawn and once to be traced, the two
+        // calls side by side with the same numbers in them. The second one
+        // is gone and the picture is the same, which is the whole claim.
         Shot {
             name: "a-lens-bends-what-is-behind-it",
             scene: |scene, meshes| {
-                let mut boxes = Vec::new();
-
                 // a row running away, so the cone the ball squeezes has
                 // something different in it at every angle. A flat wall
                 // behind a lens is a flat disc, which the arcade found by
@@ -124,13 +127,6 @@ fn shots() -> Vec<Shot> {
                             tint,
                             96.0,
                         );
-                        boxes.push(blitzkit::renderer::scene::Traced::new(
-                            blitzkit::collision::Aabb::new(
-                                stands - wide * 0.5,
-                                stands + wide * 0.5,
-                            ),
-                            tint,
-                        ));
                     }
                 }
 
@@ -146,15 +142,6 @@ fn shots() -> Vec<Shot> {
                     vec4(0.55, 0.55, 0.6, 1.0),
                     4.0,
                 );
-                boxes.push(blitzkit::renderer::scene::Traced::new(
-                    blitzkit::collision::Aabb::new(
-                        floor - floor_wide * 0.5,
-                        floor + floor_wide * 0.5,
-                    ),
-                    vec4(0.55, 0.55, 0.6, 1.0),
-                ));
-
-                scene.traces(&boxes);
                 scene.lens(
                     meshes.sphere,
                     &Transform::at(vec3(0.0, 0.9, 1.0)).with_scale(Vec3::splat(0.9)),

@@ -1,6 +1,6 @@
 # 0107 One account of the geometry
 
-**Status:** draft
+**Status:** implemented
 **Date:** 2026-11-17
 
 ## Goal
@@ -126,9 +126,22 @@ the texture at the hit is its own question and not in this.
 traced surface pushes meshes, which it already has, and `Traced` stops
 existing.
 
+`MeshData::is_box` and the `boxy` flag stay, which this spec said would go
+and was wrong about: they are spec 0048's, telling the coplanar check which
+mesh's box is a statement about its faces, and the tracer never read them.
+
+**What a game loses with it.** `glass::traced` read `solid` and `lids`, so
+anything the building collided with was in the ball whether or not it was
+ever drawn. The ball sees what the frame draws now, so a wall that is a
+collider and nothing else is not in the reflection, and no test in a game
+can see that, because a game cannot read back what it pushed.
+
 ## Acceptance criteria
 
 - Every mesh's triangles are in the pool at the offset and count it recorded, and a mesh added after another does not move it. — `renderer::tests::the_pool_holds_every_mesh_where_it_says`
+- A round mesh reflects round, which spec 0098 needed a flag on a box to say. — `renderer::asked::a_round_mesh_reflects_round`
+- A mirror shows what is behind the eye, traced from the meshes the frame draws. — `renderer::asked::a_lens_with_no_index_is_a_mirror`
+- And the sun does not reach a traced thing under a roof. — `renderer::asked::the_sun_does_not_reach_a_traced_thing_under_a_roof`
 - A mesh handed over again every frame does not grow the pools for ever. — `renderer::tests::an_updated_mesh_does_not_grow_the_pools_for_ever`
 - A mesh that is a box traces the same hits as that box did, which is the old path's own answer held against the new one. — `renderer::tests::a_box_mesh_traces_like_the_box`
 - The top level holds every instance the frame draws, and a ray that misses them all misses. — `renderer::tests::the_structure_holds_what_the_frame_draws`
@@ -138,13 +151,20 @@ existing.
 
 ### Verified by hand
 
-- **The sphere shows the turning.** capriccio's colonnade reflects as eight
-  boxes a column today, stepping along a profile the lathe draws as a curve.
-  This is the picture that says whether the spec did what it is for, and the
-  glass room's own test reference moves with it.
-- **And the balustrade.** Drawn as a string, a handrail and a turned
-  baluster to a tread, and traced as one upright box a tread, so what the
-  ball shows of it is a parapet.
+- **The sphere shows the turning.** capriccio's colonnade reflected as eight
+  boxes a column, stepping along a profile the lathe draws as a curve. It is
+  the lathe now. `capriccio::tests::the_glass_room_is_drawn` moved with it,
+  and Jake blessed the new reference on 2026-11-17.
+- **And the balustrade**, which was drawn as a string, a handrail and a
+  turned baluster to a tread while the ball showed one upright box a tread.
+  The blessed picture has the balusters in it.
+- **And the ceiling, which nobody was looking for.** The old picture had the
+  top of the ball near black. The box over it was in the list and well
+  inside the cull, so nothing was missing: `glass::colour` painted it
+  `GLASS_CEIL`, which is 0.15 grey, while the room overhead reads pale. The
+  two accounts of one ceiling had come apart and only an eye on a reflection
+  could ever have found it. That is this spec's own argument, met in the
+  work of carrying it out.
 - **What the frame costs**, from spec 0067's timestamps, before and after.
   The pool changes the draw path for every game whether or not it traces
   anything, so the mesh pass is measured on a game that traces nothing at
@@ -167,8 +187,10 @@ the hit still stands. This returns a hit and a normal.
 **The colliders.** `solid` stays exactly what it is: what a body walks into.
 What goes is its second job of standing in for the drawn world.
 
-**What a ray should do with a see-through surface.** Every instance a scene
-pushes is in the top level, glass and water among them, where `Traced` let a
-game choose what went in it. So a reflection will meet a pane the old path
-never showed it. That is a question about what the tracer does with a hit
-rather than about where the geometry is, and it belongs with the shader.
+**What a ray should do with a see-through surface** was left here while the
+shader was written, and the answer is nothing: an instance whose colour has
+any transparency in it is left out of the top level. A ray meets a window
+and comes back as the room's ambient, which is what spec 0098's box list did
+by hand and what capriccio's own comment asks for, a slot being what a
+window looks like from inside a marble. Tracing a pane as solid would put a
+grey sheet over whatever is behind it.

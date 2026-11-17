@@ -1,4 +1,4 @@
-// A ray against a list of boxes. Spec 0098.
+// A ray against the meshes the engine draws. Spec 0107, over spec 0098.
 //
 // **Its own bind group rather than the mesh shader's.** The camera's group
 // carries sixty four lamps, four spots, two shadow tables and the contact
@@ -7,9 +7,14 @@
 // that nothing holds together, which is the fault spec 0067 wrote `shaders.rs`
 // to stop. So this takes what it needs and no more.
 
-// How many boxes a traced surface will look at. Held against the Rust by
-// `renderer::tests::the_shaders_hold_the_same_caps`.
-const MAX_TRACED: u32 = 1024u;
+// How deep a walk of either level may go before it gives up on a branch.
+//
+// **A stack and not recursion**, which WGSL has not got. Thirty two is far
+// past what a middle split over nine thousand instances reaches, and a
+// branch that would go deeper is dropped rather than overrunning the array:
+// a ray that misses something is a wrong pixel and a write past the end is
+// a wrong anything.
+const DEEP: u32 = 32u;
 
 // How many times a ray may bend or bounce before it gives up and takes the
 // ambient. Each one is a whole pass over the list.
@@ -37,17 +42,16 @@ const GLINT: f32 = 7.0;
 const SHEEN: f32 = 32.0;
 const SHEEN_LIT: f32 = 0.22;
 
-// **Everything here is relative to the eye, per spec 0051.** The engine
-// hands every position over with the camera taken off it, because a world
-// a hundred and fifty metres across loses the float precision a mirror's
-// edge needs. So the boxes arrive shifted the same way the instances are,
-// the camera is at the origin, and a ray starts where the fragment is.
-//
-// That is not a detail of this shader. It is a thing spec 0098 did not
-// know and the renderer will have to do to the list before it uploads it.
+// **What is drawn is relative to the eye and what is traced is not.**
+// Spec 0051 hands every position over with the camera taken off it, because
+// a world a hundred and fifty metres across loses the float precision a
+// mirror's edge needs, and the fragment this shader runs on arrives that
+// way. Spec 0107's structure is in the world instead, so that a frame which
+// moved nothing need not build it again, so a ray gets the eye added back
+// on to it before it is traced and the hit comes back in the world.
 struct Tracing {
     view_projection: mat4x4<f32>,
-    // xyz is the camera, w is how many boxes are real
+    // xyz is where the eye is in the world, w is how many instances are real
     camera: vec4<f32>,
     // rgb is what a ray that leaves the room comes back as, a is unused
     ambient: vec4<f32>,
@@ -64,23 +68,51 @@ struct Tracing {
 
 @group(0) @binding(0) var<uniform> tracing: Tracing;
 
-// **Nought is a box and one is a cylinder standing in it**, on the y axis,
-// as wide as the box and as tall. It rides in the padding a `vec3<f32>`
-// already costs, so a round shape is free in the list.
+// One node of either level. Thirty two bytes: the box, and in the padding
+// of each corner the two numbers a walk needs. A leaf says where its first
+// item is and how many it holds; a branch says where its right child is and
+// that it holds none, its left child being the node straight after it.
 //
-// Why there is a round shape at all: capriccio's colonnade is turned, and
-// every stand-in built out of boxes read as a tube with corners. Jake went
-// up to the ball and said the shape isn't true, which it was not and could
-// not be.
-struct Box {
+// **Two four-float lanes and not a struct of vectors**, because a
+// `vec3<f32>` in a storage array aligns to sixteen and would put the two
+// counts in padding the Rust side does not pay for.
+struct Node {
     least: vec3<f32>,
-    kind: f32,
+    first: u32,
     most: vec3<f32>,
-    spare: f32,
-    color: vec4<f32>,
+    count: u32,
 };
 
-@group(0) @binding(1) var<storage, read> boxes: array<Box, MAX_TRACED>;
+// One instance the top level holds: the inverse that takes a ray into its
+// own space, three rows of four, then its colour and where the mesh under it
+// keeps itself.
+struct Placed {
+    into_it_0: vec4<f32>,
+    into_it_1: vec4<f32>,
+    into_it_2: vec4<f32>,
+    color: vec4<f32>,
+    first_node: u32,
+    first_tri: u32,
+    first_index: u32,
+    first_vertex: u32,
+};
+
+@group(0) @binding(1) var<storage, read> top: array<Node>;
+@group(0) @binding(2) var<storage, read> placed: array<Placed>;
+@group(0) @binding(3) var<storage, read> nodes: array<Node>;
+@group(0) @binding(4) var<storage, read> tris: array<u32>;
+@group(0) @binding(5) var<storage, read> indices: array<u32>;
+// **Eight floats a vertex, read loose rather than as a struct.** A vertex is
+// a position, a normal and a pair of texture coordinates packed tight, and
+// a WGSL struct of three vectors would align each to sixteen and read the
+// wrong bytes. The tracer wants the position and nothing else.
+@group(0) @binding(6) var<storage, read> vertices: array<f32>;
+
+fn corner(vertex: u32) -> vec3<f32> {
+    let at = vertex * 8u;
+
+    return vec3<f32>(vertices[at], vertices[at + 1u], vertices[at + 2u]);
+}
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
@@ -141,9 +173,26 @@ fn vs_main(
     return out;
 }
 
-// The slab test, which is the whole of the arithmetic. `collision::met` in
-// Rust is the other copy, and
+// Whether a ray meets a node's box at all, and how far along if it does.
+//
+// The slab test, which is the whole of the arithmetic here as it was for the
+// box list. `collision::met` in Rust is the other copy, and
 // `renderer::tests::the_shader_and_the_slab_agree` holds them together.
+//
+// **A ray parallel to a slab it starts outside never meets the box, and the
+// divide carries that**: the two ends come back as infinities of one sign
+// and the near end wins nothing.
+fn meets(least: vec3<f32>, most: vec3<f32>, start: vec3<f32>, way: vec3<f32>, best: f32) -> bool {
+    let a = (least - start) / way;
+    let b = (most - start) / way;
+    let near = min(a, b);
+    let far = max(a, b);
+    let in_at = max(max(near.x, near.y), near.z);
+    let out_at = min(min(far.x, far.y), far.z);
+
+    return out_at >= max(in_at, 0.0) && in_at < best;
+}
+
 struct Hit {
     at: f32,
     normal: vec3<f32>,
@@ -151,77 +200,171 @@ struct Hit {
     met: bool,
 };
 
+// Where a ray meets one triangle, and which way that triangle faces.
+//
+// Möller and Trumbore's: no plane equation and no division until the end.
+// **Two sided**, because a reflection shows the inside of a wall and
+// culling it would show the room behind.
+fn met_a_triangle(a: vec3<f32>, b: vec3<f32>, c: vec3<f32>, start: vec3<f32>, way: vec3<f32>) -> vec2<f32> {
+    let one = b - a;
+    let two = c - a;
+    let across = cross(way, two);
+    let flat = dot(one, across);
+
+    if (abs(flat) < 1e-12) {
+        return vec2<f32>(-1.0, 0.0);
+    }
+
+    let back = 1.0 / flat;
+    let to = start - a;
+    let u = dot(to, across) * back;
+
+    if (u < 0.0 || u > 1.0) {
+        return vec2<f32>(-1.0, 0.0);
+    }
+
+    let other = cross(to, one);
+    let v = dot(way, other) * back;
+
+    if (v < 0.0 || u + v > 1.0) {
+        return vec2<f32>(-1.0, 0.0);
+    }
+
+    return vec2<f32>(dot(two, other) * back, 1.0);
+}
+
+// What a ray meets inside one instance, in that instance's own space.
+//
+// **The nearest triangle and its own normal**, taken from the winding
+// rather than from the vertices' stored normals: what the tracer is asked
+// for is where the surface is, and a vertex normal is smoothed across a
+// face it was never meant to answer for.
+fn met_in_a_mesh(one: Placed, start: vec3<f32>, way: vec3<f32>, best: f32) -> vec2<f32> {
+    var near = best;
+    var which = -1.0;
+    var stack: array<u32, DEEP>;
+    var deep = 1u;
+
+    stack[0] = one.first_node;
+
+    while (deep > 0u) {
+        deep = deep - 1u;
+
+        let at = stack[deep];
+        let node = nodes[at];
+
+        if (!meets(node.least, node.most, start, way, near)) {
+            continue;
+        }
+
+        if (node.count == 0u) {
+            // the near child is the node straight after this one and the
+            // far one is where this node says, which is the whole of why a
+            // walk needs no second index
+            if (deep + 2u <= DEEP) {
+                stack[deep] = at + 1u;
+                stack[deep + 1u] = node.first;
+                deep = deep + 2u;
+            }
+
+            continue;
+        }
+
+        for (var n: u32 = 0u; n < node.count; n = n + 1u) {
+            let tri = tris[node.first + n] * 3u;
+            let a = corner(indices[tri] + one.first_vertex);
+            let b = corner(indices[tri + 1u] + one.first_vertex);
+            let c = corner(indices[tri + 2u] + one.first_vertex);
+            let met = met_a_triangle(a, b, c, start, way);
+
+            if (met.y > 0.5 && met.x > 1e-4 && met.x < near) {
+                near = met.x;
+                which = f32(tri);
+            }
+        }
+    }
+
+    return vec2<f32>(near, which);
+}
+
+// And what it meets in the world, which is the top level over the instances
+// and then the mesh under whichever of them the ray reaches.
+//
+// **The ray is taken into each instance's own space** by the inverse that
+// instance carries, which is what makes nine thousand instances of a
+// hundred and sixty meshes cost a hundred and sixty hierarchies rather than
+// nine thousand. The direction is not normalised on the way in on purpose:
+// an instance that scales makes the ray longer or shorter in its own space,
+// and leaving it alone is what keeps the distance meaning the same thing on
+// both sides.
 fn trace(ray: vec3<f32>, way: vec3<f32>) -> Hit {
     var best: Hit;
     best.met = false;
     best.at = 1e30;
 
-    let count = u32(tracing.camera.w);
+    if (tracing.camera.w < 0.5) {
+        return best;
+    }
 
-    for (var n: u32 = 0u; n < count; n = n + 1u) {
-        let one = boxes[n];
+    let start = ray + tracing.camera.xyz;
+    var stack: array<u32, DEEP>;
+    var deep = 1u;
 
-        if (one.kind > 0.5) {
-            let middle = (one.least + one.most) * 0.5;
-            let across = (one.most.x - one.least.x) * 0.5;
-            let off = vec2<f32>(ray.x - middle.x, ray.z - middle.z);
-            let along = vec2<f32>(way.x, way.z);
-            let aa = dot(along, along);
-            let bb = 2.0 * dot(off, along);
-            let cc = dot(off, off) - across * across;
-            let under = bb * bb - 4.0 * aa * cc;
+    stack[0] = 0u;
 
-            // a ray straight up the axis meets no side of it
-            if (aa < 1e-9 || under < 0.0) {
+    while (deep > 0u) {
+        deep = deep - 1u;
+
+        let at = stack[deep];
+        let node = top[at];
+
+        if (!meets(node.least, node.most, start, way, best.at)) {
+            continue;
+        }
+
+        if (node.count == 0u) {
+            if (deep + 2u <= DEEP) {
+                stack[deep] = at + 1u;
+                stack[deep + 1u] = node.first;
+                deep = deep + 2u;
+            }
+
+            continue;
+        }
+
+        for (var n: u32 = 0u; n < node.count; n = n + 1u) {
+            let one = placed[node.first + n];
+            let into = mat4x4<f32>(
+                vec4<f32>(one.into_it_0.x, one.into_it_1.x, one.into_it_2.x, 0.0),
+                vec4<f32>(one.into_it_0.y, one.into_it_1.y, one.into_it_2.y, 0.0),
+                vec4<f32>(one.into_it_0.z, one.into_it_1.z, one.into_it_2.z, 0.0),
+                vec4<f32>(one.into_it_0.w, one.into_it_1.w, one.into_it_2.w, 1.0),
+            );
+            let start = (into * vec4<f32>(start, 1.0)).xyz;
+            let along = (into * vec4<f32>(way, 0.0)).xyz;
+            let met = met_in_a_mesh(one, start, along, best.at);
+
+            if (met.y < 0.0) {
                 continue;
             }
 
-            let root = sqrt(under);
-            var met = (-bb - root) / (2.0 * aa);
+            let tri = u32(met.y);
+            let a = corner(indices[tri] + one.first_vertex);
+            let b = corner(indices[tri + 1u] + one.first_vertex);
+            let c = corner(indices[tri + 2u] + one.first_vertex);
+            // a normal goes the other way about, by the transpose of the
+            // inverse, which is the transpose of this
+            let flat = cross(b - a, c - a);
 
-            if (met < 1e-4) {
-                met = (-bb + root) / (2.0 * aa);
-            }
-            if (met < 1e-4 || met >= best.at) {
-                continue;
-            }
-
-            let on = ray + way * met;
-
-            // **The side and not the ends.** A column's ends are covered by
-            // the blocks above and below it, so the caps would be two more
-            // tests for something nothing can see.
-            if (on.y < one.least.y || on.y > one.most.y) {
-                continue;
-            }
-
-            best.at = met;
+            best.at = met.x;
             best.color = one.color;
             best.met = true;
-            best.normal = normalize(vec3<f32>(on.x - middle.x, 0.0, on.z - middle.z));
-
-            continue;
+            best.normal = normalize(vec3<f32>(
+                dot(one.into_it_0.xyz, flat),
+                dot(one.into_it_1.xyz, flat),
+                dot(one.into_it_2.xyz, flat),
+            ));
         }
-
-        // a ray parallel to a slab it starts outside never meets the box,
-        // and the divide below carries that: the two ends come back as
-        // infinities of one sign and the near end wins nothing
-        let a = (one.least - ray) / way;
-        let b = (one.most - ray) / way;
-        let near = min(a, b);
-        let far = max(a, b);
-        let in_at = max(max(near.x, near.y), near.z);
-        let out_at = min(min(far.x, far.y), far.z);
-
-        if (out_at < in_at || out_at < 1e-4 || in_at < 1e-4 || in_at >= best.at) {
-            continue;
-        }
-
-        best.at = in_at;
-        best.color = one.color;
-        best.met = true;
-        // whichever slab the ray entered through is the face it struck
-        best.normal = -sign(way) * step(near.yzx, near.xyz) * step(near.zxy, near.xyz);
     }
 
     return best;

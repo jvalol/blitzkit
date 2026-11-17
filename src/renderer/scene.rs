@@ -67,43 +67,6 @@ pub struct Instance {
 
 unsafe impl bytemuck::Pod for Instance {}
 
-/// One box a traced ray can meet, and what colour it comes back. Spec 0098.
-///
-/// **A colour on the box rather than an index into a table.** The spec drafted
-/// it the second way, to keep from repeating a material per box. At this size
-/// that saves nothing worth a second buffer and a second lookup in the hot
-/// loop: capriccio's whole building is 635 boxes, which is ten kilobytes of
-/// colour. The spike also found the colour is the whole of what makes a traced
-/// image legible, so it belongs where the box is rather than a hop away.
-///
-/// Padded to what a storage buffer wants: a `vec3<f32>` aligns to sixteen, so
-/// the two corners each carry a float nobody reads.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct Traced {
-    pub least: [f32; 3],
-    /// Nought for a box and one for a cylinder standing in it, on the y
-    /// axis, as wide as the box and as tall. Spec 0098.
-    ///
-    /// **It costs nothing**, because a `vec3<f32>` aligns to sixteen and
-    /// this is the float that padding was already paying for.
-    pub kind: f32,
-    pub most: [f32; 3],
-    pub _most_pad: f32,
-    pub color: [f32; 4],
-}
-
-unsafe impl bytemuck::Zeroable for Traced {}
-unsafe impl bytemuck::Pod for Traced {}
-
-/// How many boxes a traced surface will look at.
-///
-/// Held against the shader's own by
-/// `renderer::tests::the_shaders_hold_the_same_caps`. A thousand is well past
-/// capriccio's whole building at 635 and is 48 kilobytes of storage, which is
-/// nothing beside what a frame of instances costs.
-pub const MAX_TRACED: usize = 1024;
-
 /// And how many lamps a traced surface takes a highlight from, per spec
 /// 0098.
 ///
@@ -112,55 +75,6 @@ pub const MAX_TRACED: usize = 1024;
 /// was lit by rather than the room. Each one is still another loop over
 /// every fragment of the ball, which is why this is not simply sixty four.
 pub const MAX_TRACED_LAMPS: usize = 32;
-
-impl Traced {
-    pub const SIZE: wgpu::BufferAddress = std::mem::size_of::<Self>() as wgpu::BufferAddress;
-
-    /// The same box with the camera taken off it, per spec 0051.
-    ///
-    /// Every position the shaders see is handed over this way, because a
-    /// world this size loses the float precision an edge needs. The
-    /// instances are already shifted, so a box that is not is in a different
-    /// world from the surface tracing it.
-    pub fn from_the_eye(&self, eye: glam::Vec3) -> Self {
-        let off = eye.to_array();
-
-        Self {
-            least: [
-                self.least[0] - off[0],
-                self.least[1] - off[1],
-                self.least[2] - off[2],
-            ],
-            most: [
-                self.most[0] - off[0],
-                self.most[1] - off[1],
-                self.most[2] - off[2],
-            ],
-            ..*self
-        }
-    }
-
-    pub fn new(box_: crate::collision::Aabb, color: glam::Vec4) -> Self {
-        Self {
-            least: box_.min.to_array(),
-            kind: 0.0,
-            most: box_.max.to_array(),
-            _most_pad: 0.0,
-            color: color.to_array(),
-        }
-    }
-
-    /// The same, as a cylinder standing in that box rather than the box.
-    ///
-    /// For anything turned: capriccio's colonnade is, and a stack of boxes
-    /// standing in for one read as a tube with corners.
-    pub fn round(box_: crate::collision::Aabb, color: glam::Vec4) -> Self {
-        Self {
-            kind: 1.0,
-            ..Self::new(box_, color)
-        }
-    }
-}
 /// One instance a traced ray can meet, and where the mesh under it keeps
 /// itself. Spec 0107's top level.
 ///
@@ -393,8 +307,6 @@ pub struct Scene {
     /// The glass this frame has, per spec 0092: surfaces that wear a target
     /// sampled where the fragment is rather than where the mesh says.
     glass: Vec<Glass>,
-    /// The boxes a traced surface can meet this frame. Spec 0098.
-    traced: Vec<Traced>,
     /// And the surfaces that look at them. Spec 0098.
     lenses: Vec<Lens>,
     /// The sky, or whatever stands behind everything. Spec 0086.
@@ -532,7 +444,6 @@ impl Scene {
         self.outlines.clear();
         self.mirrors.clear();
         self.glass.clear();
-        self.traced.clear();
         self.lenses.clear();
         self.backdrop = None;
         self.turned = Turned::default();
@@ -921,24 +832,6 @@ impl Scene {
 
     pub fn glass_surfaces(&self) -> &[Glass] {
         &self.glass
-    }
-
-    /// Hands over the boxes a traced surface may meet this frame. Spec 0098.
-    ///
-    /// **One list a frame and not one a surface.** Every traced surface in a
-    /// scene is looking at the same room, so the list is the scene's rather
-    /// than the surface's, and it is uploaded once however many surfaces read
-    /// it.
-    ///
-    /// Said again each frame, like the instances, because what a game can
-    /// walk through moves.
-    pub fn traces(&mut self, boxes: &[Traced]) {
-        self.traced.clear();
-        self.traced.extend_from_slice(boxes);
-    }
-
-    pub fn traced(&self) -> &[Traced] {
-        &self.traced
     }
 
     /// Says that mesh, placed there, bends what is behind it. Spec 0098.
@@ -1716,14 +1609,13 @@ impl Round {
 
 #[cfg(test)]
 mod tests {
-    use super::{Traced, MAX_TRACED, MAX_TRACED_LAMPS};
+    use super::{Placed, MAX_TRACED_LAMPS};
 
     /// Spec 0098: the cap in Rust and the cap in the shader are one number.
     #[test]
     fn the_tracer_holds_the_same_cap() {
         use crate::shaders::{says, TRACE};
 
-        assert_eq!(says::<usize>(TRACE, "MAX_TRACED"), MAX_TRACED);
         assert_eq!(
             says::<usize>(TRACE, "MAX_TRACED_LAMPS"),
             MAX_TRACED_LAMPS,
@@ -1731,28 +1623,40 @@ mod tests {
         );
     }
 
-    /// Spec 0098: a box goes to the GPU as its two corners and a colour,
-    /// padded the way a storage buffer wants them.
+    /// Spec 0107: an instance goes to the GPU as three rows of an inverse,
+    /// a colour and four offsets, packed the way the shader reads them.
     ///
-    /// **Asked of the bytes and not of the fields.** A `vec3<f32>` aligns to
-    /// sixteen, so the two corners each carry a float nobody reads, and a
-    /// struct that packs tighter than the shader expects is a room drawn
-    /// out of the wrong memory rather than a compile error.
+    /// **Asked of the bytes and not of the fields.** This was spec 0098's
+    /// box, which carried a float nobody read in each corner's padding
+    /// because a `vec3<f32>` aligns to sixteen. Rows of four spend nothing
+    /// on padding, and the reason to hold it is unchanged: a struct that
+    /// packs differently from what the shader expects is a room traced out
+    /// of the wrong memory rather than a compile error.
     #[test]
-    fn a_box_packs_the_way_the_shader_reads_it() {
-        use glam::{vec3, vec4};
-
-        let one = Traced::new(
-            crate::collision::Aabb::new(vec3(-1.0, -2.0, -3.0), vec3(4.0, 5.0, 6.0)),
-            vec4(0.1, 0.2, 0.3, 1.0),
-        );
+    fn an_instance_packs_the_way_the_shader_reads_it() {
+        let one = Placed {
+            into_it: [
+                [1.0, 2.0, 3.0, 4.0],
+                [5.0, 6.0, 7.0, 8.0],
+                [9.0, 10.0, 11.0, 12.0],
+            ],
+            color: [0.1, 0.2, 0.3, 1.0],
+            first_node: 13,
+            first_tri: 14,
+            first_index: 15,
+            first_vertex: 16,
+        };
         let bytes: &[u8] = bytemuck::bytes_of(&one);
         let floats: &[f32] = bytemuck::cast_slice(bytes);
+        let whole: &[u32] = bytemuck::cast_slice(bytes);
 
-        assert_eq!(Traced::SIZE, 48, "a box is not three sixteens");
-        assert_eq!(floats[0..3], [-1.0, -2.0, -3.0], "the least corner moved");
-        assert_eq!(floats[4..7], [4.0, 5.0, 6.0], "the most corner moved");
-        assert_eq!(floats[8..12], [0.1, 0.2, 0.3, 1.0], "the colour moved");
+        assert_eq!(Placed::SIZE, 80, "an instance is not five sixteens");
+        assert_eq!(
+            floats[0..12],
+            (1..=12).map(|n| n as f32).collect::<Vec<f32>>()[..]
+        );
+        assert_eq!(floats[12..16], [0.1, 0.2, 0.3, 1.0], "the colour moved");
+        assert_eq!(whole[16..20], [13, 14, 15, 16], "the offsets moved");
     }
 
     /// Spec 0058: what is kept outlives the frame it was kept in.
