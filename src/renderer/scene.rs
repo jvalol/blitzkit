@@ -161,6 +161,41 @@ impl Traced {
         }
     }
 }
+/// One instance a traced ray can meet, and where the mesh under it keeps
+/// itself. Spec 0107's top level.
+///
+/// **The inverse and not the transform.** A ray is taken into each
+/// instance's own space and the mesh's hierarchy answers there, which is
+/// what makes 9,509 instances of 163 meshes cost 163 hierarchies rather
+/// than 9,509.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Placed {
+    /// That inverse, as three rows of four.
+    ///
+    /// **Rows where `Instance::model` holds columns.** An affine inverse's
+    /// last row is nought, nought, nought, one and is not carried either
+    /// way; rows are what leaves the three that remain sixteen bytes each,
+    /// which is what a storage buffer wants and what spares the shader a
+    /// transpose.
+    pub into_it: [[f32; 4]; 3],
+    pub color: [f32; 4],
+    /// The root of this mesh's own hierarchy, in the node pool.
+    pub first_node: u32,
+    /// Where the triangle order its leaves name starts.
+    pub first_tri: u32,
+    /// And where its triangles start, so a triangle number means something.
+    pub first_index: u32,
+    pub first_vertex: u32,
+}
+
+unsafe impl bytemuck::Zeroable for Placed {}
+unsafe impl bytemuck::Pod for Placed {}
+
+impl Placed {
+    pub const SIZE: wgpu::BufferAddress = std::mem::size_of::<Self>() as wgpu::BufferAddress;
+}
+
 unsafe impl bytemuck::Zeroable for Instance {}
 
 impl Instance {

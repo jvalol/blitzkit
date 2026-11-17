@@ -70,19 +70,48 @@ buffers, which is the whole reason the tracer reads boxes. The pool is one
 vertex buffer and one index buffer with every mesh's triangles in them, and
 each mesh records where its own start and how many it has.
 
-**A mesh that grows is appended, not patched in place.** A mesh rebuilt
-larger takes a new range and leaves its old one dead. Compaction is a
-question for the day something actually churns; nothing in sixteen games
-rebuilds a mesh per frame.
+**A mesh that still fits is written over its own range, and one that grows
+is appended.** A mesh rebuilt larger takes a new range and leaves its old
+one dead. Compaction is a question for the day something actually churns.
+
+This spec drafted that as the whole rule, on the grounds that nothing in
+sixteen games rebuilds a mesh per frame. Three things do, all in capriccio:
+the garden's pond, the baths' water and the tesseract are handed over on
+every single frame, so appending each time grew the pool for as long as the
+game ran. Writing over the range is what a surface that moves and keeps its
+triangle count actually wants, and that is all three of them.
 
 **A structure under each mesh, built when the mesh is.** Over its own
-triangles, in its own space, once.
+triangles, in its own space, once. A mesh written over its own range builds
+its hierarchy again, because a hierarchy over triangles that have moved is
+the second account of one thing that this whole spec is against.
 
 **And one over the instances, rebuilt when they move.** The arcade moves
 things every frame, the cradle and the orrery and the panel among them, and
 spec 0096 already measured that the static share is most of it: 351 of the
-instances are kept across frames. What moves refits; what does not is built
-once.
+instances are kept across frames. A frame where nothing moved pays a
+comparison of the gathered instances and no build at all.
+
+Measured on this machine over 9,509 instances, which is the arcade's own
+count: 0.96 ms for the whole pass, of which 0.22 ms is gathering the
+instances and 0.62 ms is the build, and 0.23 ms for a frame that moved
+nothing. So a refit's bookkeeping would be chasing six tenths of a
+millisecond, and the floor under both is the gather, which is one matrix
+inverse and eight corners an instance and is paid either way.
+
+**In the world, where everything else the shaders are handed has the eye
+taken off it.** Spec 0051 subtracts the camera from every position the GPU
+sees, and the boxes spec 0098 traces are subtracted with it. A structure
+handed over that way would be rebuilt every frame the camera moved, which is
+every frame, and the frame where nothing moved would never come. So this one
+stays in the world and the shader adds the eye back on to the ray, once. The
+precision spec 0051 is written for is not in question at this size: the
+arcade is sixty metres across, where f32 holds a surface to microns.
+
+**Every instance the scene holds, and not the ones the picture keeps.**
+`culling::pick` answers which instances a pass draws, and a mirror shows the
+room behind you. A ray that could only meet what the camera can see would
+lose the half of the room that makes a reflection worth having.
 
 **A ray is traced in instance space.** The top level answers which instances
 a ray meets, the ray is taken into each one's own space by the inverse of
@@ -100,9 +129,10 @@ existing.
 ## Acceptance criteria
 
 - Every mesh's triangles are in the pool at the offset and count it recorded, and a mesh added after another does not move it. — `renderer::tests::the_pool_holds_every_mesh_where_it_says`
+- A mesh handed over again every frame does not grow the pools for ever. — `renderer::tests::an_updated_mesh_does_not_grow_the_pools_for_ever`
 - A mesh that is a box traces the same hits as that box did, which is the old path's own answer held against the new one. — `renderer::tests::a_box_mesh_traces_like_the_box`
 - The top level holds every instance the frame draws, and a ray that misses them all misses. — `renderer::tests::the_structure_holds_what_the_frame_draws`
-- A structure refits when an instance moves and is left alone when nothing does. — `renderer::tests::it_refits_only_what_moved`
+- The structure is built when an instance moves and left alone when nothing does. — `renderer::tests::it_refits_only_what_moved`
 - A ray against an instance with a turned transform hits where the drawn triangle is, which is the thing instance space is for. — `renderer::tests::a_turned_instance_is_hit_where_it_is_drawn`
 - The caps in Rust and in each shader stay the same number. — `renderer::tests::the_shaders_hold_the_same_caps`
 
@@ -136,3 +166,9 @@ the hit still stands. This returns a hit and a normal.
 
 **The colliders.** `solid` stays exactly what it is: what a body walks into.
 What goes is its second job of standing in for the drawn world.
+
+**What a ray should do with a see-through surface.** Every instance a scene
+pushes is in the top level, glass and water among them, where `Traced` let a
+game choose what went in it. So a reflection will meet a pane the old path
+never showed it. That is a question about what the tracer does with a hit
+rather than about where the geometry is, and it belongs with the shader.

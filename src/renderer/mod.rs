@@ -200,6 +200,32 @@ pub struct Renderer {
     pool_indices: wgpu::Buffer,
     pooled_vertices: Vec<crate::mesh::Vertex>,
     pooled_indices: Vec<u32>,
+    /// **Every mesh's hierarchy in one array too**, for the reason the
+    /// triangles are: one buffer a shader can index. A leaf names a range
+    /// of `pooled_tris`, and those are triangle numbers into
+    /// `pooled_indices`.
+    pool_nodes: wgpu::Buffer,
+    pool_tris: wgpu::Buffer,
+    pooled_nodes: Vec<crate::bvh::Node>,
+    pooled_tris: Vec<u32>,
+    /// And the top level, which is this frame's instances. Spec 0107:
+    /// rebuilt rather than refitted, with a refit left for the day a
+    /// measurement asks for it. `upload_top` holds the numbers.
+    top_nodes: wgpu::Buffer,
+    top_placed: wgpu::Buffer,
+    /// The tree itself, whose leaves name a range of `placed` rather than of
+    /// an order of their own: the top level is built fresh, so the instances
+    /// are written in the order the tree wants and the indirection the
+    /// bottom level needs is not paid for twice.
+    topped: Vec<crate::bvh::Node>,
+    placed: Vec<scene::Placed>,
+    /// And the same instances in the order they were gathered, which is the
+    /// one thing that says whether anything moved.
+    gathered: Vec<scene::Placed>,
+    /// How many times the top level has been built, which is what
+    /// `it_refits_only_what_moved` reads. A frame where nothing moved does
+    /// not add to it.
+    tops_built: u64,
     /// Whether a coplanar check is owed, and what the last one found. A game
     /// asks for one on a key press and reads the answer back the frame after.
     /// See spec 0048.
@@ -264,6 +290,16 @@ pub struct Renderer {
 }
 
 /// A mesh living on the GPU. Built once, drawn many times.
+/// Where a mesh's triangles and its own hierarchy landed in the pools.
+#[derive(Clone, Copy, Debug, Default)]
+struct Put {
+    first_vertex: u32,
+    first_index: u32,
+    first_node: u32,
+    node_count: u32,
+    first_tri: u32,
+}
+
 struct GpuMesh {
     /// Spec 0075: drawn by the water pipelines rather than the ordinary ones.
     water: bool,
@@ -284,6 +320,12 @@ struct GpuMesh {
     /// And how many vertices it holds, which `update_mesh` needs to know
     /// whether a new one still fits the range.
     vertex_count: u32,
+    /// Where this mesh's own hierarchy starts in the node pool, and where
+    /// the triangle order its leaves name starts in the order pool. Spec
+    /// 0107's bottom level, built once when the mesh is.
+    first_node: u32,
+    node_count: u32,
+    first_tri: u32,
     /// The box the mesh fits inside, kept so the coplanar check has something
     /// to measure without reading the vertices back off the GPU. See spec
     /// 0048.
@@ -634,6 +676,10 @@ impl Renderer {
         // spec 0107's pool: one pair of buffers for every mesh in the game
         let pool_vertices = create_buffer(&device, 0, VERTICES);
         let pool_indices = create_buffer(&device, 0, INDICES);
+        let pool_nodes = create_buffer(&device, 0, STORAGE);
+        let pool_tris = create_buffer(&device, 0, STORAGE);
+        let top_nodes = create_buffer(&device, 0, STORAGE);
+        let top_placed = create_buffer(&device, 0, STORAGE);
         let index_buffer = create_buffer(&device, 0, wgpu::BufferUsages::INDEX);
 
         let text_brush = BrushBuilder::using_font_bytes(FONT_BYTES).unwrap().build(
@@ -1222,6 +1268,16 @@ impl Renderer {
             pool_indices,
             pooled_vertices: Vec::new(),
             pooled_indices: Vec::new(),
+            pool_nodes,
+            pool_tris,
+            pooled_nodes: Vec::new(),
+            pooled_tris: Vec::new(),
+            top_nodes,
+            top_placed,
+            topped: Vec::new(),
+            tops_built: 0,
+            placed: Vec::new(),
+            gathered: Vec::new(),
             asked_fights: false,
             fights: coplanar::Fights::default(),
             body: None,
@@ -1650,13 +1706,16 @@ impl Renderer {
         // an empty mesh is a legal thing to build, a lattice of no lines for
         // one, and wgpu refuses to make a buffer with nothing in it. It gets
         // placeholder buffers and an index count of zero, which the passes skip.
-        let (first_vertex, first_index) = self.pool(data);
+        let put = self.pool(data);
 
         self.meshes.push(GpuMesh {
-            first_vertex,
-            first_index,
+            first_vertex: put.first_vertex,
+            first_index: put.first_index,
             index_count: data.indices.len() as u32,
             vertex_count: data.vertices.len() as u32,
+            first_node: put.first_node,
+            node_count: put.node_count,
+            first_tri: put.first_tri,
             bounds: data.bounds(),
             boxy: data.is_box(),
             water: false,
@@ -1739,17 +1798,25 @@ impl Renderer {
 
         let fits = data.indices.len() as u32 <= mesh.index_count
             && data.vertices.len() as u32 <= mesh.vertex_count;
-        let (first_vertex, first_index) = (mesh.first_vertex, mesh.first_index);
+        let put = Put {
+            first_vertex: mesh.first_vertex,
+            first_index: mesh.first_index,
+            first_node: mesh.first_node,
+            node_count: mesh.node_count,
+            first_tri: mesh.first_tri,
+        };
 
         let _ = (device, queue);
 
-        // **A mesh that no longer fits takes a new range and leaves its old
-        // one dead.** Spec 0107 says so and says why: nothing in sixteen
-        // games rebuilds a mesh per frame, so compaction is a question for
-        // the day something churns.
-        let (first_vertex, first_index) = if fits {
-            self.patch(first_vertex, first_index, data);
-            (first_vertex, first_index)
+        // **A mesh that still fits is written over its own range.** Spec
+        // 0107's out of scope says a mesh that grows takes a new range and
+        // leaves its old one dead, and that is right for a mesh rebuilt
+        // once. It is not right for one rebuilt every frame, and three
+        // are: capriccio hands over the garden's pond, the baths' water and
+        // the tesseract on every single frame, so appending would grow the
+        // pool for as long as the game ran.
+        let put = if fits {
+            self.patch(put, data)
         } else {
             self.pool(data)
         };
@@ -1758,35 +1825,165 @@ impl Renderer {
             return;
         };
 
-        mesh.first_vertex = first_vertex;
-        mesh.first_index = first_index;
+        mesh.first_vertex = put.first_vertex;
+        mesh.first_index = put.first_index;
+        mesh.first_node = put.first_node;
+        mesh.node_count = put.node_count;
+        mesh.first_tri = put.first_tri;
         mesh.index_count = data.indices.len() as u32;
         mesh.vertex_count = data.vertices.len() as u32;
         mesh.bounds = data.bounds();
         mesh.boxy = data.is_box();
     }
 
-    /// Appends a mesh's triangles to the pool and says where they went.
-    fn pool(&mut self, data: &MeshData) -> (u32, u32) {
-        let at = (
-            self.pooled_vertices.len() as u32,
-            self.pooled_indices.len() as u32,
-        );
+    /// Appends a mesh's triangles and its own hierarchy to the pools, and
+    /// says where each went.
+    fn pool(&mut self, data: &MeshData) -> Put {
+        let put = Put {
+            first_vertex: self.pooled_vertices.len() as u32,
+            first_index: self.pooled_indices.len() as u32,
+            first_node: self.pooled_nodes.len() as u32,
+            first_tri: self.pooled_tris.len() as u32,
+            node_count: 0,
+        };
 
         self.pooled_vertices.extend_from_slice(&data.vertices);
         self.pooled_indices.extend_from_slice(&data.indices);
+
+        // **The tree is built once here because a mesh does not move.**
+        // What moves is the instance, and that is the top level's business.
+        let (nodes, order) = Self::tree_of(data);
+        let count = nodes.len() as u32;
+
+        self.pooled_nodes.extend(std::iter::repeat_n(
+            crate::bvh::Node::default(),
+            nodes.len(),
+        ));
+        self.pooled_tris
+            .extend(std::iter::repeat_n(0u32, order.len()));
+        self.write_tree(
+            put.first_node as usize,
+            put.first_tri,
+            put.first_index,
+            nodes,
+            order,
+        );
         self.upload_pool();
 
-        at
+        Put {
+            node_count: count,
+            ..put
+        }
     }
 
-    /// Writes a mesh's triangles over a range it already holds.
-    fn patch(&mut self, first_vertex: u32, first_index: u32, data: &MeshData) {
-        let (v, i) = (first_vertex as usize, first_index as usize);
+    /// Writes a mesh's triangles over a range it already holds, and its
+    /// hierarchy over its own if the new one still fits there.
+    ///
+    /// **A tree that no longer fits takes a new range and the old one is
+    /// left dead.** That is the leak spec 0107 names, and here it is
+    /// bounded rather than per frame: a mesh handed over again with the same
+    /// triangle count builds a tree of about the same size, so this is the
+    /// exception rather than the rule. `an_updated_mesh_does_not_grow_the_
+    /// pools_for_ever` is what holds that.
+    fn patch(&mut self, put: Put, data: &MeshData) -> Put {
+        let (v, i) = (put.first_vertex as usize, put.first_index as usize);
 
         self.pooled_vertices[v..v + data.vertices.len()].copy_from_slice(&data.vertices);
         self.pooled_indices[i..i + data.indices.len()].copy_from_slice(&data.indices);
+
+        // **The nodes are asked whether they fit and the triangle order is
+        // not**, because the order is one number a triangle and `fits` has
+        // already said this mesh has no more triangles than its range was
+        // built for. The nodes are a different count: a tree over the same
+        // number of boxes in different places can need more of them.
+        let (nodes, order) = Self::tree_of(data);
+        let out = if nodes.len() as u32 <= put.node_count {
+            let at = put.first_node as usize;
+
+            self.write_tree(at, put.first_tri, put.first_index, nodes, order);
+
+            Put {
+                node_count: put.node_count,
+                ..put
+            }
+        } else {
+            let first_node = self.pooled_nodes.len() as u32;
+            let first_tri = self.pooled_tris.len() as u32;
+
+            self.pooled_nodes.extend(std::iter::repeat_n(
+                crate::bvh::Node::default(),
+                nodes.len(),
+            ));
+            self.pooled_tris
+                .extend(std::iter::repeat_n(0u32, order.len()));
+            self.write_tree(
+                first_node as usize,
+                first_tri,
+                put.first_index,
+                nodes,
+                order,
+            );
+
+            Put {
+                first_node,
+                first_tri,
+                node_count: self.pooled_nodes.len() as u32 - first_node,
+                ..put
+            }
+        };
+
         self.upload_pool();
+
+        out
+    }
+
+    /// A box round each of a mesh's triangles, and the hierarchy over them.
+    fn tree_of(data: &MeshData) -> (Vec<crate::bvh::Node>, Vec<u32>) {
+        let boxes: Vec<crate::collision::Aabb> = data
+            .indices
+            .chunks_exact(3)
+            .map(|face| {
+                let mut least = glam::Vec3::splat(f32::MAX);
+                let mut most = glam::Vec3::splat(f32::MIN);
+
+                for corner in face {
+                    let at = glam::Vec3::from(data.vertices[*corner as usize].position);
+
+                    least = least.min(at);
+                    most = most.max(at);
+                }
+
+                crate::collision::Aabb::new(least, most)
+            })
+            .collect();
+
+        crate::bvh::build(&boxes)
+    }
+
+    /// Writes a tree into the pools at a place, shifting what it names.
+    ///
+    /// **A leaf's `first` is an index into this mesh's own order and a
+    /// branch's is a node of its own tree**, so both move by where that
+    /// tree landed. The left child stays the node after its parent, which
+    /// it is because a subtree is written whole.
+    fn write_tree(
+        &mut self,
+        at: usize,
+        first_tri: u32,
+        first_index: u32,
+        nodes: Vec<crate::bvh::Node>,
+        order: Vec<u32>,
+    ) {
+        let first_triangle = first_index / 3;
+
+        for (n, mut node) in nodes.into_iter().enumerate() {
+            node.first += if node.is_leaf() { first_tri } else { at as u32 };
+            self.pooled_nodes[at + n] = node;
+        }
+
+        for (n, tri) in order.into_iter().enumerate() {
+            self.pooled_tris[first_tri as usize + n] = tri + first_triangle;
+        }
     }
 
     /// And puts the pool on the card, growing the buffers when it has to.
@@ -1809,6 +2006,26 @@ impl Renderer {
             "Mesh Pool Indices",
             indices,
             INDICES,
+        );
+
+        let nodes: &[u8] = bytemuck::cast_slice(&self.pooled_nodes);
+        let tris: &[u8] = bytemuck::cast_slice(&self.pooled_tris);
+
+        refill(
+            &self.device,
+            &self.queue,
+            &mut self.pool_nodes,
+            "Mesh Pool Nodes",
+            nodes,
+            STORAGE,
+        );
+        refill(
+            &self.device,
+            &self.queue,
+            &mut self.pool_tris,
+            "Mesh Pool Triangles",
+            tris,
+            STORAGE,
         );
     }
 
@@ -3205,6 +3422,12 @@ impl Renderer {
         // the boxes every lens in this frame looks at, written once
         self.upload_traced(scene);
 
+        // and the structure over the meshes those lenses will read instead,
+        // which is built for a frame that has a lens in it and for no other
+        if lenses > 0 {
+            self.upload_top(scene);
+        }
+
         if lenses > 0 {
             let (into, onto) = match &self.colour {
                 Some(many) => (many, Some(view)),
@@ -4006,6 +4229,226 @@ impl Renderer {
         }
 
         instances.len() as u32
+    }
+
+    /// This frame's instances, each with the inverse that takes a ray into
+    /// its own space, and a box round it in the world.
+    ///
+    /// **Every instance the scene holds, and not the ones the picture
+    /// keeps.** `culling::pick` answers which instances a pass draws, and a
+    /// mirror shows the room behind you: a ray that could only meet what
+    /// the camera can see would lose the half of the room that makes a
+    /// reflection worth having.
+    fn gather(meshes: &[GpuMesh], scene: &Scene) -> (Vec<scene::Placed>, Vec<Aabb>) {
+        let mut placed = Vec::new();
+        let mut boxes = Vec::new();
+        let mut take = |mesh: scene::MeshId, instance: &scene::Instance, middle: glam::Vec3| {
+            // **A mesh with no triangles has no tree**, and a root that
+            // does not exist is read as whichever mesh's nodes happen to
+            // lie at that offset.
+            let Some(under) = meshes.get(mesh.0).filter(|under| under.node_count > 0) else {
+                return;
+            };
+            let model = instance.shifted(middle).matrix();
+            // the inverse's rows, which are its transpose's columns
+            let rows = model.inverse().transpose().to_cols_array_2d();
+            let mut round = Aabb::empty();
+
+            for x in [under.bounds.min.x, under.bounds.max.x] {
+                for y in [under.bounds.min.y, under.bounds.max.y] {
+                    for z in [under.bounds.min.z, under.bounds.max.z] {
+                        round = round.union_point(model.transform_point3(glam::Vec3::new(x, y, z)));
+                    }
+                }
+            }
+
+            placed.push(scene::Placed {
+                into_it: [rows[0], rows[1], rows[2]],
+                color: instance.color,
+                first_node: under.first_node,
+                first_tri: under.first_tri,
+                first_index: under.first_index,
+                first_vertex: under.first_vertex,
+            });
+            boxes.push(round);
+        };
+
+        for (mesh, _, instances) in scene.batches(true) {
+            for instance in instances {
+                take(mesh, instance, glam::Vec3::ZERO);
+            }
+        }
+
+        // **A kept run is stored round its own middle**, per spec 0063, so
+        // its instances are put back in the world before they are measured.
+        for keeping in scene.keepings() {
+            for instance in &keeping.instances {
+                take(keeping.mesh, instance, keeping.round.at);
+            }
+        }
+
+        (placed, boxes)
+    }
+
+    /// Builds the top level over this frame's instances and puts it on the
+    /// card, and says how many instances it holds.
+    ///
+    /// **Rebuilt rather than refitted, and skipped outright when nothing
+    /// moved.** Spec 0107 asks for a refit of what moved, and what that
+    /// would save is measured rather than assumed. Over 9,509 instances,
+    /// which is the arcade's own count: 0.96 ms for this whole method, of
+    /// which 0.22 ms is the gather and 0.62 ms is the build, and 0.23 ms
+    /// for a frame that moved nothing. A refit would be chasing the six
+    /// tenths, and the gather under it is paid either way.
+    ///
+    /// **In the world and not with the eye off it**, which is the one place
+    /// this parts from spec 0051. Everything the shaders are handed has the
+    /// camera subtracted, and a structure handed over that way would be
+    /// rebuilt every frame the camera moved, which is every frame. The
+    /// shader adds the eye back on to the ray once instead, and the arcade
+    /// is sixty metres across, where f32 holds a surface to microns.
+    fn upload_top(&mut self, scene: &Scene) -> u32 {
+        let (gathered, boxes) = Self::gather(&self.meshes, scene);
+
+        if gathered == self.gathered {
+            return self.placed.len() as u32;
+        }
+
+        let (nodes, order) = crate::bvh::build(&boxes);
+
+        self.topped = nodes;
+        self.tops_built += 1;
+        self.placed = order.iter().map(|n| gathered[*n as usize]).collect();
+        self.gathered = gathered;
+
+        refill(
+            &self.device,
+            &self.queue,
+            &mut self.top_nodes,
+            "Top Level Nodes",
+            bytemuck::cast_slice(&self.topped),
+            STORAGE,
+        );
+        refill(
+            &self.device,
+            &self.queue,
+            &mut self.top_placed,
+            "Top Level Instances",
+            bytemuck::cast_slice(&self.placed),
+            STORAGE,
+        );
+
+        self.placed.len() as u32
+    }
+
+    /// What a ray meets in the world, nearest first, by walking both levels
+    /// on the CPU: how far along the ray, and the surface's normal there.
+    ///
+    /// **Here for the reason `bvh::met` is**: the walk this is for is spec
+    /// 0107's step three and lives in a shader, and a structure nothing can
+    /// read is a structure nothing can check. This is what that shader will
+    /// be held against.
+    #[cfg(test)]
+    fn met_in_the_world(&self, from: glam::Vec3, way: glam::Vec3) -> Option<(f32, glam::Vec3)> {
+        let mut best: Option<(f32, glam::Vec3)> = None;
+
+        if self.topped.is_empty() {
+            return None;
+        }
+
+        let mut stack = vec![0usize];
+
+        while let Some(at) = stack.pop() {
+            let node = self.topped[at];
+
+            if !crate::bvh::hits(node.bounds(), from, way) {
+                continue;
+            }
+
+            if !node.is_leaf() {
+                stack.push(at + 1);
+                stack.push(node.first as usize);
+
+                continue;
+            }
+
+            let first = node.first as usize;
+
+            for one in &self.placed[first..first + node.count as usize] {
+                let rows = one.into_it;
+                let into = glam::Mat4::from_cols(
+                    glam::vec4(rows[0][0], rows[1][0], rows[2][0], 0.0),
+                    glam::vec4(rows[0][1], rows[1][1], rows[2][1], 0.0),
+                    glam::vec4(rows[0][2], rows[1][2], rows[2][2], 0.0),
+                    glam::vec4(rows[0][3], rows[1][3], rows[2][3], 1.0),
+                );
+                // **Not normalised on purpose.** An instance that scales
+                // makes the ray longer or shorter in its own space, and
+                // leaving the direction alone is what keeps `t` meaning the
+                // same thing in both: the hit is at `from + t * way` either
+                // way round.
+                let start = into.transform_point3(from);
+                let along = into.transform_vector3(way);
+
+                if let Some((t, normal)) = self.met_in_a_mesh(one, start, along) {
+                    // a normal goes the other way about, by the transpose of
+                    // the inverse, which is the transpose of this
+                    let turned = (into.transpose() * normal.extend(0.0)).truncate();
+
+                    if best.is_none_or(|(near, _)| t < near) {
+                        best = Some((t, turned.normalize()));
+                    }
+                }
+            }
+        }
+
+        best
+    }
+
+    /// And what it meets inside one instance, in that instance's own space.
+    #[cfg(test)]
+    fn met_in_a_mesh(
+        &self,
+        one: &scene::Placed,
+        from: glam::Vec3,
+        way: glam::Vec3,
+    ) -> Option<(f32, glam::Vec3)> {
+        let mut best: Option<(f32, glam::Vec3)> = None;
+        let mut stack = vec![one.first_node as usize];
+
+        while let Some(at) = stack.pop() {
+            let node = self.pooled_nodes[at];
+
+            if !crate::bvh::hits(node.bounds(), from, way) {
+                continue;
+            }
+
+            if !node.is_leaf() {
+                stack.push(at + 1);
+                stack.push(node.first as usize);
+
+                continue;
+            }
+
+            let first = node.first as usize;
+
+            for tri in &self.pooled_tris[first..first + node.count as usize] {
+                let corner = |n: usize| {
+                    let which = self.pooled_indices[*tri as usize * 3 + n] + one.first_vertex;
+
+                    glam::Vec3::from(self.pooled_vertices[which as usize].position)
+                };
+                let (a, b, c) = (corner(0), corner(1), corner(2));
+
+                if let Some((t, normal)) = met_a_triangle(a, b, c, from, way) {
+                    if t >= 0.0 && best.is_none_or(|(near, _)| t < near) {
+                        best = Some((t, normal));
+                    }
+                }
+            }
+        }
+
+        best
     }
 
     /// This frame's boxes and the three camera fields a tracer reads, per
@@ -5002,6 +5445,49 @@ fn create_mesh_pipeline(
 /// new vertices into a buffer already there rather than making another.
 const VERTICES: wgpu::BufferUsages = wgpu::BufferUsages::VERTEX.union(wgpu::BufferUsages::COPY_DST);
 const INDICES: wgpu::BufferUsages = wgpu::BufferUsages::INDEX.union(wgpu::BufferUsages::COPY_DST);
+/// What spec 0107's hierarchies are held in: a shader reads them by index,
+/// which a vertex or index buffer cannot be.
+/// Where a ray meets one triangle, and that triangle's own normal.
+///
+/// Möller and Trumbore's, which is the one the shader will carry too: no
+/// plane equation and no division until the end. Two sided, because a
+/// reflection shows the inside of a wall and culling it would show the room
+/// behind.
+#[cfg(test)]
+fn met_a_triangle(
+    a: glam::Vec3,
+    b: glam::Vec3,
+    c: glam::Vec3,
+    from: glam::Vec3,
+    way: glam::Vec3,
+) -> Option<(f32, glam::Vec3)> {
+    let (one, two) = (b - a, c - a);
+    let across = way.cross(two);
+    let flat = one.dot(across);
+
+    if flat.abs() < 1e-12 {
+        return None;
+    }
+
+    let back = 1.0 / flat;
+    let to = from - a;
+    let u = to.dot(across) * back;
+
+    if u < 0.0 || u > 1.0 {
+        return None;
+    }
+
+    let other = to.cross(one);
+    let v = way.dot(other) * back;
+
+    if v < 0.0 || u + v > 1.0 {
+        return None;
+    }
+
+    Some((two.dot(other) * back, one.cross(two).normalize()))
+}
+
+const STORAGE: wgpu::BufferUsages = wgpu::BufferUsages::STORAGE.union(wgpu::BufferUsages::COPY_DST);
 
 /// How big a buffer must become to take `want` bytes when it holds `have` now,
 /// or `None` when the one already there will do.
@@ -5904,6 +6390,380 @@ mod tests {
             .collect();
 
         assert_eq!(starts, vec![0, 3, 9], "the ranges overlap: {:?}", starts);
+    }
+
+    /// Spec 0107: a mesh handed over again every frame does not grow the
+    /// pools for ever.
+    ///
+    /// **The leak this had, and the reason the spec's own out of scope is
+    /// not the whole rule.** That paragraph says a mesh that grows takes a
+    /// new range and leaves its old one dead, on the grounds that nothing
+    /// rebuilds a mesh per frame. Three things do: capriccio hands over the
+    /// garden's pond, the baths' water and the tesseract on every single
+    /// frame, so appending each time grew the pool for as long as the game
+    /// ran.
+    #[test]
+    fn an_updated_mesh_does_not_grow_the_pools_for_ever() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(16, 16)) else {
+            return;
+        };
+
+        let id = renderer.add_mesh(&MeshData::cube());
+        let after = (
+            renderer.pooled_vertices.len(),
+            renderer.pooled_indices.len(),
+            renderer.pooled_nodes.len(),
+            renderer.pooled_tris.len(),
+        );
+
+        // the same shape moved, which is what a water surface is
+        for n in 0..100 {
+            let mut data = MeshData::cube();
+
+            for vertex in data.vertices.iter_mut() {
+                vertex.position[1] += (n as f32 * 0.31).sin() * 0.2;
+            }
+
+            renderer.update_mesh(id, &data);
+        }
+
+        assert_eq!(
+            (
+                renderer.pooled_vertices.len(),
+                renderer.pooled_indices.len(),
+                renderer.pooled_nodes.len(),
+                renderer.pooled_tris.len(),
+            ),
+            after,
+            "a hundred updates of one mesh moved the pools"
+        );
+
+        // and the mesh still traces where it was moved to, which is what
+        // says the tree went in rather than being skipped
+        let mut scene = Scene::new();
+        scene.push(id, &crate::mesh::Transform::new());
+        renderer.upload_top(&scene);
+
+        let top = 0.5 + (99.0f32 * 0.31).sin() * 0.2;
+        let (t, _) = renderer
+            .met_in_the_world(glam::vec3(0.0, 10.0, 0.0), -glam::Vec3::Y)
+            .expect("the moved cube is not there");
+
+        assert!(
+            (t - (10.0 - top)).abs() < 1e-3,
+            "the cube's top reads at {} and was moved to {}",
+            10.0 - t,
+            top
+        );
+    }
+
+    /// Spec 0107: the top level holds every instance the frame draws, and a
+    /// ray that misses them all misses.
+    #[test]
+    fn the_structure_holds_what_the_frame_draws() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(16, 16)) else {
+            return;
+        };
+
+        let cube = renderer.add_mesh(&MeshData::cube());
+        let mut scene = Scene::new();
+        let mut places = Vec::new();
+
+        for x in 0..6 {
+            for z in 0..7 {
+                let at = glam::vec3(x as f32 * 2.0, 0.0, z as f32 * 2.0);
+
+                scene.push(cube, &crate::mesh::Transform::at(at));
+                places.push(at);
+            }
+        }
+
+        let held = renderer.upload_top(&scene);
+
+        assert_eq!(held as usize, places.len(), "the top level lost instances");
+
+        // every instance is in exactly one leaf, which is what makes the
+        // leaves a partition of the frame rather than a sample of it
+        let mut seen = vec![0u32; places.len()];
+
+        for leaf in renderer.topped.iter().filter(|node| node.is_leaf()) {
+            for n in leaf.first..leaf.first + leaf.count {
+                seen[n as usize] += 1;
+            }
+        }
+
+        assert!(
+            seen.iter().all(|times| *times == 1),
+            "some instance is in no leaf or in two"
+        );
+
+        // and each one is where it was put
+        for at in &places {
+            let (t, normal) = renderer
+                .met_in_the_world(*at + glam::Vec3::Y * 10.0, -glam::Vec3::Y)
+                .unwrap_or_else(|| panic!("nothing at {:?}", at));
+
+            assert!(
+                (t - 9.5).abs() < 1e-4,
+                "the cube at {:?} reads at {}",
+                at,
+                t
+            );
+            assert!(
+                normal.dot(glam::Vec3::Y) > 0.99,
+                "its top faces {:?}",
+                normal
+            );
+        }
+
+        // while a ray over the top of the whole frame meets nothing
+        assert!(
+            renderer
+                .met_in_the_world(glam::vec3(-20.0, 40.0, -20.0), glam::Vec3::X)
+                .is_none(),
+            "a ray well clear of the frame met something"
+        );
+    }
+
+    /// Spec 0107: the structure is built when an instance moves and left
+    /// alone when nothing does.
+    #[test]
+    fn it_refits_only_what_moved() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(16, 16)) else {
+            return;
+        };
+
+        let cube = renderer.add_mesh(&MeshData::cube());
+        let standing = |at: glam::Vec3| {
+            let mut scene = Scene::new();
+
+            for n in 0..20 {
+                scene.push(cube, &crate::mesh::Transform::at(glam::Vec3::X * n as f32));
+            }
+
+            scene.push(cube, &crate::mesh::Transform::at(at));
+
+            scene
+        };
+
+        let still = standing(glam::vec3(0.0, 4.0, 0.0));
+
+        renderer.upload_top(&still);
+
+        let once = renderer.tops_built;
+
+        assert_eq!(once, 1, "the first frame built {} structures", once);
+
+        // the same frame again, which is what a scene that is reset and
+        // pushed the same way every frame looks like from here
+        for _ in 0..5 {
+            renderer.upload_top(&standing(glam::vec3(0.0, 4.0, 0.0)));
+        }
+
+        assert_eq!(
+            renderer.tops_built, once,
+            "five frames of a still scene built the structure again"
+        );
+
+        // and one thing moving builds it
+        renderer.upload_top(&standing(glam::vec3(0.0, 4.5, 0.0)));
+
+        assert_eq!(
+            renderer.tops_built,
+            once + 1,
+            "an instance moved and nothing was rebuilt"
+        );
+
+        let (t, _) = renderer
+            .met_in_the_world(glam::vec3(0.0, 10.0, 0.0), -glam::Vec3::Y)
+            .expect("the moved cube is not there");
+
+        assert!(
+            (t - 5.0).abs() < 1e-4,
+            "the cube moved to 4.5 has its top at {}",
+            10.0 - t
+        );
+    }
+
+    /// Spec 0107: a mesh that is a box traces the same hits as that box did,
+    /// which is the old path's own answer held against the new one.
+    #[test]
+    fn a_box_mesh_traces_like_the_box() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(16, 16)) else {
+            return;
+        };
+
+        let cube = renderer.add_mesh(&MeshData::cube());
+        let at = glam::vec3(1.5, 0.75, -2.0);
+        let size = glam::vec3(3.0, 1.5, 4.0);
+        let mut scene = Scene::new();
+
+        scene.push(
+            cube,
+            &crate::mesh::Transform {
+                position: at,
+                rotation: glam::Quat::IDENTITY,
+                scale: size,
+            },
+        );
+        renderer.upload_top(&scene);
+
+        // the box spec 0098 would have been handed for the same thing
+        let boxy = Aabb::from_center_size(at, size);
+        let mut hits = 0;
+
+        for n in 0..200 {
+            let a = n as f32 * 0.41;
+            let from = at
+                + glam::vec3(a.sin(), (a * 0.7).cos() * 0.5 + 0.4, (a * 1.3).cos()).normalize()
+                    * 12.0;
+            let way = (at + glam::vec3((a * 2.1).sin(), (a * 1.1).sin(), (a * 0.3).cos()) * 0.6
+                - from)
+                .normalize();
+            let ray = crate::collision::Ray::new(from, way);
+            let theirs = ray.hit_aabb(&boxy);
+            let ours = renderer.met_in_the_world(from, way);
+
+            match (theirs, ours) {
+                (Some(theirs), Some((t, normal))) => {
+                    hits += 1;
+
+                    assert!(
+                        (t - theirs.distance).abs() < 1e-3,
+                        "ray {} meets the mesh at {} and the box at {}",
+                        n,
+                        t,
+                        theirs.distance
+                    );
+                    assert!(
+                        normal.dot(theirs.normal) > 0.99,
+                        "ray {} meets a face facing {:?} and the box's {:?}",
+                        n,
+                        normal,
+                        theirs.normal
+                    );
+                }
+                (None, None) => {}
+                (theirs, ours) => panic!(
+                    "ray {} from {:?} along {:?}: the box says {:?} and the mesh says {:?}",
+                    n, from, way, theirs, ours
+                ),
+            }
+        }
+
+        assert!(
+            hits > 100,
+            "only {} of 200 rays hit, which proves little",
+            hits
+        );
+    }
+
+    /// Spec 0107: a ray against a turned instance hits where the drawn
+    /// triangle is, which is the thing instance space is for.
+    ///
+    /// **Held against the triangles the vertex stage would put in the
+    /// world**, rather than against a second account of where the mesh
+    /// ought to be. That is the whole fault this spec is written against,
+    /// so the oracle here is the mesh's own vertices through the instance's
+    /// own matrix and nothing else.
+    #[test]
+    fn a_turned_instance_is_hit_where_it_is_drawn() {
+        let Some(mut renderer) = pollster::block_on(Renderer::offscreen(16, 16)) else {
+            return;
+        };
+
+        let data = MeshData::cube();
+        let cube = renderer.add_mesh(&data);
+        let mut scene = Scene::new();
+        let standing = [
+            crate::mesh::Transform {
+                position: glam::vec3(2.0, 1.0, -3.0),
+                rotation: glam::Quat::from_rotation_y(0.7),
+                scale: glam::vec3(1.0, 2.5, 1.0),
+            },
+            crate::mesh::Transform {
+                position: glam::vec3(-4.0, 0.5, 1.0),
+                rotation: glam::Quat::from_euler(glam::EulerRot::YXZ, 1.9, 0.4, -0.3),
+                scale: glam::Vec3::splat(1.6),
+            },
+        ];
+
+        for one in &standing {
+            scene.push(cube, one);
+        }
+
+        renderer.upload_top(&scene);
+
+        // where the vertex stage would put every triangle of them
+        let mut drawn: Vec<(glam::Vec3, glam::Vec3, glam::Vec3)> = Vec::new();
+
+        for one in &standing {
+            let model = one.matrix();
+
+            for face in data.indices.chunks_exact(3) {
+                let corner = |n: usize| {
+                    model.transform_point3(glam::Vec3::from(
+                        data.vertices[face[n] as usize].position,
+                    ))
+                };
+
+                drawn.push((corner(0), corner(1), corner(2)));
+            }
+        }
+
+        let mut hits = 0;
+
+        for n in 0..300 {
+            let a = n as f32 * 0.29;
+            let from = glam::vec3(
+                a.sin() * 9.0,
+                (a * 0.6).cos() * 5.0 + 1.0,
+                (a * 1.4).cos() * 9.0,
+            );
+            let aim = standing[n % standing.len()].position
+                + glam::vec3((a * 2.3).sin(), (a * 0.9).cos(), (a * 1.7).sin()) * 0.5;
+            let way = (aim - from).normalize();
+
+            // the nearest of the triangles as they are drawn
+            let theirs = drawn
+                .iter()
+                .filter_map(|(x, y, z)| met_a_triangle(*x, *y, *z, from, way))
+                .filter(|(t, _)| *t >= 0.0)
+                .min_by(|(one, _), (two, _)| one.total_cmp(two));
+            let ours = renderer.met_in_the_world(from, way);
+
+            match (theirs, ours) {
+                (Some((t, normal)), Some((ours, faces))) => {
+                    hits += 1;
+
+                    assert!(
+                        (t - ours).abs() < 1e-3,
+                        "ray {} meets a drawn triangle at {} and the structure says {}",
+                        n,
+                        t,
+                        ours
+                    );
+                    assert!(
+                        faces.dot(normal).abs() > 0.99,
+                        "ray {} meets a face facing {:?} and the drawn one faces {:?}",
+                        n,
+                        faces,
+                        normal
+                    );
+                }
+                (None, None) => {}
+                (theirs, ours) => panic!(
+                    "ray {} from {:?} along {:?}: drawn {:?}, structure {:?}",
+                    n, from, way, theirs, ours
+                ),
+            }
+        }
+
+        assert!(
+            hits > 150,
+            "only {} of 300 rays hit, which proves little",
+            hits
+        );
     }
 
     /// Spec 0094 and spec 0095. Two mirrors facing each other, with the eye
