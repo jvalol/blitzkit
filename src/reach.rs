@@ -46,7 +46,22 @@ pub const STEP: f32 = 0.25;
 /// bounded to where you already expect to get to cannot find the place you
 /// did not expect. Ninety six megabytes for a second is the cheaper side of
 /// that trade.
-pub const MOST: usize = 32_000_000;
+///
+/// **And forty million on 2026-11-17, for the same reason again.** The
+/// arcade's spec 0114 put a wing on the south of its building, which took
+/// the fill's box from 194 by 13 by 187 to 194 by 13 by 197 and from 30.8
+/// million cells to 32.4: a five per cent room over a cap it was already
+/// within four per cent of. The engine refused and the game's own tests
+/// caught it the same way they did last time, by asserting the fill had
+/// reached something before asking where.
+///
+/// The cap is still a cap and it is still worth having. What is worth
+/// saying with it is that most of those cells are air: a box round a
+/// building with a trail running out of it is mostly the ground between
+/// them, and the real answer when this is hit again is a fill over several
+/// boxes rather than one round the lot. That is an engine change nobody has
+/// needed yet.
+pub const MOST: usize = 40_000_000;
 
 /// The body a fill is for.
 #[derive(Clone, Copy, Debug)]
