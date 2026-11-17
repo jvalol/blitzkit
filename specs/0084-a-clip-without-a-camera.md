@@ -308,6 +308,58 @@ yes to everything.
 could not tell apart stops existing: a refilmed clip that has not changed is
 not written, so git has nothing to show.
 
+**The render drifts by one pixel and the clip drifts by much more**, which
+the entry above had wrong on its first writing. x264 carries a changed pixel
+forward through its prediction, so a render differing in three of 420 frames
+by one pixel comes back as a decoded clip differing in 46 of 212 frames,
+worst 0.58 per cent of a frame. The gate compares clips, so what it sees is
+the amplified figure and not the one the render made. 2026-11-09's entry
+recorded that same 46 of 212, which is how far back this goes.
+
+What follows from that is that the gate keeps fourteen of the sixteen clips
+and not all of them. menger is over the tolerance whenever the tie has
+flipped since the committed clip was filmed, and `load` and capriccio are
+over it every time, from the text fault below.
+
+### Filming flat, built and backed out
+
+One sample a pixel fixes the tie by having no tie to lose, so it was built:
+`Renderer::offscreen_flat`, taken by the film path only, with pictures left
+on four samples so that no reference this engine or its games holds would
+move. It worked on what it was for. Three films of menger came back
+byte-identical, 420 frames, one stream.
+
+**Jake looked at the two clips side by side and the four sample one lands
+better.** So it is out.
+
+He had been shown a still crop first and could not tell those apart, which is
+not the same thing and is why the clips were sent after: what one sample
+costs is edge crawl on a turning solid, and a frame cannot show that. What he
+judged was the clips. Whether the still was simply too small a sample of the
+difference, at 1143 of its 24000 pixels, or whether a still understates this
+artefact in general, is not something one comparison can say.
+
+The cost had already shown up as two numbers before he said so. The flat clip
+reads 212 of 212 frames differing against the committed one, worst 0.0148,
+where the drift it was meant to cure reads 46 frames at 0.0058; and it is
+580 KB against 505 KB, because hard edges are dearer for x264 to carry than
+soft ones.
+
+**And it would not have fixed the two that churn most.** `load` differs in
+all 420 frames across three streams at one sample, and capriccio in all 240
+across two. Those are the glyph fault and multisampling was never theirs.
+
+### The glyph fault, with a sharper handle
+
+capriccio's text drift is there in frame 0. menger's first three frames
+always agreed, which is what made its fault look like something that
+accumulates; this one does not accumulate at all. Two processes drawing the
+same first frame of text disagree, so what varies is seeded per process
+rather than built up over a run, and 2026-11-13 already ruled out the
+obvious candidate in `glyph_brush`'s section hasher.
+
+That is where to start, and it is not small.
+
 ## Acceptance criteria for the gate
 
 - A clip refilmed with menger's own drift is the same clip, a frame that moved by less than a channel is the same clip, and a frame that really moved is not. — `picture::tests::a_refilmed_clip_is_the_same_clip_and_a_changed_one_is_not`
