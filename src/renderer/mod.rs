@@ -1906,7 +1906,11 @@ impl Renderer {
         // built for. The nodes are a different count: a tree over the same
         // number of boxes in different places can need more of them.
         let (nodes, order) = Self::tree_of(data);
-        let out = if nodes.len() as u32 <= put.node_count {
+        // kept before the tree is handed over, for the ranges written below
+        let grew = nodes.len() as u32 > put.node_count;
+        let these_nodes = nodes.len();
+        let these_tris = order.len();
+        let out = if !grew {
             let at = put.first_node as usize;
 
             self.write_tree(at, put.first_tri, put.first_index, nodes, order);
@@ -1941,7 +1945,59 @@ impl Renderer {
             }
         };
 
-        self.upload_pool();
+        // **This mesh's own ranges, rather than the whole pool.**
+        //
+        // `upload_pool` writes every vertex, index, node and triangle in the
+        // building, and this is the one path that runs per frame: capriccio
+        // hands over the pond, the baths' water and the tub every frame, so
+        // the whole pool went onto the card three times a frame to change
+        // three surfaces. On 2026-11-17 that was 2535 of 3471 samples of the
+        // arcade's main thread, which is most of what it was doing.
+        //
+        // The ranges are exactly what was written above: a mesh's vertices
+        // and indices, and its tree where the tree fitted. Every offset is a
+        // whole item and the smallest item is four bytes, so the alignment
+        // `write_buffer` asks for comes out of the layout rather than being
+        // arranged for.
+        //
+        // **A tree that outgrew its place still goes the long way.** It is
+        // appended, so the pools are longer than the buffers know and one of
+        // them may have to be made again. That is `upload_pool`'s job and
+        // the thing it marks `trace_stale` for.
+        if grew {
+            self.upload_pool();
+        } else {
+            let queue = &self.queue;
+
+            write_range(
+                queue,
+                &self.pool_vertices,
+                &self.pooled_vertices,
+                v,
+                data.vertices.len(),
+            );
+            write_range(
+                queue,
+                &self.pool_indices,
+                &self.pooled_indices,
+                i,
+                data.indices.len(),
+            );
+            write_range(
+                queue,
+                &self.pool_nodes,
+                &self.pooled_nodes,
+                put.first_node as usize,
+                these_nodes,
+            );
+            write_range(
+                queue,
+                &self.pool_tris,
+                &self.pooled_tris,
+                put.first_tri as usize,
+                these_tris,
+            );
+        }
 
         out
     }
@@ -5671,6 +5727,29 @@ fn instance_room(have: u64, want: u64, most: u64) -> Option<u64> {
 /// group holds the buffer it was made with, not the field it was read from,
 /// so a pool that grows leaves every bind group naming the old one. Spec
 /// 0107's tracer reads four of these.
+/// Puts one slice of a pool onto its buffer, at the place it sits in the pool.
+///
+/// **Beside `refill` because it is the other half of the same question.**
+/// That one asks whether the buffer still holds the pool and writes the lot;
+/// this one is for when the caller knows what it touched and nothing moved.
+/// A buffer is at least as long as its pool here, since every path that makes
+/// the pool longer goes through `refill` first.
+fn write_range<T: bytemuck::Pod>(
+    queue: &wgpu::Queue,
+    buffer: &wgpu::Buffer,
+    pool: &[T],
+    from: usize,
+    count: usize,
+) {
+    if count == 0 {
+        return;
+    }
+
+    let at = (from * std::mem::size_of::<T>()) as u64;
+
+    queue.write_buffer(buffer, at, bytemuck::cast_slice(&pool[from..from + count]));
+}
+
 fn refill(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
