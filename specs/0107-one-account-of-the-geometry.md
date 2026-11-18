@@ -81,6 +81,23 @@ every single frame, so appending each time grew the pool for as long as the
 game ran. Writing over the range is what a surface that moves and keeps its
 triangle count actually wants, and that is all three of them.
 
+**And what it is written with is its own ranges, not the pool.** The first
+build of this called `upload_pool` at the end of every patch, which puts
+every vertex, index, node and triangle in the building onto the card. That
+is right when a mesh is added, which is rare, and wrong on the one path that
+runs per frame: those three surfaces above meant the whole pool went across
+three times a frame to change three sheets of water. Measured in the arcade
+on 2026-11-17, it was 2535 of 3471 samples of the main thread, and taking it
+out moved the frame's own work from 5.61 ms to 4.31 ms.
+
+A patch writes four ranges, which are exactly what it touched: the mesh's
+vertices, its indices, and its nodes and triangle order where the tree still
+fitted. Every offset is a whole item and the smallest item is four bytes, so
+the alignment `write_buffer` asks for falls out of the layout rather than
+being arranged for. A tree that outgrew its place is appended instead, which
+makes the pools longer than the buffers know, so that case still goes the
+long way and `upload_pool` marks the bind group stale as it always did.
+
 **A structure under each mesh, built when the mesh is.** Over its own
 triangles, in its own space, once. A mesh written over its own range builds
 its hierarchy again, because a hierarchy over triangles that have moved is
@@ -147,14 +164,18 @@ can see that, because a game cannot read back what it pushed.
 - The top level holds every instance the frame draws, and a ray that misses them all misses. — `renderer::tests::the_structure_holds_what_the_frame_draws`
 - The structure is built when an instance moves and left alone when nothing does. — `renderer::tests::it_refits_only_what_moved`
 - A ray against an instance with a turned transform hits where the drawn triangle is, which is the thing instance space is for. — `renderer::tests::a_turned_instance_is_hit_where_it_is_drawn`
-- The caps in Rust and in each shader stay the same number. — `renderer::tests::the_shaders_hold_the_same_caps`
+- The caps in Rust and in each shader stay the same number. — `lighting::tests::the_shaders_hold_the_same_caps`
 
 ### Verified by hand
 
 - **The sphere shows the turning.** capriccio's colonnade reflected as eight
   boxes a column, stepping along a profile the lathe draws as a curve. It is
-  the lathe now. `capriccio::tests::the_glass_room_is_drawn` moved with it,
-  and Jake blessed the new reference on 2026-11-17.
+  the lathe now. capriccio's own `the_glass_room_is_drawn` moved with it,
+  and Jake blessed the new reference on 2026-11-17. Named without its
+  module, because ./check-specs reads any backticked path with tests in it
+  citation and resolves it against this repo's own tests: a spec here
+  cannot cite a test over there, and writing it as though it could
+  reports a dead citation on every run.
 - **And the balustrade**, which was drawn as a string, a handrail and a
   turned baluster to a tread while the ball showed one upright box a tread.
   The blessed picture has the balusters in it.
