@@ -307,7 +307,14 @@ through a roof, and the flash rode in on the sun.
 - An index at or under nought draws a mirror, which shows what is behind the eye, and not a lens. — `renderer::asked::a_lens_with_no_index_is_a_mirror`
 - A lens shows the row behind it, inverted, which is the one thing spec 0092's glass cannot do. — `pictures::tests::a_lens_bends_what_is_behind_it`, which fails on 3.1% of its pixels with the index set to one
 - The box cap in Rust and the cap in the shader are the same number. — `renderer::scene::tests::the_tracer_holds_the_same_cap`
-- A box reaches the GPU as its two corners and a colour, padded the way a storage buffer wants them. — `renderer::scene::tests::a_box_packs_the_way_the_shader_reads_it`
+- A thing to trace reaches the GPU padded the way a storage buffer wants
+  it. — `renderer::scene::tests::an_instance_packs_the_way_the_shader_reads_it`
+
+  **It was a box, and it is an instance.** Spec 0107 took the list of
+  boxes out on 2026-11-17: the tracer reads the meshes the frame draws,
+  so `Traced` and the test that packed it went with it and `Placed`
+  took its place. The claim is the same claim and is why the line is
+  rewritten rather than struck.
 - Every pass of a frame is timed, which the tracer's new slot has to keep true. — `clock::tests::every_pass_of_a_frame_is_timed`
 
 ### What is not held, and should be
