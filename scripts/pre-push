@@ -46,6 +46,24 @@ if [ -x blitzkit/scripts/ship-check ]; then
   fi
 fi
 
+# and whether any string going out is still a draft. ./check-copy with no
+# repo named asks every one of them, which is right here for the reason the
+# check-voice loop below gives at length: the ./build-web further down
+# compiles each game's working tree into the wasm this push serves, so a
+# marker sitting in a game is published by a push of the engine.
+#
+# ship-check above reads this crate's readme and site. A marker in a game's
+# Rust was outside both that and check-voice's .copy-files, and was caught
+# only by ./check-all, which nobody runs before a push.
+if [ -x ./check-copy ]; then
+  if ! ./check-copy; then
+    echo
+    echo "pre-push: stopped by check-copy above."
+    echo "          pushing this repo publishes those repos' browser builds."
+    exit 1
+  fi
+fi
+
 # and whether the copy going out is copy he signed, which is the same
 # question ship-check asks and a stronger form of it: a marker he struck
 # months ago guards nothing written into that page since. See
