@@ -245,9 +245,13 @@ pub fn start(title: &str, game: Box<dyn Game>) {
 /// itself. A count of fixed steps rather than five seconds of a real clock,
 /// which is the whole difference: the same count draws the same frame on any
 /// machine, and a photograph of a window never did.
-#[cfg(not(target_arch = "wasm32"))]
+///
+/// Both were off on wasm, with the native-only code that was their only
+/// caller. A number is the same number in a browser, and a `pub const` is
+/// never warned about for going unused, so the cfg bought nothing and cost
+/// `cargo check --target wasm32-unknown-unknown` over this crate, which
+/// builds its bins too.
 pub const PICTURE_SIZE: (u32, u32) = (1200, 948);
-#[cfg(not(target_arch = "wasm32"))]
 pub const PICTURE_FRAMES: u32 = 300;
 #[cfg(not(target_arch = "wasm32"))]
 const PICTURE_STEP: f32 = 1.0 / 60.0;
