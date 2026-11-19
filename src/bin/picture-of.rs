@@ -42,8 +42,17 @@ fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(blitzkit::LOG))
         .init();
 
-    let said: Vec<String> = std::env::args().skip(1).collect();
-    let plain = plain(&said);
+    let mut said = blitzkit::Said::given();
+
+    let Some(asked) = asked(&mut said) else {
+        eprintln!("--size is written as 1200x948");
+
+        return ExitCode::from(2);
+    };
+
+    // **Every option is read by now**, which is what makes this the
+    // positionals and not a guess at them. See the note at the foot.
+    let plain = said.rest();
 
     let [from, to] = plain.as_slice() else {
         eprintln!(
@@ -54,11 +63,7 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
 
-    let Some((wide, tall)) = size() else {
-        eprintln!("--size is written as 1200x948");
-
-        return ExitCode::from(2);
-    };
+    let (wide, tall) = asked.size;
 
     let mut mesh = match asked_for(from, (wide, tall)) {
         Ok(mesh) => mesh,
@@ -77,7 +82,7 @@ fn main() -> ExitCode {
 
     mesh.fill_missing_normals();
 
-    match drawn(&mesh, (wide, tall), Path::new(to)) {
+    match drawn(&mesh, &asked, Path::new(to)) {
         Ok(()) => {
             println!("{} by {} of {} into {}", wide, tall, from, to);
 
@@ -91,10 +96,29 @@ fn main() -> ExitCode {
     }
 }
 
-/// Which options here are given a value, as `one_argument` reads them.
+/// Everything the command line says, read in one place.
 ///
-/// Written out because nothing can be asked. See the note at the foot.
-const TAKES_A_VALUE: [&str; 3] = ["--size", "--turn", "--pitch"];
+/// One place because [`blitzkit::Said`] hands back what nobody asked for,
+/// and what nobody asked for is only right once everybody has asked. An
+/// option read further down, where `--turn` and `--pitch` used to be read,
+/// would be read after its own word had gone out as a positional.
+struct Asked {
+    size: (u32, u32),
+    turn: f32,
+    pitch: f32,
+}
+
+/// Reads them all, or nothing when `--size` will not parse.
+fn asked(said: &mut blitzkit::Said) -> Option<Asked> {
+    let turn = degrees(said, "--turn", 35.0);
+    let pitch = degrees(said, "--pitch", 20.0);
+
+    Some(Asked {
+        size: size(said)?,
+        turn,
+        pitch,
+    })
+}
 
 /// How many segments round a built-in sphere, for a picture whose short
 /// side is `across` pixels.
@@ -115,32 +139,6 @@ fn round_enough(across: u32) -> u32 {
     let radius = (across as f32 * 0.4).max(1.0);
 
     ((std::f32::consts::PI * radius.sqrt()).ceil() as u32).clamp(32, 512)
-}
-
-/// What was said that is not an option or an option's value.
-///
-/// **A filter on `--` is not enough.** `--turn 125` leaves `125`, which
-/// then counts as a third positional and the whole run prints its usage and
-/// exits. The engine's own reader already knows that `--turn` swallows what
-/// follows it; it just has no way to say so, so this says it again.
-fn plain(said: &[String]) -> Vec<&String> {
-    let mut plain = Vec::new();
-    let mut said = said.iter();
-
-    while let Some(one) = said.next() {
-        if !one.starts_with("--") {
-            plain.push(one);
-
-            continue;
-        }
-
-        // `--name=value` carries its value and eats nothing after it
-        if !one.contains('=') && TAKES_A_VALUE.contains(&one.as_str()) {
-            said.next();
-        }
-    }
-
-    plain
 }
 
 /// The mesh behind a name: one of the engine's own, or a file to read.
@@ -177,7 +175,9 @@ fn asked_for(name: &str, (wide, tall): (u32, u32)) -> Result<MeshData, String> {
 }
 
 /// Draws it and writes it.
-fn drawn(mesh: &MeshData, (wide, tall): (u32, u32), to: &Path) -> Result<(), String> {
+fn drawn(mesh: &MeshData, asked: &Asked, to: &Path) -> Result<(), String> {
+    let (wide, tall) = asked.size;
+
     let Some(mut renderer) = pollster::block_on(Renderer::offscreen(wide, tall)) else {
         return Err("no adapter here, so nothing was drawn".to_string());
     };
@@ -206,7 +206,7 @@ fn drawn(mesh: &MeshData, (wide, tall): (u32, u32), to: &Path) -> Result<(), Str
         64.0,
     );
 
-    let camera = standing(middle, radius, (wide, tall));
+    let camera = standing(middle, radius, asked);
 
     // **Lit off the camera rather than off the world**, because this is
     // handed one object at a time with no say in which way it was modelled,
@@ -245,11 +245,12 @@ fn drawn(mesh: &MeshData, (wide, tall): (u32, u32), to: &Path) -> Result<(), Str
 /// 0.1 and 100, which are a room's numbers: a teapot of 0.3 across gets a
 /// far plane of 100 and all its depth in the first thousandth of the
 /// buffer, and anything bigger than a hundred metres is simply cut off.
-fn standing(middle: Vec3, radius: f32, (wide, tall): (u32, u32)) -> Camera {
+fn standing(middle: Vec3, radius: f32, asked: &Asked) -> Camera {
     let mut camera = Camera::new();
 
-    let turn = degrees("--turn", 35.0).to_radians();
-    let pitch = degrees("--pitch", 20.0).to_radians();
+    let (wide, tall) = asked.size;
+    let turn = asked.turn.to_radians();
+    let pitch = asked.pitch.to_radians();
 
     // the vertical field is the one that is fixed, so a frame wider than it
     // is tall holds this and a frame taller than it is wide has to back off
@@ -270,8 +271,8 @@ fn standing(middle: Vec3, radius: f32, (wide, tall): (u32, u32)) -> Camera {
 }
 
 /// `--size 1200x948`, or the engine's own picture size.
-fn size() -> Option<(u32, u32)> {
-    let Some(said) = blitzkit::one_argument("--size") else {
+fn size(said: &mut blitzkit::Said) -> Option<(u32, u32)> {
+    let Some(said) = said.one("--size") else {
         return Some(blitzkit::PICTURE_SIZE);
     };
 
@@ -288,8 +289,8 @@ fn size() -> Option<(u32, u32)> {
 /// A number that will not parse is the default rather than a refusal,
 /// because the engine's own reader already warns on `--turn --pitch` and
 /// there is nothing here worth a second account of it.
-fn degrees(name: &str, by_default: f32) -> f32 {
-    blitzkit::one_argument(name)
+fn degrees(said: &mut blitzkit::Said, name: &str, by_default: f32) -> f32 {
+    said.one(name)
         .and_then(|said| said.trim().parse().ok())
         .unwrap_or(by_default)
 }
@@ -304,19 +305,22 @@ fn degrees(name: &str, by_default: f32) -> f32 {
 // camera's viewport off the surface config, so the aspect is right without
 // being asked for.
 //
-// **The command line cannot be shared.** This is the one that bit.
+// **The command line could not be shared, and now it can.**
 // `one_argument` reads `std::env::args` itself and returns only the value,
-// so a caller is never told which tokens were taken. Anything that wants a
-// positional argument of its own has to know, separately, which options
-// swallow what follows them: `picture-of sphere out.png --turn 125` read
-// `125` as a third positional and printed its usage, and `TAKES_A_VALUE`
-// above exists because of it. That list is a second account of what
-// `one_of` already knows, which is the fault this project writes down as
-// two lists of one thing. `one_of` was private and is public since
-// 2026-11-19, and that did not fix it: it answers for one name and still
-// says nothing about what it took, so this list stands. The fix is the
-// other half, an engine that hands back what it did not consume, and that
-// is not written.
+// so a caller is never told which tokens were taken. Anything that wanted a
+// positional of its own had to know, separately, which options swallow what
+// follows them: `picture-of sphere out.png --turn 125` read `125` as a
+// third positional and printed its usage, and a `TAKES_A_VALUE` list stood
+// here for a day because of it. That list was a second account of what the
+// engine's own reader already knew, which is the fault this project writes
+// down as two lists of one thing.
+//
+// Making `one_of` public did not fix it, which is the part worth keeping:
+// it answers for one name and still says nothing about what it took. What
+// fixed it is `blitzkit::Said` and spec 0108, where each question takes its
+// answer out of the list it holds, so what is left over is the positionals
+// and there is no list for a caller to write. The cost is an ordering, and
+// `asked` is where it is paid: every option is read before `rest` is.
 //
 // **`Camera::new`'s near and far are a room's numbers.** 0.1 and 100 are
 // the arcade's scale. Anything handed a model it has not seen has to

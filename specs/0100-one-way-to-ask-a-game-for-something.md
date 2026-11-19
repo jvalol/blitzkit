@@ -35,7 +35,8 @@ inherit the rule that a flag is not a value. It answers for one name and says
 nothing about what it consumed, so a caller that also wants the arguments
 which are not options still needs its own account of which names swallow the
 word after them. Handing back what was left is a different function and is
-not written.
+spec 0108, written the same day once making this public had been tried and
+had not been enough.
 
 **`--help` and `-h` print the options and stop**, before the window opens, in
 the same place `--film-size` already answers and returns. What it prints is the

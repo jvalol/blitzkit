@@ -344,60 +344,138 @@ pub fn one_argument(_name: &str) -> Option<String> {
 /// The reading itself, over whatever was said rather than over the real
 /// command line, so a test can hand it one.
 ///
-/// **Public, so anything holding a list of its own reads it the same way.**
-/// [`one_argument`] is this over `std::env::args`, which is the only source
-/// a native binary has and is no source at all in a browser. Options that
-/// arrive some other way, from a query string, a file, or a test, had
-/// nothing to parse them with and no way to inherit the rule below about a
-/// flag not being a value.
-///
-/// It was private and off on wasm, because its only caller there was
-/// [`one_argument`], which is a stub in a browser, and every browser build
-/// warned this was never used. A public function is never unused, so the
-/// cfg goes with the privacy.
-///
-/// **What it still does not say is what it consumed.** It answers for one
-/// name and nothing else, so a caller that also wants the arguments which
-/// are not options has to know on its own which names swallow the word
-/// after them. `picture-of` carries that list. Giving a caller back what
-/// was left is a different function from this one.
+/// One question over a list nobody keeps. [`Said`] is the same reading when
+/// the answers have to be taken out of the list as they are given, and this
+/// is one of its questions asked once.
 pub fn one_of(said: impl Iterator<Item = String>, name: &str) -> Option<String> {
-    let mut said = said;
-    let joined = format!("{}=", name);
+    Said::new(said).one(name)
+}
 
-    while let Some(arg) = said.next() {
-        if let Some(value) = arg.strip_prefix(&joined) {
-            return Some(value.to_string());
-        }
-        if arg == name {
-            return match said.next() {
-                // **A flag is not a value.** This took whatever came next,
-                // so one option could swallow the next one: in
-                // `--record --where /tmp/jake.play` the recording went to
-                // a file literally called `--where`, the path after it was
-                // never used, and `asked_for("--where")` still found the
-                // flag in the arguments, so the readout came up and
-                // nothing looked wrong. Jake lost a recording that way
-                // on 2026-11-18, and the only sign of it was a file named
-                // after an option sitting in capriccio's root.
-                //
-                // Refused rather than taken, because a value that looks
-                // like an option is a mistake every time at this size: the
-                // things handed to these are paths, numbers and names.
-                // Anything that really does begin with two dashes can be
-                // given as `--name=--value`, which is read above and is
-                // not touched by this.
+/// What was said, with each answer taken out of it as it is given.
+///
+/// **What [`one_of`] cannot say is what it read.** It answers for one name
+/// and nothing else, so a caller that also wants the words which are not
+/// options has to keep its own list of which names swallow the word after
+/// them. `picture-of` kept one, and `picture-of sphere out.png --turn 125`
+/// printed its usage rather than a picture, because with that list not yet
+/// written `125` was a third positional. Two accounts of one thing, which is
+/// the fault this project makes most often.
+///
+/// Here the asking is the account. Each question takes its answer out of the
+/// list this holds, so [`Said::rest`] is what nobody asked for and there is
+/// nothing for a caller to write down. The cost is that the questions come
+/// first: an option read after `rest` is read is a word that has already
+/// gone out as a positional.
+///
+/// **An option nobody asked about is still in `rest`.** Spec 0100 left
+/// refusing an unknown argument out of scope, and this is the thing that
+/// would be built on: a caller that knows all of its own options knows that
+/// anything beginning with two dashes still in the leftovers is a typo.
+/// Nothing here does that yet.
+#[derive(Debug)]
+pub struct Said(Vec<String>);
+
+impl Said {
+    /// Over a list the caller holds, verbatim.
+    ///
+    /// Nothing is skipped, so a caller handing this `std::env::args()` gets
+    /// the program's own name back out of [`Said::rest`]. [`Said::given`] is
+    /// the one that drops it.
+    pub fn new(said: impl Iterator<Item = String>) -> Self {
+        Said(said.collect())
+    }
+
+    /// Over the real command line, without the program's own name.
+    ///
+    /// Empty in a browser, where there is no command line, the same answer
+    /// [`one_argument`] gives there.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn given() -> Self {
+        Said::new(std::env::args().skip(1))
+    }
+
+    /// Over the real command line, which a browser has not got.
+    #[cfg(target_arch = "wasm32")]
+    pub fn given() -> Self {
+        Said(Vec::new())
+    }
+
+    /// `--name value` or `--name=value`, whichever was written, taken out.
+    ///
+    /// The first `--name` answers and only that one is taken, so a name
+    /// given twice leaves the second where it is and it comes back out of
+    /// [`Said::rest`]. That is the same answer [`one_of`] has always given,
+    /// and a repeated option is a typo this is in no position to judge.
+    pub fn one(&mut self, name: &str) -> Option<String> {
+        let joined = format!("{}=", name);
+
+        for at in 0..self.0.len() {
+            if let Some(value) = self.0[at].strip_prefix(&joined) {
+                let value = value.to_string();
+                self.0.remove(at);
+
+                return Some(value);
+            }
+
+            if self.0[at] != name {
+                continue;
+            }
+
+            // **A flag is not a value.** This took whatever came next, so
+            // one option could swallow the next one: in
+            // `--record --where /tmp/jake.play` the recording went to a
+            // file literally called `--where`, the path after it was never
+            // used, and `asked_for("--where")` still found the flag in the
+            // arguments, so the readout came up and nothing looked wrong.
+            // Jake lost a recording that way on 2026-11-18, and the only
+            // sign of it was a file named after an option sitting in
+            // capriccio's root.
+            //
+            // Refused rather than taken, because a value that looks like an
+            // option is a mistake every time at this size: the things handed
+            // to these are paths, numbers and names. Anything that really
+            // does begin with two dashes can be given as `--name=--value`,
+            // which is read above and is not touched by this.
+            //
+            // The name goes whatever happens, since it was asked for and
+            // answered. A refused value stays, so the option it was meant
+            // to be is still there for its own question to find.
+            let answer = match self.0.get(at + 1) {
                 Some(value) if value.starts_with("--") => {
                     log::warn!("{} wants a value and was handed {}", name, value);
 
                     None
                 }
-                value => value,
+                value => value.cloned(),
             };
+
+            self.0
+                .drain(at..=if answer.is_some() { at + 1 } else { at });
+
+            return answer;
+        }
+
+        None
+    }
+
+    /// Whether a flag carrying nothing was given, taken out.
+    ///
+    /// The first one is taken, for the reason [`Said::one`] gives.
+    pub fn flag(&mut self, name: &str) -> bool {
+        match self.0.iter().position(|said| said == name) {
+            Some(at) => {
+                self.0.remove(at);
+
+                true
+            }
+            None => false,
         }
     }
 
-    None
+    /// What nobody asked for, in the order it was said.
+    pub fn rest(self) -> Vec<String> {
+        self.0
+    }
 }
 
 /// Whether a flag carrying nothing was given.
@@ -1400,6 +1478,100 @@ mod tests {
         assert!(!has(&["game"], "--help"));
         // and a flag is a whole word, not a prefix of one
         assert!(!has(&["game", "--help-me"], "--help"));
+    }
+
+    /// Spec 0108: asking takes the question out of what is left.
+    ///
+    /// **The whole of it.** `picture-of sphere out.png --turn 125` is the
+    /// run that prompted this: its two positionals and one option, where
+    /// the option's value had to be told apart from a third positional by
+    /// a list the tool kept of its own.
+    #[test]
+    fn asking_takes_the_question_out_of_what_is_left() {
+        let mut held = Said::new(said(&["sphere", "out.png", "--film-to", "125"]));
+
+        assert_eq!(held.one("--film-to"), Some(String::from("125")));
+        assert_eq!(held.rest(), ["sphere", "out.png"]);
+
+        // the joined form carries its value and takes nothing after it
+        let mut held = Said::new(said(&["sphere", "--film-to=125", "out.png"]));
+
+        assert_eq!(held.one("--film-to"), Some(String::from("125")));
+        assert_eq!(held.rest(), ["sphere", "out.png"]);
+
+        // and a flag goes the same way
+        let mut held = Said::new(said(&["sphere", "--help", "out.png"]));
+
+        assert!(held.flag("--help"));
+        assert!(!held.flag("--help"));
+        assert_eq!(held.rest(), ["sphere", "out.png"]);
+    }
+
+    /// Spec 0108: a refused value is left for its own question to find.
+    ///
+    /// The other half of `an_option_does_not_swallow_the_next_one`. That
+    /// one holds that the value is refused; this holds that refusing it
+    /// puts the option back in reach, so `--record --film-to /tmp/play`
+    /// still films where it was told to.
+    #[test]
+    fn a_refused_value_is_left_where_it_was() {
+        let mut held = Said::new(said(&["--record", "--film-to", "/tmp/play"]));
+
+        assert_eq!(held.one("--record"), None);
+        assert_eq!(held.one("--film-to"), Some(String::from("/tmp/play")));
+        assert!(held.rest().is_empty());
+    }
+
+    /// Spec 0108: what nobody asked for comes back, option or not.
+    #[test]
+    fn what_nobody_asked_for_comes_back() {
+        let mut held = Said::new(said(&["game", "--help", "out.png"]));
+
+        assert_eq!(held.one("--film-to"), None);
+        // the unknown option among them, which is what refusing a typo
+        // would be built on, and the program's own name, which `new` does
+        // not drop and `given` does
+        assert_eq!(held.rest(), ["game", "--help", "out.png"]);
+
+        // an option given twice answers once and leaves the second
+        let mut held = Said::new(said(&["--film-to", "a", "--film-to", "b"]));
+
+        assert_eq!(held.one("--film-to"), Some(String::from("a")));
+        assert_eq!(held.rest(), ["--film-to", "b"]);
+    }
+
+    /// Spec 0108: `one_of` is this asked once.
+    ///
+    /// **So the rule cannot be written twice.** `one_of` was the whole
+    /// parser and is four lines over this one now. If it ever answers
+    /// differently, one of the two has grown its own account of what a
+    /// value is.
+    #[test]
+    fn one_of_is_this_asked_once() {
+        let each = [
+            (vec!["game", "--film-to", "/tmp/out"], "--film-to"),
+            (vec!["game", "--film-to=/tmp/out"], "--film-to"),
+            (vec!["game", "--film-to="], "--film-to"),
+            (vec!["game"], "--film-to"),
+            (vec!["game", "--no-film-to", "x"], "--film-to"),
+            (vec!["game", "--film-to"], "--film-to"),
+            (
+                vec!["game", "--record", "--film-to", "/tmp/play"],
+                "--record",
+            ),
+            (vec!["game", "--record=--film-to"], "--record"),
+            (vec!["game", "--at", "-0.5"], "--at"),
+        ];
+
+        for (args, name) in each {
+            assert_eq!(
+                one_of(said(&args), name),
+                Said::new(said(&args)).one(name),
+                "{:?} asked for {}",
+                args,
+                name
+            );
+        }
     }
 
     /// Spec 0100: every flag the engine reads is named in `OPTIONS`.
