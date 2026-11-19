@@ -352,7 +352,30 @@ fn one_of(said: impl Iterator<Item = String>, name: &str) -> Option<String> {
             return Some(value.to_string());
         }
         if arg == name {
-            return said.next();
+            return match said.next() {
+                // **A flag is not a value.** This took whatever came next,
+                // so one option could swallow the next one: in
+                // `--record --where /tmp/jake.play` the recording went to
+                // a file literally called `--where`, the path after it was
+                // never used, and `asked_for("--where")` still found the
+                // flag in the arguments, so the readout came up and
+                // nothing looked wrong. Jake lost a recording that way
+                // on 2026-11-18, and the only sign of it was a file named
+                // after an option sitting in capriccio's root.
+                //
+                // Refused rather than taken, because a value that looks
+                // like an option is a mistake every time at this size: the
+                // things handed to these are paths, numbers and names.
+                // Anything that really does begin with two dashes can be
+                // given as `--name=--value`, which is read above and is
+                // not touched by this.
+                Some(value) if value.starts_with("--") => {
+                    log::warn!("{} wants a value and was handed {}", name, value);
+
+                    None
+                }
+                value => value,
+            };
         }
     }
 
@@ -1317,6 +1340,38 @@ mod tests {
         assert_eq!(one_of(said(&["game", "--film-to"]), "--film-to"), None);
     }
 
+    /// Spec 0100: an option does not swallow the one after it.
+    ///
+    /// **Because one did, and it cost a recording.** `--record --where
+    /// /tmp/jake.play` wrote the play log to a file called `--where`,
+    /// ignored the path, and still raised the readout, `asked_for` finding
+    /// the flag in the arguments whatever `--record` had done with it. The
+    /// only sign was a file named after an option turning up in
+    /// capriccio's root.
+    #[test]
+    fn an_option_does_not_swallow_the_next_one() {
+        // **Written with the engine's own flags**, this test's strings
+        // being read by `the_help_names_every_flag_the_engine_takes`:
+        // naming the game's `--where` here made that one say the engine
+        // takes a flag it has never heard of. What this is about is still
+        // `--record --where`, which is what happened.
+        let both = ["game", "--record", "--film-to", "/tmp/play"];
+
+        assert_eq!(one_of(said(&both), "--record"), None);
+        // and the one it would have eaten is still there to be found
+        assert!(said(&both).any(|one| one == "--film-to"));
+        // a value that really does begin with two dashes goes the other way
+        assert_eq!(
+            one_of(said(&["game", "--record=--film-to"]), "--record"),
+            Some(String::from("--film-to"))
+        );
+        // and one dash is not two: a negative number is a value
+        assert_eq!(
+            one_of(said(&["game", "--at", "-0.5"]), "--at"),
+            Some(String::from("-0.5"))
+        );
+    }
+
     /// Spec 0100: a flag is there or it is not.
     #[test]
     fn a_flag_is_asked_for_or_it_is_not() {
@@ -1348,18 +1403,30 @@ mod tests {
         };
 
         let mut found = Vec::new();
-        let mut rest = running;
 
-        while let Some(at) = rest.find("\"--") {
-            rest = &rest[at + 1..];
+        // **A line at a time, and never a comment.** This read the running
+        // half as one string, so a flag quoted in a note counted as a flag
+        // the engine takes: a comment about `asked_for("--where")` had
+        // this test saying the engine reads a flag that belongs to a game.
+        // What the parser does is in code, and code is what is read.
+        for line in running.lines() {
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
 
-            if let Some(end) = rest.find('"') {
-                let flag = &rest[..end];
+            let mut rest = line;
 
-                // the help's own lines are in this file too, and the list
-                // cannot be asked to name itself
-                if !flag.contains(' ') && !found.contains(&flag) {
-                    found.push(flag);
+            while let Some(at) = rest.find("\"--") {
+                rest = &rest[at + 1..];
+
+                if let Some(end) = rest.find('"') {
+                    let flag = &rest[..end];
+
+                    // the help's own lines are in this file too, and the
+                    // list cannot be asked to name itself
+                    if !flag.contains(' ') && !found.contains(&flag) {
+                        found.push(flag);
+                    }
                 }
             }
         }

@@ -53,6 +53,16 @@ unread. capriccio's own `says.rs` is the same answer to the same question.
 - `--name value` and `--name=value` are read the same. — `tests::an_argument_is_read_either_way`
 - An option nobody gave reads as nothing. — `tests::an_argument_nobody_gave_is_nothing`
 - A flag is there or it is not. — `tests::a_flag_is_asked_for_or_it_is_not`
+- An option does not swallow the one written after it. —
+  `tests::an_option_does_not_swallow_the_next_one`
+
+  **Added 2026-11-18, after it did.** `--record --where /tmp/jake.play` wrote
+  the play log to a file called `--where`, never used the path, and still
+  raised the readout, since `asked_for` finds the flag in the arguments
+  whatever the option before it did with it. The only sign was a file named
+  after an option sitting in capriccio's root. A value beginning with two
+  dashes is refused and warned about; one that really does begin that way is
+  given as `--name=--value`, which this does not touch.
 - Every flag the engine itself reads is named in `OPTIONS`. — `tests::the_help_names_every_flag_the_engine_takes`
 
 ### Verified by hand
