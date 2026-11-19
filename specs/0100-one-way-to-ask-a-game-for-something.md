@@ -27,6 +27,16 @@ parser and they were already written. `one_argument("--name")` takes
 the same question for a flag that carries nothing. On wasm, where there is no
 command line, both answer as though nothing was given.
 
+**And `one_of` is public under them**, which is the same reading over a list
+the caller holds rather than over `std::env::args`. Options do not only
+arrive on a command line: a browser build has a query string, a test has a
+list it wrote, and before this both had to parse them by hand and so did not
+inherit the rule that a flag is not a value. It answers for one name and says
+nothing about what it consumed, so a caller that also wants the arguments
+which are not options still needs its own account of which names swallow the
+word after them. Handing back what was left is a different function and is
+not written.
+
 **`--help` and `-h` print the options and stop**, before the window opens, in
 the same place `--film-size` already answers and returns. What it prints is the
 game's own options first, then the engine's, because the game's are what the

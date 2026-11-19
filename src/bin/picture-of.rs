@@ -312,9 +312,11 @@ fn degrees(name: &str, by_default: f32) -> f32 {
 // `125` as a third positional and printed its usage, and `TAKES_A_VALUE`
 // above exists because of it. That list is a second account of what
 // `one_of` already knows, which is the fault this project writes down as
-// two lists of one thing. `one_of` takes an iterator and is private; the
-// fix is to make it public, or to have the engine hand back what it did
-// not consume.
+// two lists of one thing. `one_of` was private and is public since
+// 2026-11-19, and that did not fix it: it answers for one name and still
+// says nothing about what it took, so this list stands. The fix is the
+// other half, an engine that hands back what it did not consume, and that
+// is not written.
 //
 // **`Camera::new`'s near and far are a room's numbers.** 0.1 and 100 are
 // the arcade's scale. Anything handed a model it has not seen has to

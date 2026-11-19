@@ -344,10 +344,24 @@ pub fn one_argument(_name: &str) -> Option<String> {
 /// The reading itself, over whatever was said rather than over the real
 /// command line, so a test can hand it one.
 ///
-/// Off on wasm with the caller, or every browser build warns that it is
-/// never used.
-#[cfg(not(target_arch = "wasm32"))]
-fn one_of(said: impl Iterator<Item = String>, name: &str) -> Option<String> {
+/// **Public, so anything holding a list of its own reads it the same way.**
+/// [`one_argument`] is this over `std::env::args`, which is the only source
+/// a native binary has and is no source at all in a browser. Options that
+/// arrive some other way, from a query string, a file, or a test, had
+/// nothing to parse them with and no way to inherit the rule below about a
+/// flag not being a value.
+///
+/// It was private and off on wasm, because its only caller there was
+/// [`one_argument`], which is a stub in a browser, and every browser build
+/// warned this was never used. A public function is never unused, so the
+/// cfg goes with the privacy.
+///
+/// **What it still does not say is what it consumed.** It answers for one
+/// name and nothing else, so a caller that also wants the arguments which
+/// are not options has to know on its own which names swallow the word
+/// after them. `picture-of` carries that list. Giving a caller back what
+/// was left is a different function from this one.
+pub fn one_of(said: impl Iterator<Item = String>, name: &str) -> Option<String> {
     let mut said = said;
     let joined = format!("{}=", name);
 
