@@ -78,8 +78,8 @@ pub trait Game {
     /// This game's own options, for `--help` to print above the engine's.
     ///
     /// Nothing, for a game whose only options are the engine's. Spec 0100.
-    fn options(&self) -> &'static str {
-        ""
+    fn options(&self) -> Options {
+        Options::none()
     }
     /// Called at the start of every frame, for anything that needs the
     /// renderer: locking the cursor, or uploading a mesh mid-game.
@@ -198,9 +198,29 @@ pub fn start(title: &str, game: Box<dyn Game>) {
     // them.
     #[cfg(not(target_arch = "wasm32"))]
     if asked_for("--help") || asked_for("-h") {
-        println!("{}\n{}{}", title, game.options(), OPTIONS);
+        let mine = game.options();
+
+        println!("{}\n{}", title, as_help(&[&mine, &OPTIONS]));
 
         return;
+    }
+
+    // **And an option nothing takes stops here rather than opening a
+    // window.** Spec 0109, and the thing the list exists for: a help text
+    // can only say what the options are, where a list can also say what
+    // they are not. `--flim-to /tmp/out` used to open the game, run it,
+    // and write nothing, with no line anywhere saying why.
+    //
+    // Exits rather than returning, because a shell asked for a picture and
+    // did not get one should be able to tell. `start` returns nothing and
+    // a game's `main` has usually already returned by the time this would
+    // reach it, so there is no status to hand back any other way. Nothing
+    // is open yet, which is why this is here and not further down.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(unknown) = unknown_argument(&game.options()) {
+        eprintln!("{}", says::UNKNOWN.replace("{}", &unknown));
+
+        std::process::exit(2);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -476,6 +496,214 @@ impl Said {
     pub fn rest(self) -> Vec<String> {
         self.0
     }
+}
+
+/// One option a game or the engine takes: how it is written, and what it
+/// does.
+///
+/// **The list it belongs to is the only list.** Spec 0100 put every option
+/// behind one parser and left `--help` as a hand-typed paragraph beside it,
+/// held to the parser by a test that read the source for flags and looked
+/// for each in the text. That holds a help text from falling behind and
+/// cannot do the other thing a list is for: nothing could say what is *not*
+/// an option, so a typo did nothing at all and said nothing about it. Spec
+/// 0109.
+pub struct Asked {
+    /// `--record`, with its dashes.
+    pub name: &'static str,
+    /// Another way of writing it, `-h` beside `--help`, or nothing.
+    pub also: &'static str,
+    /// What its value is called where it is printed, `<file>`, or nothing
+    /// when it carries none. `--name value` and `--name=value` are read the
+    /// same, so this says neither.
+    pub takes: &'static str,
+    /// What it does, as one sentence. Wrapped where it is printed, so it
+    /// carries no line breaks of its own.
+    pub says: &'static str,
+}
+
+impl Asked {
+    /// How it is written, `--picture-for <seconds>`.
+    pub fn written(&self) -> String {
+        let mut written = String::from(self.name);
+
+        if !self.also.is_empty() {
+            written.push_str(", ");
+            written.push_str(self.also);
+        }
+        if !self.takes.is_empty() {
+            written.push(' ');
+            written.push_str(self.takes);
+        }
+
+        written
+    }
+
+    /// Whether this is the option written `name`, by either of its names.
+    pub fn is(&self, name: &str) -> bool {
+        self.name == name || (!self.also.is_empty() && self.also == name)
+    }
+}
+
+/// The options one thing takes, with the line that introduces them.
+///
+/// Two fields because the sentence above the list is copy and the list is
+/// not: `says` is written in a game's `says.rs` with everything else
+/// anybody reads, and the shape of the list is code.
+pub struct Options {
+    /// The line above them, or nothing.
+    pub says: &'static str,
+    /// Them.
+    pub each: &'static [Asked],
+}
+
+impl Options {
+    /// None, which is what a game that has no options of its own says.
+    pub const fn none() -> Self {
+        Options {
+            says: "",
+            each: &[],
+        }
+    }
+}
+
+/// How wide `--help` is printed.
+///
+/// Eighty is a terminal and this leaves two, since a line that reaches the
+/// last column wraps itself in some of them and leaves a blank line behind.
+///
+/// Native, with the two below: a browser has no command line to ask for help
+/// on and no stderr to be refused on, and a private thing nothing calls is a
+/// warning on every browser build.
+#[cfg(not(target_arch = "wasm32"))]
+const HELP_WIDE: usize = 78;
+
+/// The help as it is printed: what each option is written as in a column,
+/// then what it does, wrapped under it.
+///
+/// **The column is measured and not typed.** It was spaces inside the copy,
+/// which meant the alignment was Jake's to keep and an option whose name was
+/// longer than the rest would quietly push one line out of true. Here the
+/// widest entry sets it and nothing in the copy says where anything sits.
+///
+/// **And measured over every list at once**, which is why this takes them
+/// all rather than being called once each. A game's options are printed
+/// above the engine's and the two read as one page, so a column each put a
+/// step down the middle of it.
+#[cfg(not(target_arch = "wasm32"))]
+fn as_help(blocks: &[&Options]) -> String {
+    let written: Vec<Vec<String>> = blocks
+        .iter()
+        .map(|one| one.each.iter().map(Asked::written).collect())
+        .collect();
+    let column = written
+        .iter()
+        .flat_map(|block| block.iter())
+        .map(|one| one.chars().count())
+        .max()
+        .unwrap_or(0);
+    let indent = column + 4;
+
+    let mut out = String::new();
+
+    for (options, written) in blocks.iter().zip(&written) {
+        if options.each.is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        if !options.says.is_empty() {
+            out.push_str(options.says);
+            out.push_str("\n\n");
+        }
+
+        for (one, written) in options.each.iter().zip(written) {
+            out.push_str("  ");
+            out.push_str(written);
+            out.push_str(&" ".repeat(indent - 2 - written.chars().count()));
+
+            let mut at = indent;
+
+            for word in one.says.split_whitespace() {
+                let room = word.chars().count();
+
+                if at > indent && at + 1 + room > HELP_WIDE {
+                    out.push('\n');
+                    out.push_str(&" ".repeat(indent));
+                    at = indent;
+                } else if at > indent {
+                    out.push(' ');
+                    at += 1;
+                }
+
+                out.push_str(word);
+                at += room;
+            }
+
+            out.push('\n');
+        }
+    }
+
+    out
+}
+
+/// The first thing given that nothing takes, or nothing.
+///
+/// **It has to know which options carry a value, or it refuses one.**
+/// `--at -0.5` is a time of day and a value beginning with a dash, and a
+/// reading that only looked for a leading dash would call it a typo. So it
+/// walks the arguments rather than filtering them, stepping over the word
+/// after an option that takes one, which is the thing only the table can
+/// say.
+///
+/// A word that is not an option and not a value is left alone. No game here
+/// takes one, and refusing something nobody has ever passed is a way to
+/// break a command nobody thought to try.
+#[cfg(not(target_arch = "wasm32"))]
+fn unknown_argument(of: &Options) -> Option<String> {
+    unknown_of(std::env::args().skip(1), of)
+}
+
+/// The reading itself, over whatever was said, so a test can hand it one.
+#[cfg(not(target_arch = "wasm32"))]
+fn unknown_of(said: impl Iterator<Item = String>, of: &Options) -> Option<String> {
+    let takes = |name: &str| {
+        of.each
+            .iter()
+            .chain(OPTIONS.each.iter())
+            .find(|one| one.is(name))
+            .map(|one| one.takes)
+    };
+
+    let said: Vec<String> = said.collect();
+    let mut at = 0;
+
+    while at < said.len() {
+        let arg = &said[at];
+        let name = arg.split('=').next().unwrap_or(arg);
+
+        match takes(name) {
+            Some(takes) => {
+                // one written `--name=value` carries its own and eats
+                // nothing; one handed a word beginning with two dashes was
+                // handed an option, which spec 0100 refuses rather than
+                // swallows, so it is not stepped over here either
+                if !arg.contains('=')
+                    && !takes.is_empty()
+                    && said.get(at + 1).is_some_and(|next| !next.starts_with("--"))
+                {
+                    at += 1;
+                }
+            }
+            None if arg.starts_with('-') => return Some(arg.clone()),
+            None => {}
+        }
+
+        at += 1;
+    }
+
+    None
 }
 
 /// Whether a flag carrying nothing was given.
@@ -1574,6 +1802,115 @@ mod tests {
         }
     }
 
+    /// Spec 0109: an option nothing takes is found and named.
+    #[test]
+    fn an_option_nothing_takes_is_found() {
+        let none = Options::none();
+        let asked = |args: &[&str]| unknown_of(said(args), &none);
+
+        assert_eq!(
+            asked(&["--flim-to", "/tmp/out"]),
+            Some(String::from("--flim-to"))
+        );
+        assert_eq!(asked(&["--film-to", "/tmp/out"]), None);
+        // the joined form is the same option by another spelling
+        assert_eq!(asked(&["--film-to=/tmp/out"]), None);
+        assert_eq!(
+            asked(&["--flim-to=/tmp/out"]),
+            Some(String::from("--flim-to=/tmp/out"))
+        );
+        // a second name counts as the name
+        assert_eq!(asked(&["-h"]), None);
+        // and one after a good one is still found
+        assert_eq!(
+            asked(&["--film-size", "--nope"]),
+            Some(String::from("--nope"))
+        );
+    }
+
+    /// Spec 0109: a value that begins with a dash is not a typo.
+    ///
+    /// **The reason this needs the list at all.** capriccio is run with
+    /// `--at -0.5` and the engine with `--picture-for -5`, and anything
+    /// that found a typo by looking for a leading dash would refuse both.
+    /// Only the list can say that the word before them swallows them.
+    #[test]
+    fn a_value_beginning_with_a_dash_is_not_a_typo() {
+        let none = Options::none();
+
+        assert_eq!(unknown_of(said(&["--picture-for", "-5"]), &none), None);
+        // and an option taking nothing does not step over the next word
+        assert_eq!(
+            unknown_of(said(&["--film-size", "-5"]), &none),
+            Some(String::from("-5"))
+        );
+        // nor does one handed an option, which spec 0100 refuses rather
+        // than swallows, so what follows is read as itself
+        assert_eq!(
+            unknown_of(said(&["--picture-for", "--nope"]), &none),
+            Some(String::from("--nope"))
+        );
+    }
+
+    /// Spec 0109: a game's own options are taken as well as the engine's.
+    #[test]
+    fn a_games_own_options_are_known_too() {
+        let mine = Options {
+            says: "The arcade takes these of its own:",
+            each: &[Asked {
+                name: "--fly",
+                also: "",
+                takes: "",
+                says: "fly rather than walk",
+            }],
+        };
+
+        assert_eq!(unknown_of(said(&["--fly"]), &mine), None);
+        assert_eq!(
+            unknown_of(said(&["--fly"]), &Options::none()),
+            Some(String::from("--fly"))
+        );
+    }
+
+    /// Spec 0109: the help is a column nobody typed.
+    #[test]
+    fn the_help_is_a_column_nobody_typed() {
+        let printed = as_help(&[&OPTIONS]);
+        let lines: Vec<&str> = printed.lines().collect();
+
+        assert_eq!(lines[0], OPTIONS.says);
+        assert_eq!(lines[1], "");
+
+        // every option's own line starts its saying at one column, and the
+        // widest written form is what sets it
+        let widest = OPTIONS
+            .each
+            .iter()
+            .map(|one| one.written().chars().count())
+            .max()
+            .expect("the engine takes options");
+        let mut seen = 0;
+
+        for (one, line) in OPTIONS.each.iter().zip(&lines[2..]) {
+            let written = one.written();
+
+            assert!(line.starts_with(&format!("  {}", written)), "{}", line);
+            assert!(
+                line[2 + written.len()..]
+                    .starts_with(&" ".repeat(widest - written.chars().count() + 2)),
+                "{} does not reach the column",
+                one.name
+            );
+            seen += 1;
+        }
+
+        assert_eq!(seen, OPTIONS.each.len());
+        // and nothing printed runs past the width
+        for line in &lines {
+            assert!(line.chars().count() <= HELP_WIDE, "{} is too wide", line);
+        }
+    }
+
     /// Spec 0100: every flag the engine reads is named in `OPTIONS`.
     ///
     /// **Because a help text is a second list of the first list.** The
@@ -1612,9 +1949,11 @@ mod tests {
                 if let Some(end) = rest.find('"') {
                     let flag = &rest[..end];
 
-                    // the help's own lines are in this file too, and the
-                    // list cannot be asked to name itself
-                    if !flag.contains(' ') && !found.contains(&flag) {
+                    // `--` itself is not an option, it is the two
+                    // dashes spec 0100 refuses a value for, written as a
+                    // string in the code that refuses it. A paragraph
+                    // contained it and a list cannot.
+                    if flag != "--" && !flag.contains(' ') && !found.contains(&flag) {
                         found.push(flag);
                     }
                 }
@@ -1622,15 +1961,15 @@ mod tests {
         }
 
         assert!(
-            found.len() > 4,
+            found.len() > 3,
             "found only {} flags in this file, so the reading is wrong",
             found.len()
         );
 
         for flag in found {
             assert!(
-                OPTIONS.contains(flag),
-                "the engine reads {} and --help does not name it",
+                OPTIONS.each.iter().any(|one| one.is(flag)),
+                "the engine reads {} and the list does not name it",
                 flag
             );
         }
