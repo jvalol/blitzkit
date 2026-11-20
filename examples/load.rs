@@ -402,6 +402,10 @@ struct Load {
     /// What the renderer counted, and what the GPU said, both asked of it at
     /// the top of the frame rather than worked out here.
     counted: (u32, u32),
+    /// Whether this run is being filmed, so the one measured number on the
+    /// readout can be left off a clip that has to come back the same twice.
+    /// Spec 0084.
+    filming: bool,
     gpu: Option<f32>,
     /// What each pass of the last reported frame took. Spec 0067.
     passes: Vec<(&'static str, f32)>,
@@ -462,6 +466,7 @@ impl Load {
             window: (0.0, 0.0),
             sweeping,
             counted: (0, 0),
+            filming: blitzkit::one_argument("--film-to").is_some(),
             gpu: None,
             passes: Vec::new(),
             ran: false,
@@ -485,28 +490,31 @@ impl Load {
         // all, one that will and has not yet, and a number. The middle one
         // read as the first one until this was split, and the first frames
         // of every run reported a device fault that was not there.
-        // **Whole milliseconds, because this one is measured.** Every other
-        // number here is counted or is nought in a film; this is the card's own
-        // timing, so it differs by a hundredth or two from one run to the next.
-        // That is the whole of why this example's clip came back a different
-        // file every time it was filmed: 255 frames of 300 differing, all of
-        // them in this one line and none anywhere else. Spec 0084.
+        // **Left out of a film, because it is the one number here that is
+        // measured.** Everything else on this readout is counted, or is nought
+        // in a film because there is no wall clock in a run on fixed steps.
+        // This is the card's own timing, so it is a different number every run,
+        // and that is the whole of why this example's clip came back a
+        // different file every time anybody refilmed it: two runs of 300 frames
+        // differ in 255 of them, every differing pixel inside the eight rows
+        // this line occupies and none anywhere else. Spec 0084.
         //
-        // It makes the churn rare rather than impossible. A reading sitting on
-        // a boundary still falls either side of it, and this figure climbs
-        // through several milliseconds as the sweep loads the card up, so it
-        // meets a boundary more than once a run. Leaving the number out of a
-        // film is the only thing that would settle it, and the number is what
-        // this example is for.
-        let whole = |got: Option<f32>| match got {
-            Some(ms) => format!("{:.0} ms", ms),
-            None => String::from("--"),
-        };
-
-        let gpu = match (self.timed, self.costs.has_gpu()) {
-            (true, true) => whole(self.costs.gpu_middle_ms()),
-            (true, false) => String::from("no reading yet"),
-            (false, _) => String::from("this device will not time a frame"),
+        // Rounding it to whole milliseconds was tried first and is not enough.
+        // It settled four runs of 900 frames with no keys, and the clip, which
+        // plays the staging keys and works the card much harder, came back a
+        // different file on the next refresh anyway.
+        //
+        // So a film says what a device with no reading says, which is the `--`
+        // below, and the window keeps the figure. No new words for the voice
+        // gate and the line stays where it is.
+        let gpu = if self.filming {
+            ms(None)
+        } else {
+            match (self.timed, self.costs.has_gpu()) {
+                (true, true) => ms(self.costs.gpu_middle_ms()),
+                (true, false) => String::from("no reading yet"),
+                (false, _) => String::from("this device will not time a frame"),
+            }
         };
 
         vec![

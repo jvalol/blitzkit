@@ -494,39 +494,33 @@ changed nothing. `load`'s differing rows are that same single band at 256 and
 at 1024, so `initial_cache_size` was reverted rather than kept, since a
 megabyte a brush that fixes nothing here is a megabyte a brush.
 
-**Rounded, which was Jake's call of the three.** The three were to leave the
-gpu figure out of a film, to round it until it stops moving, or to let the
-clip be refilmed every time. The figure now prints as whole milliseconds.
+**Rounded first, and rounding is not enough.** Of the three, Jake took
+rounding, so the figure printed as whole milliseconds. Four runs of 900 frames
+with no keys came back one stream and no frame differing, and the clip came
+back a different file on the very next refresh, because the clip plays the
+staging keys and those work the card much harder. Filmed the way the refresh
+films it, with `load`'s own keys compiled from its row in the table: 327 frames
+of 900 differ, the first at 410, which is just after the keys start adding
+cubes, and every differing pixel still inside this one line.
 
-| | |
+**A test with no keys is a test of something easier**, which is the same
+mistake as the three frame films above and was made the same day. The clip has
+a tour; so must anything measuring the clip.
+
+**So it is left out of a film.** Jake's call once rounding failed. A run being
+filmed says what a device with no reading says, which is the `--` that line
+already prints, so the line keeps its place, the window keeps the figure, and
+no new words go near the voice gate. `blitzkit::one_argument("--film-to")` is
+public, so the example asks once in its own constructor.
+
+| filmed with its own staging keys | |
 | --- | --- |
-| six runs, 300 frames | one stream, no frame disagrees |
-| four runs, 900 frames, the clip's own length | one stream, no frame disagrees |
+| rounded to whole milliseconds | 327 of 900 frames differ |
+| left out | four runs, one stream, no frame differs |
 
-**It is a fix by probability and the comment in `load` says so.** A reading
-sitting on a whole millisecond still falls either side of it, and this figure
-climbs through several as the sweep loads the card up, so a boundary gets met.
-Four runs of 900 frames met none, and this was written expecting it to meet
-one. A quieter or busier machine is a different sample than this one.
-
-**What it is not.** Not the draw order, since `scene::batches` sorts and says
-so. Not an unwritten atlas texel: the sampler is `Linear` over an `R8Unorm`
-texture nothing clears, which made that a fair lead, but
-`glyph_brush_draw_cache` defaults `pad_glyphs` to true and writes a border of
-zeros round every glyph.
-
-**And not the positions**, which is worth saying because it was tested the
-wrong way round first. capriccio's lines are at whole pixels already, so
-rounding `with_screen_position` changed nothing and could not have: eight
-films with it rounded still gave two streams. A scratch example drawing
-nothing but text does drift for lines stepping 16.5 from 25.3 and not for
-.0, all of .3, .0 and .5, or quarters, which reads as a dedup decision near
-the tolerance boundary rather than as anything about fractions.
-
-**What landing this costs.** The atlas comes out differently once it is
-deterministic, 43 rows and 3664 ink against the current 38 and 3657, so the
-clips and stills with text in them change the day it goes in. After that they
-stop changing, which is the point.
+**Which leaves menger alone**, and menger is the multisample tie this spec
+cannot fix without a sample a pixel, which Jake looked at and turned down. Of
+the sixteen, fifteen now come back the clip they already were.
 
 ## Acceptance criteria for the gate
 
