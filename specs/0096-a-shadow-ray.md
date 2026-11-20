@@ -119,11 +119,32 @@ louder fault than a soft edge and easier to miss in a still.
 
 ## Out of scope
 
-**Reflections.** They want the surface at the hit, which this adapter does
-not return. That is its own spec and it starts with building the tables.
+**Reflections.** Out of this spec, and not for the reason first written here.
+What was written was that they want the surface at the hit and this adapter
+does not return it. Measured twice since, in the sections below, and it is
+wrong twice over.
 
-That reason is wrong, and the last section of this spec is where it was
-measured. The hit returns enough to rebuild the surface by hand.
+A hit returns eleven fields, and `barycentrics` with `primitive_index` are the
+surface. One buffer can feed the acceleration structure and be bound beside it
+as storage, so a shader rebuilds the struck point, the interpolated normal, the
+uv and the material out of the geometry already there, exact to the CPU's own
+arithmetic over five rays. The normal matrix is `world_to_object` transposed,
+which a hit hands over, so there is no inversion and no second copy of any
+vertex. What `EXPERIMENTAL_RAY_HIT_VERTEX_RETURN` saves is the lookup, not the
+information.
+
+Nor are reflections the expensive half, which this section also assumed. One
+ray a pixel measures 0.46 ms, 2.8 per cent of a frame, and only the pixels
+showing a mirror cast one. A ray per casting lamp, which is what this spec is
+about, is seven rays on every lit pixel and 19.5 per cent. Shadows are the
+costly use and the weak one.
+
+What keeps reflections out of this spec is work rather than capability: a
+structure over a building whose doors, people, gate and water move, shading
+the hit, and a mirror that looks as right as the one specs 0091 to 0095
+already hang. They are also the only candidate here big enough to pay for a
+path that exists on some adapters and not others, since collapsing five specs
+into one is the deletion this engine asks of a new mechanism.
 
 **Soft shadows and area lights.** One ray, hard edge.
 
