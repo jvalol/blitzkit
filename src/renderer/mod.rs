@@ -458,10 +458,11 @@ impl Renderer {
         // is where thirteen test threads were stuck for thirty-one minutes
         // on 2026-11-19, so halving the enumerations looked like the fix.
         // Measured warm it is worth nothing at all: 26.4s against 26.6s over
-        // the engine's twenty-six picture tests. What costs the thirty
-        // seconds is the first run of a freshly linked binary, whatever this
-        // does. See spec 0062. Kept because one call is simpler than two,
-        // not because it is faster.
+        // the engine's twenty-six picture tests. The minutes were a build
+        // directory holding 2.78 million stale object files, and with it
+        // cleaned those tests take 1.11s however many times this asks. See
+        // spec 0062. Kept because one call is simpler than two, not because
+        // it is faster.
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions::default())
             .await

@@ -189,24 +189,42 @@ so "eighteen threads" and "first run of a new binary" were the same column.
 
 ## What the cost is
 
-**The first run of a freshly linked test binary**, and nothing to do with
-how many threads or how many enumerations. Four relinks, alternating:
+**The directory the binary is linked into.** `target/debug/deps` had reached
+2,783,045 files, nearly all of them orphan `.rcgu.o` objects. Incremental
+rustc writes one per codegen unit and nothing ever collects them, so sixteen
+crates rebuilding over months leave millions behind.
 
-| | freshly linked | warm |
-| --- | --- | --- |
-| 18 threads | 71.38s, 66.46s | 26.38s, 26.59s |
-| 4 threads | 83.87s, 82.65s | 27.99s, 27.70s |
+Measured in an isolated tree: prime it, touch the engine, rebuild one game,
+three rounds at each size.
 
-Forty to fifty-six seconds on this one binary, and in the gate run that
-evening it was 132.62s against a warm 27s. **Every gate run is the cold case
-by definition**: it has just compiled everything. Fourteen test binaries pay
-it, which is where the minutes are, and the cap makes the cold case worse
-rather than better, 66s against 83s.
+| entries in `debug/deps` | rebuild |
+| --- | --- |
+| 4,349 | 1s, 0s, 1s |
+| 1,005,432 | 26s, 8s, 2s |
+| 2,806,515 | 186s, 43s, 20s |
 
-What holds that Metal lock for those seconds on a binary macOS has not seen
-before is not known yet. It is the next thing to look at, and it is not
-something this engine does.
+The project's own tree, interleaved with a fresh one so neither could be
+favoured by drift, settled at 38s against 1s over eight rounds.
 
-**And the gate's time is mostly not tests at all.** That run was 4,186s
-wall, of which the test results add up to 1,156s. The rest is compiling
-sixteen crates four ways each.
+**So these twenty-six tests were never slow.** They take 1.11s on a clean
+tree. The 26.5s warm and the 132.62s in the gate were both this directory.
+
+**And the first-run reading above is the same thing seen from inside.** A
+relink writes a new executable into that directory, which is where the cost
+lives, so "freshly linked" and "linked into three million files" were never
+two separate columns.
+
+Why a crowded directory costs Metal's device enumeration tens of seconds is
+still unknown, and it is no longer worth chasing. The fix sits upstream of it.
+
+**What the gate costs**, same gate, same machine:
+
+| tree | wall |
+| --- | --- |
+| 2.78M files | 4,187s |
+| cleaned, nothing built | 735s |
+| cleaned, built | 182s |
+
+The clean removed 3,225,368 files and took 550s. One gate run leaves 10,726
+entries and a second leaves the same, so the count grows only when something
+compiles. `ls -U target/debug/deps | wc -l` is the thing to watch.
