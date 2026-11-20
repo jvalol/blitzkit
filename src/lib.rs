@@ -205,23 +205,9 @@ pub fn start(title: &str, game: Box<dyn Game>) {
         return;
     }
 
-    // **And an option nothing takes stops here rather than opening a
-    // window.** Spec 0109, and the thing the list exists for: a help text
-    // can only say what the options are, where a list can also say what
-    // they are not. `--flim-to /tmp/out` used to open the game, run it,
-    // and write nothing, with no line anywhere saying why.
-    //
-    // Exits rather than returning, because a shell asked for a picture and
-    // did not get one should be able to tell. `start` returns nothing and
-    // a game's `main` has usually already returned by the time this would
-    // reach it, so there is no status to hand back any other way. Nothing
-    // is open yet, which is why this is here and not further down.
+    // and an option nothing takes stops here rather than opening a window
     #[cfg(not(target_arch = "wasm32"))]
-    if let Some(unknown) = unknown_argument(&game.options()) {
-        eprintln!("{}", says::UNKNOWN.replace("{}", &unknown));
-
-        std::process::exit(2);
-    }
+    refuse_unknown(&game.options());
 
     #[cfg(not(target_arch = "wasm32"))]
     if std::env::args().any(|arg| arg == "--film-size") {
@@ -647,6 +633,37 @@ fn as_help(blocks: &[&Options]) -> String {
 
     out
 }
+
+/// Stops, saying so, if an option was given that nothing here takes.
+///
+/// **Spec 0109, and the thing the list exists for.** A help text can only
+/// say what the options are, where a list can also say what they are not.
+/// `--flim-to /tmp/out` used to open the game, run it, write nothing, and
+/// say nothing anywhere about why.
+///
+/// **Public because a game can answer an option before the engine sees
+/// one.** [`start`] calls this, so a game that does nothing has it anyway;
+/// but capriccio reads `--walk`, `--tour`, `--film` and `--screenshots` in
+/// its own `main` and returns without ever calling `start`, so a typo of
+/// one of those four fell through to a window. A game that answers anything
+/// itself calls this first.
+///
+/// Exits rather than returning, because a shell that asked for a picture
+/// and did not get one should be able to tell. `start` returns nothing and
+/// a game's `main` has usually returned by the time this would reach it, so
+/// there is no status to hand back any other way.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn refuse_unknown(of: &Options) {
+    if let Some(unknown) = unknown_argument(of) {
+        eprintln!("{}", says::UNKNOWN.replace("{}", &unknown));
+
+        std::process::exit(2);
+    }
+}
+
+/// Nothing in a browser, which has no command line to be wrong about.
+#[cfg(target_arch = "wasm32")]
+pub fn refuse_unknown(_of: &Options) {}
 
 /// The first thing given that nothing takes, or nothing.
 ///

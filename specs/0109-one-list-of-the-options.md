@@ -81,13 +81,32 @@ spec it is and that test is in another one.
   where it used to open a window.
 - `capriccio --at -0.5 --screenshots` still runs, so the walk does not refuse
   a negative number.
+- `capriccio --screenshotss` and `capriccio --wal /tmp/route` are refused and
+  exit 2, where both used to fall past the four answers. `--screenshots`
+  still prints its list, and `--walk nonsense` still reaches the walking and
+  not the refusal.
+
+## 2026-11-19: and before a game answers anything of its own
+
+The paragraph that was here said an option read before `start` was out of
+scope, because capriccio answers `--walk`, `--tour`, `--film` and
+`--screenshots` in its own `main` and returns without ever calling `start`.
+That left the four options a person is most likely to mistype as the four
+the refusal could not see: `--screenshotss` printed nothing, fell past every
+one of them, and opened the building.
+
+**`refuse_unknown` is public**, which is the refusal on its own, and `start`
+calls it so a game that does nothing has it anyway. A game that answers
+anything itself calls it first, which capriccio now does as the first line
+of its `main`. Written as one function rather than as advice, because the
+alternative is each game printing its own refusal and that is the second
+list this spec is about.
+
+It exits, so nothing in a test can call it. The reading it does is
+`unknown_of`, which the criteria above cover; that it is reached before the
+four answers is checked by hand below.
 
 ## Out of scope
-
-- **An option read before `start`.** capriccio answers `--screenshots` in its
-  own `main` before the engine sees anything, so a typo of one of those falls
-  through to the window as it always did. Moving them behind the engine is a
-  change to how a game starts and is not this.
 - **A game declaring which of its options take values to `Said`.** The table
   says it and `Said` still learns it by being asked. Wiring the one to the
   other would make every caller of `Said` pass a table, which is a cost on
