@@ -485,8 +485,26 @@ impl Load {
         // all, one that will and has not yet, and a number. The middle one
         // read as the first one until this was split, and the first frames
         // of every run reported a device fault that was not there.
+        // **Whole milliseconds, because this one is measured.** Every other
+        // number here is counted or is nought in a film; this is the card's own
+        // timing, so it differs by a hundredth or two from one run to the next.
+        // That is the whole of why this example's clip came back a different
+        // file every time it was filmed: 255 frames of 300 differing, all of
+        // them in this one line and none anywhere else. Spec 0084.
+        //
+        // It makes the churn rare rather than impossible. A reading sitting on
+        // a boundary still falls either side of it, and this figure climbs
+        // through several milliseconds as the sweep loads the card up, so it
+        // meets a boundary more than once a run. Leaving the number out of a
+        // film is the only thing that would settle it, and the number is what
+        // this example is for.
+        let whole = |got: Option<f32>| match got {
+            Some(ms) => format!("{:.0} ms", ms),
+            None => String::from("--"),
+        };
+
         let gpu = match (self.timed, self.costs.has_gpu()) {
-            (true, true) => ms(self.costs.gpu_middle_ms()),
+            (true, true) => whole(self.costs.gpu_middle_ms()),
             (true, false) => String::from("no reading yet"),
             (false, _) => String::from("this device will not time a frame"),
         };

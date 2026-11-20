@@ -461,10 +461,53 @@ fixed and menger fixed, and two of those three were wrong: menger's first
 three frames always agree, and `load`'s drift needs a run long enough for its
 readout to turn over.
 
-**What is left for `load`.** `keep_in_cache` is a `FxHashSet<SectionHash>`,
-so the retention decision carries the same seeding the gather did. That is
-where to look, and the same CPU harness reaches it: queue changing text over
-many rounds and dump the atlas, with no device in sight.
+### load is not this, and never was
+
+Chased the same day, and it is not a glyph fault at all.
+
+**One band.** Two full runs of 300 frames compared pixel by pixel: 255 frames
+differ, the worst by 133 pixels, which is 0.0117 per cent of a frame, and
+every differing pixel in the run falls in rows 66 to 73 and nowhere else.
+
+**Which line that is.** The long fixed line forces `size` to its floor of 9,
+so the readout's lines sit 10.8 apart from y 12, and rows 66 to 73 are line
+five: `format!("gpu {}", gpu)`. The runs agree until frame 45, which is when
+the first reading resolves; before that the line reads `no reading yet` in
+every run.
+
+**So `load`'s clip is a number measured on the card.** This spec already says
+a film has the GPU's own figure, because it is measured on the GPU rather than
+against a clock. A measured number is a different number every run, so that
+clip cannot come back the same twice while it is on the picture, and nothing
+about glyphs or atlases will change that.
+
+**And it explains 2026-11-13 exactly.** That entry found five lines stable and
+six not, and went looking in the glyph path for what the sixth line could
+possibly do. The sixth line is the gpu line. The entry also says its content
+is constant, which is the single thing in it that was wrong.
+
+**The atlas size was tried and taken back out.** An evicting cache decides
+what it keeps in a set keyed by the same per-process hash, and in the harness
+that is real: with changing text at 256 every process gave a different atlas,
+and at 512 and above out to 3000 rounds they all gave one. In the engine it
+changed nothing. `load`'s differing rows are that same single band at 256 and
+at 1024, so `initial_cache_size` was reverted rather than kept, since a
+megabyte a brush that fixes nothing here is a megabyte a brush.
+
+**Rounded, which was Jake's call of the three.** The three were to leave the
+gpu figure out of a film, to round it until it stops moving, or to let the
+clip be refilmed every time. The figure now prints as whole milliseconds.
+
+| | |
+| --- | --- |
+| six runs, 300 frames | one stream, no frame disagrees |
+| four runs, 900 frames, the clip's own length | one stream, no frame disagrees |
+
+**It is a fix by probability and the comment in `load` says so.** A reading
+sitting on a whole millisecond still falls either side of it, and this figure
+climbs through several as the sweep loads the card up, so a boundary gets met.
+Four runs of 900 frames met none, and this was written expecting it to meet
+one. A quieter or busier machine is a different sample than this one.
 
 **What it is not.** Not the draw order, since `scene::batches` sorts and says
 so. Not an unwritten atlas texel: the sampler is `Linear` over an `R8Unorm`
