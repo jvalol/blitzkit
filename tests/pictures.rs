@@ -32,6 +32,23 @@ const TALL: u32 = blitzkit::picture::SIZE.1;
 /// spec 0027: a game cannot reach a test, and two tolerances would drift.
 use blitzkit::picture::{CHANNEL, SHARE};
 
+/// How many samples a pixel the references in `tests/pictures` were drawn
+/// from.
+///
+/// **Not a setting. A record of what blessed them.** The renderer takes the
+/// best count the device will give, so this number is the machine's and not
+/// this engine's: eight here, four on a device that supports four without
+/// `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`, one on a device that will not
+/// multisample at all. Spec 0062 accepts that a reference is not a promise
+/// about a stranger's GPU, and said for two years that these were drawn at
+/// one sample, which they never were.
+///
+/// The test below is here so that a count which does not match says so in one
+/// line, rather than twenty six pictures failing on edges with nothing saying
+/// why. Spec 0096 is where this was settled, along with what a ray path would
+/// owe these files.
+const SAMPLES: u32 = 8;
+
 /// What the tests draw, and the one place a scene is described.
 struct Shot {
     name: &'static str,
@@ -888,6 +905,30 @@ mod pictures {
         /// which is not this.
         ///
         /// Three quads, because each answers something the others cannot.
+        /// Spec 0096: the references hold for one sample count, and this says
+        /// which rather than leaving it to be inferred from the diffs.
+        ///
+        /// **A control that can fail.** Set `SAMPLES` to seven and this
+        /// fails while every picture still passes, which is the point: it
+        /// catches the configuration rather than the pixels.
+        #[test]
+        fn the_references_were_drawn_at_the_count_this_device_gives() {
+            let Some(renderer) = pollster::block_on(Renderer::offscreen(WIDE, TALL)) else {
+                eprintln!("no adapter here, so nothing was drawn");
+                return;
+            };
+
+            assert_eq!(
+                renderer.samples(),
+                SAMPLES,
+                "the pictures in tests/pictures were drawn from {} samples a pixel and this \
+                 device gives {}, so every one of them will differ along its edges. Nothing is \
+                 wrong with the engine: the references are this machine's, per spec 0062.",
+                SAMPLES,
+                renderer.samples()
+            );
+        }
+
         #[test]
         fn a_quad_wears_its_image_the_right_way_up() {
             let Some(mut renderer) = pollster::block_on(Renderer::offscreen(WIDE, TALL)) else {
