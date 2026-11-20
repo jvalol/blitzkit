@@ -47,9 +47,15 @@ against `tests/pictures/<name>.png`. Small, because the file is committed
 and read by a person: 320 by 240 is enough to see a shadow and a highlight
 and small enough to look at in a diff.
 
-**One sample a pixel and no animation.** Multisampling resolves differently
-on different hardware, and a frame that depends on a clock is a frame that
-depends on when it ran. The scenes stand still.
+**Whatever the device will multisample, and no animation.** This said one
+sample a pixel, and gave the right reason: multisampling resolves differently
+on different hardware. The renderer does not do it. `depth::samples` takes the
+best count the device will give, which is eight on the machine these
+references were blessed on, measured 2026-11-20 by asking an offscreen
+renderer. So a reference here is this machine's twice over, by its driver and
+by its sample count, which the out of scope below already accepts rather than
+fights. A frame that depends on a clock is still a frame that depends on when
+it ran, and the scenes still stand still.
 
 **A comparison with a tolerance, and a picture of the difference.** Two GPUs
 rarely agree to the bit. A test fails when more than a small share of pixels

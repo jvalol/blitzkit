@@ -445,3 +445,48 @@ numbers neither the rays nor the structure is what would stop this. What is
 left is the one that was never a measurement, which is what happens to every
 picture test in this project when a renderer turns a path on by asking the
 adapter.
+
+## 2026-11-20: the picture tests, settled
+
+**Jake: settle it.** The two sections above leave this open and call it the
+half that decides the thing: what happens to every picture test when a
+renderer turns a path on by asking the adapter. They offer two ways, two sets
+of references or forcing the raster path in tests, and pick neither. It is the
+wrong pair, because one of them is already the standing position.
+
+**The references are this machine's, and that was decided years before a
+ray.** Spec 0062's own out of scope says it: a reference blessed here is not a
+promise about a stranger's GPU, and making it one wants a tolerance per driver
+and a worse life. Nothing about a ray query changes that.
+
+**And they are further from portable than either spec said.** Measured today
+by asking the renderer what an offscreen picture is drawn from: eight samples
+a pixel. Spec 0062 says one and spec 0084 says four. Both sentences are
+corrected where they sit. The count comes from `depth::samples`, which takes
+the best the device will give, so it is eight here, four on a device that
+supports four without `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`, and one on a
+device that will not multisample. Every committed reference in this project
+would already fail on all three of those.
+
+**So a ray path owes a re-blessing, not an architecture.** One pass through
+the affected references, looked at before they are committed, which 0062
+requires of any reference anyway. That is the debt every lighting change in
+this engine has carried.
+
+**What it does owe is the fallback staying drawn.** This is the real
+requirement and the sections above only half name it. If the path switches
+itself on by asking the adapter, then on this machine the raster path stops
+being drawn at all, while the raster path is what eighteen browser builds and
+every adapter without ray queries run. A path nothing draws is a path that
+rots, and it would rot silently, with the gate green, which is this project's
+most expensive failure shape.
+
+So the shadowing path has to be askable rather than only adapter-chosen. The
+renderer picks by adapter for a game; a test says which one it wants. The
+picture tests stay on the raster path, which keeps every reference valid and
+keeps the fallback honest, and a ray path gets its own pictures when there is
+one worth looking at.
+
+**Which leaves one new thing to build, and it is small.** A way to say draw
+this the raster way that does not depend on what the adapter offers.
+Everything else in this section is already true today.

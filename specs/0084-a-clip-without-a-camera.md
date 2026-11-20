@@ -325,8 +325,10 @@ over it every time, from the text fault below.
 
 One sample a pixel fixes the tie by having no tie to lose, so it was built:
 `Renderer::offscreen_flat`, taken by the film path only, with pictures left
-on four samples so that no reference this engine or its games holds would
-move. It worked on what it was for. Three films of menger came back
+on whatever the device gives so that no reference this engine or its games
+holds would move. Said four here and it is eight, measured 2026-11-20: the
+count is the best `depth::samples` will give and this adapter offers eight.
+What mattered was that the film path alone changed, and that still holds. It worked on what it was for. Three films of menger came back
 byte-identical, 420 frames, one stream.
 
 **Jake looked at the two clips side by side and the four sample one lands
