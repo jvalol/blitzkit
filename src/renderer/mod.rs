@@ -416,9 +416,16 @@ impl Renderer {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(instance_desc);
         let surface = instance.create_surface(window.clone()).unwrap();
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                compatible_surface: Some(&surface),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
 
         Self::made(
-            instance,
+            adapter,
             Some(surface),
             Some(window),
             size,
@@ -441,14 +448,28 @@ impl Renderer {
     pub async fn offscreen(width: u32, height: u32) -> Option<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
 
-        instance
+        // **Asked for once.** This used to ask here only to learn whether
+        // there was an adapter at all, drop the answer, and leave `made` to
+        // ask again and keep that one. Two enumerations for one renderer,
+        // and the first told nobody anything the second did not.
+        //
+        // **Not a speed-up, and it was put in as one.** Enumerating the
+        // adapters takes a lock Metal holds across the whole process, which
+        // is where thirteen test threads were stuck for thirty-one minutes
+        // on 2026-11-19, so halving the enumerations looked like the fix.
+        // Measured warm it is worth nothing at all: 26.4s against 26.6s over
+        // the engine's twenty-six picture tests. What costs the thirty
+        // seconds is the first run of a freshly linked binary, whatever this
+        // does. See spec 0062. Kept because one call is simpler than two,
+        // not because it is faster.
+        let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions::default())
             .await
             .ok()?;
 
         Some(
             Self::made(
-                instance,
+                adapter,
                 None,
                 None,
                 winit::dpi::PhysicalSize::new(width.max(1), height.max(1)),
@@ -462,22 +483,19 @@ impl Renderer {
         )
     }
 
+    /// **Handed the adapter rather than finding one.** Both ways in know
+    /// already whether there is a device to draw on: a window's renderer
+    /// wants one that suits its surface, and an offscreen one skips its test
+    /// when there is none. Asking a second time here answered neither
+    /// question and cost a full enumeration, which is the expensive part.
     async fn made(
-        instance: wgpu::Instance,
+        adapter: wgpu::Adapter,
         surface: Option<wgpu::Surface<'static>>,
         window: Option<Arc<Window>>,
         size: winit::dpi::PhysicalSize<u32>,
         presenting: Presenting,
         timing: bool,
     ) -> Self {
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                compatible_surface: surface.as_ref(),
-                ..Default::default()
-            })
-            .await
-            .unwrap();
-
         // Spec 0052: a device holds every format to what the WebGPU
         // specification guarantees unless it is asked for the rest, and eight
         // samples on a depth format is past the guarantee. The adapter saying

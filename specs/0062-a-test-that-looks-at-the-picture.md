@@ -147,3 +147,66 @@ to write, and it needs this one first.
 
 **Perceptual comparison.** A share of pixels past a threshold is crude and
 enough. Anything cleverer is a thing to tune rather than a thing to trust.
+
+## 2026-11-19: a wrong answer, and what the cost actually is
+
+Jake said the gates slow the machine down. They do. A full gate had reached
+thirty-one minutes with thirteen test threads sitting idle, and sampling the
+stalled process put all 4,775 samples of every one of those threads in one
+place, which is the whole window rather than a hot spot in it:
+
+```
+Renderer::offscreen → wgpu Instance::request_adapter
+  → wgpu_hal::metal::Instance::enumerate_adapters
+    → MTLCopyAllDevices → MTLDeviceArrayInitialize → __ulock_wait
+```
+
+**Asking what GPUs there are takes a lock Metal holds across the process.**
+Each picture test builds its own renderer, so each one asks. That reading is
+sound and the stalled process held 64 MB, which agrees with it: they were
+blocked before they had allocated anything.
+
+**The fixes that follow from it do not work.** Both were tried and both are
+written down here because the reasoning was good and the answer was wrong.
+
+Fewer enumerations, by having `offscreen` stop asking twice. Fewer threads,
+by capping `RUST_TEST_THREADS` in the gate. Measured over these twenty-six
+tests, each thread count run twice, with Metal's caches warm:
+
+| | 18 threads | 4 threads |
+| --- | --- | --- |
+| asking once | 26.38s, 26.59s | 27.99s, 27.70s |
+| asking twice | 26.61s, 26.66s | 28.40s, 27.96s |
+
+The second enumeration costs nothing. Capping the threads costs 1.4s, the
+wrong way round. The cap was reverted; asking once was kept because one call
+is simpler than two, which is a different argument.
+
+**The first measurement said otherwise and was measured wrong.** It gave
+83.75s against 35.55s and read as the enumeration being half the cost. In
+both halves of it the 18-thread run came first, immediately after a rebuild,
+so "eighteen threads" and "first run of a new binary" were the same column.
+
+## What the cost is
+
+**The first run of a freshly linked test binary**, and nothing to do with
+how many threads or how many enumerations. Four relinks, alternating:
+
+| | freshly linked | warm |
+| --- | --- | --- |
+| 18 threads | 71.38s, 66.46s | 26.38s, 26.59s |
+| 4 threads | 83.87s, 82.65s | 27.99s, 27.70s |
+
+Forty to fifty-six seconds on this one binary, and in the gate run that
+evening it was 132.62s against a warm 27s. **Every gate run is the cold case
+by definition**: it has just compiled everything. Fourteen test binaries pay
+it, which is where the minutes are, and the cap makes the cold case worse
+rather than better, 66s against 83s.
+
+What holds that Metal lock for those seconds on a binary macOS has not seen
+before is not known yet. It is the next thing to look at, and it is not
+something this engine does.
+
+**And the gate's time is mostly not tests at all.** That run was 4,186s
+wall, of which the test results add up to 1,156s. The rest is compiling
+sixteen crates four ways each.
