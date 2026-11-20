@@ -2903,7 +2903,41 @@ impl Renderer {
                     plain_wanted = !sections.is_empty();
                 }
 
-                if let Err(e) = brush.queue(&self.device, &self.queue, sections) {
+                // **Each line offered on its own first, so the atlas is full
+                // before the frame that draws it.** `glyph_brush` gathers the
+                // glyphs it has been queued by walking a map keyed by a hash
+                // of each section, and that hash is seeded per process, so
+                // several sections at once reach the glyph cache in an order
+                // that differs from one run to the next. They are then
+                // deduplicated in that order and land in different slots: the
+                // same text came out as eight different atlases in eight
+                // processes, 38 rows against 43, and the letters' edges moved
+                // by a level or two of grey wherever two runs disagreed. It is
+                // what made capriccio's clip and `load`'s refilm every time.
+                //
+                // One section is one entry, so there is no order to get wrong.
+                // Queueing them singly settles every glyph into the atlas in a
+                // fixed order, and the real queue below then inserts nothing
+                // and cannot be made to differ. Eight processes, one atlas.
+                //
+                // **Every frame, not once at startup.** `load` draws its
+                // counts as they change, so a variant nobody has seen arrives
+                // mid-run and puts the order back in play.
+                //
+                // The knob for this is `section_hasher`, which would say it in
+                // one line. It changes the builder's type and so is not in
+                // `wgpu_text`'s delegating macro, and its `BrushBuilder` keeps
+                // its inner builder private, so the engine cannot reach it.
+                // Spec 0084.
+                if sections.len() > 1 {
+                    for section in &sections {
+                        if let Err(e) = brush.queue(&self.device, &self.queue, [section]) {
+                            log::error!("Failed to warm the text atlas: {}", e);
+                        }
+                    }
+                }
+
+                if let Err(e) = brush.queue(&self.device, &self.queue, &sections) {
                     log::error!("Failed to queue text: {}", e);
                 }
             }

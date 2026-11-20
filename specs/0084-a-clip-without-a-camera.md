@@ -360,6 +360,131 @@ obvious candidate in `glyph_brush`'s section hasher.
 
 That is where to start, and it is not small.
 
+## 2026-11-20: it is the section hasher, and the atlas is where it lands
+
+capriccio, chased down to a cause. 2026-11-13's entry says it is not the
+section hasher. It is, and the measurement that cleared it was read off films
+of menger and load, where menger is the multisample fault and no hasher was
+ever going to move it.
+
+**Two outcomes, not many.** Eight films of the first frame give two distinct
+streams, five to three. Every entry above counted streams over a whole clip,
+where a run that differs anywhere differs at all.
+
+**One band, at the glyphs' edges.** 626 pixels of frame 0 differ, every one
+inside y 25 to 58: the help line. Each is one to five levels on a grey at a
+letter's edge, and both runs read as ordinary antialiasing rather than as
+garbage. Frames 0, 1 and 2 differ in the same pixels by the same amounts, so
+it is settled once per process and does not accumulate.
+
+### Split on the CPU, which is where it turned out to live
+
+`glyph_brush` lays out, rasterises and packs on the CPU and hands a GPU
+nothing but finished rects, so all of this needs no device and runs in
+milliseconds. Eight processes a condition, capriccio's own numbers
+(`SAYS_AT` 20 by 20, `SAYS_LINE` 24, `SAYS_SIZE` 18, the plain face).
+
+**The layout is identical**, bit for bit, in all eight. 152 glyphs, every
+position printed as its float bits. So nothing above the atlas varies.
+
+**The atlas is not.** Eight processes, eight distinct dumps. Pixel coordinates
+agree and the uvs do not: a glyph lands somewhere else in the atlas each run.
+The upload differs in height, 38 rows against 43, and in total ink, 3657
+against 3665, so the set of rasterisations differs too and glyphs are being
+deduplicated differently.
+
+**Which names the cause.** Different dedup means a different insertion order,
+and the order comes from iterating a map keyed by a hash that
+`DefaultSectionHasher` seeds per process.
+
+| section hasher | distinct dumps of eight |
+| --- | --- |
+| the default, `xxhash64::RandomState` | eight |
+| `BuildHasherDefault`, same every process | one |
+
+### Two knobs that are reachable and do not help
+
+Both come through `delegate_glyph_brush_builder_fns!`, so the engine can set
+them today. Neither is the ordering.
+
+| | distinct of eight |
+| --- | --- |
+| `draw_cache_position_tolerance(1.0)` | eight |
+| `cache_glyph_positioning(false)` | eight |
+| both | eight |
+
+The second is the surprising one: the cache it turns off is the map keyed by
+the section hash, and turning it off leaves the drift exactly where it was.
+
+### And the knob that does is not forwarded
+
+`section_hasher` changes the builder's type parameter, so it is not in that
+macro, and `wgpu_text::BrushBuilder` is `#[non_exhaustive]` with a private
+`inner` and no pass-through, in 30.0.0 or 30.0.1. `glyph_brush`'s own docs
+show a wrapper the three lines to add; `wgpu_text` has not. So setting it
+means a fork or an upstream change.
+
+### A fix that needs neither, and what it actually fixes
+
+Queue each section on its own first, then queue them all and draw. One section
+is one entry to iterate and has no order to get wrong, so the warm-up settles
+every glyph into the atlas in a fixed order; the real queue then inserts
+nothing and cannot be made to differ. In the harness that is one dump of
+eight where it was eight of eight.
+
+In the engine, filmed for five seconds and hashed frame by frame, four runs
+each:
+
+| | 300 frames, four runs |
+| --- | --- |
+| capriccio | one stream, no frame differs |
+| `load` | four streams, worst pair differs in 226 frames |
+| menger | two streams, worst pair differs in two frames |
+
+**So capriccio is fixed and `load` is not.** capriccio's help lines are the
+same text every frame, so one warm-up settles every variant for good. `load`
+counts as it runs, so a glyph nobody has seen arrives mid-run, the atlas
+evicts to make room, and what it keeps is held in a set keyed by that same
+per-process hash. Warming cannot help a cache whose contents are still being
+decided.
+
+menger is the control and behaves: it is the multisample tie and no atlas
+change touches it.
+
+**It costs nothing measurable.** Two builds, three films of 300 frames each.
+capriccio 5.30 to 5.50s with the warm-up against 5.26 to 5.80s without,
+`load` 1.66 to 1.67s against 1.62 to 1.87s. The ranges overlap.
+
+**And a three frame film proves nothing**, which is this spec's own lesson
+learned twice more today. Eight short films read as capriccio fixed, `load`
+fixed and menger fixed, and two of those three were wrong: menger's first
+three frames always agree, and `load`'s drift needs a run long enough for its
+readout to turn over.
+
+**What is left for `load`.** `keep_in_cache` is a `FxHashSet<SectionHash>`,
+so the retention decision carries the same seeding the gather did. That is
+where to look, and the same CPU harness reaches it: queue changing text over
+many rounds and dump the atlas, with no device in sight.
+
+**What it is not.** Not the draw order, since `scene::batches` sorts and says
+so. Not an unwritten atlas texel: the sampler is `Linear` over an `R8Unorm`
+texture nothing clears, which made that a fair lead, but
+`glyph_brush_draw_cache` defaults `pad_glyphs` to true and writes a border of
+zeros round every glyph.
+
+**And not the positions**, which is worth saying because it was tested the
+wrong way round first. capriccio's lines are at whole pixels already, so
+rounding `with_screen_position` changed nothing and could not have: eight
+films with it rounded still gave two streams. A scratch example drawing
+nothing but text does drift for lines stepping 16.5 from 25.3 and not for
+.0, all of .3, .0 and .5, or quarters, which reads as a dedup decision near
+the tolerance boundary rather than as anything about fractions.
+
+**What landing this costs.** The atlas comes out differently once it is
+deterministic, 43 rows and 3664 ink against the current 38 and 3657, so the
+clips and stills with text in them change the day it goes in. After that they
+stop changing, which is the point.
+
 ## Acceptance criteria for the gate
 
 - A clip refilmed with menger's own drift is the same clip, a frame that moved by less than a channel is the same clip, and a frame that really moved is not. — `picture::tests::a_refilmed_clip_is_the_same_clip_and_a_changed_one_is_not`
