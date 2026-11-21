@@ -23,8 +23,8 @@ One has three lifts to take a tile out and set it down anywhere. If that's not e
 
 ## capriccio
 
-An arcade with games built on this engine, and thirty three kilometres of
-solar system behind one of its walls.
+An arcade with games built on this engine, and a solar system
+behind one of its walls.
 
 [Walk round it in a browser]({{< relref "capriccio" >}}).
 
@@ -34,13 +34,7 @@ There is a village out in the field, with people living in it.
 
 ![A dirt street of beaten earth between timber cabins, wheel ruts curving away down it, three figures walking off up the middle and a wagon wheel leaning against a wall on the right](https://raw.githubusercontent.com/jvalol/capriccio/main/media/village.png)
 
-![Saturn, its rings open, with Titan a speck nine metres off and a galaxy above them both](https://raw.githubusercontent.com/jvalol/capriccio/main/media/screenshot.png)
-
-![The Earth, nine centimetres of it, coastlines and all, on a lit line running away into stars](https://raw.githubusercontent.com/jvalol/capriccio/main/media/earth.png)
-
-![The Moon, a grey marble alone on a plain of stars](https://raw.githubusercontent.com/jvalol/capriccio/main/media/the-moon.png)
-
-![Jupiter, a metre across, with the sixth astronomical unit marked beside it](https://raw.githubusercontent.com/jvalol/capriccio/main/media/jupiter.png)
+![A lit cabinet playing tessera under its own neon sign, with the aisle and the rest of the row running away behind it](https://raw.githubusercontent.com/jvalol/capriccio/main/media/screenshot.png)
 
 ## pong
 
