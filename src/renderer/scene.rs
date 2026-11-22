@@ -378,6 +378,14 @@ pub struct Scene {
     /// The worst any cap has turned away since this scene was made.
     worst: Turned,
     spoke: usize,
+    /// Where the first lamp refused a shadow this frame stood, so the
+    /// warning can name it. Spec 0111.
+    ///
+    /// Beside `Turned` rather than in it, because `Turned` is compared with
+    /// `==` to decide whether anything was turned away at all, and a float
+    /// in there would take `Eq` off it and make that comparison a different
+    /// question.
+    lost_its_cast: Option<Vec3>,
 }
 
 /// How much of a frame each cap refused.
@@ -464,6 +472,7 @@ impl Scene {
         self.lenses.clear();
         self.backdrop = None;
         self.turned = Turned::default();
+        self.lost_its_cast = None;
         // **Put back whatever the last frame left it as.** Spec 0091: a
         // frame that forgets `and_everywhere` draws its room into mirrors
         // and nowhere else, which is a frame of black walls. Forgetting it
@@ -541,9 +550,12 @@ impl Scene {
         }
         if casting > 0 {
             log::warn!(
-                "a scene asked {} more point lights to cast than the {} it carries",
+                "a scene asked {} more point lights to cast than the {} it carries. {}. They are \
+                 given out in the order they are asked for, so a lamp with none of what it lights \
+                 on screen can take one from the room you are standing in; see spec 0022",
                 casting,
-                MAX_SHADOWING_POINT_LIGHTS
+                MAX_SHADOWING_POINT_LIGHTS,
+                self.what_lost_its_cast()
             );
         }
         if spots > 0 {
@@ -605,10 +617,49 @@ impl Scene {
 
         if light.casts && self.casting_lamps().len() >= MAX_SHADOWING_POINT_LIGHTS {
             self.turned.casting += 1;
+
+            if self.lost_its_cast.is_none() {
+                self.lost_its_cast = Some(light.position);
+            }
+
             light.casts = false;
         }
 
         self.point_lights.push(light);
+    }
+
+    /// Which lamp lost its shadow and which ones have the slots, in a
+    /// sentence the warning can carry.
+    ///
+    /// **A count sends a reader to the wrong room.** capriccio printed
+    /// `asked 1 more point lights to cast than the 2 it carries` under
+    /// every staged picture of its arcade for as long as its trail could be
+    /// finished, and nothing in that line says the lamp holding a slot is a
+    /// hearth a hundred and sixty four metres away in a building you cannot
+    /// see from there. Finding that took a print put into this function's
+    /// own neighbour by hand. The engine knew it the whole time.
+    ///
+    /// Both halves, because which lamp was refused is the smaller half of
+    /// the answer: a lamp loses a slot to another lamp, and the one worth
+    /// naming is the one that has no business holding it.
+    fn what_lost_its_cast(&self) -> String {
+        let lamps = self.point_lights();
+        let held = self
+            .casting_lamps()
+            .iter()
+            .map(|n| lamps[*n].position.to_string())
+            .collect::<Vec<_>>()
+            .join(" and ");
+
+        match self.lost_its_cast {
+            Some(at) => format!(
+                "The first turned away stood at {}, and {} kept theirs",
+                at, held
+            ),
+            // Written in the same breath as the count this is said about,
+            // so reaching here is the compiler's arm rather than a case.
+            None => String::from("Which lamp it was went unrecorded"),
+        }
     }
 
     pub fn point_lights(&self) -> &[PointLight] {
@@ -2649,6 +2700,41 @@ mod tests {
         scene.push_light(lamp(3.0).casting());
 
         assert_eq!(scene.casting_lamps(), vec![1, 3]);
+    }
+
+    /// Spec 0111: the warning names the lamp that lost its shadow and the
+    /// ones that took the slots.
+    #[test]
+    fn a_lamp_that_loses_its_shadow_says_which_ones_took_it() {
+        let mut scene = Scene::new();
+
+        for at in [1.0f32, 2.0, 3.0] {
+            scene.push_light(lamp(at).casting());
+        }
+
+        let said = scene.what_lost_its_cast();
+
+        assert!(
+            said.contains(&lamp(3.0).position.to_string()),
+            "{} does not name the lamp that lost its shadow",
+            said
+        );
+
+        for at in [1.0f32, 2.0] {
+            assert!(
+                said.contains(&lamp(at).position.to_string()),
+                "{} does not name the lamp at {} that kept its slot",
+                said,
+                at
+            );
+        }
+
+        // and the frame ends, because a lamp named for ever is the same
+        // fault as a count that never clears: the next frame's warning
+        // would point at the last frame's room.
+        scene.reset();
+
+        assert_eq!(scene.lost_its_cast, None);
     }
 
     #[test]
