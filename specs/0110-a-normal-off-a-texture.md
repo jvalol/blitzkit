@@ -72,9 +72,44 @@ of those gets it without being told.
 ## What it costs
 
 A texture fetch per fragment on every surface in every game, including the
-ones that bind the flat default. That number is not taken yet. It wants
-measuring on the arcade, which is the only real scene in this project: it
-pushes 7,421 instances a frame in a few hundred batches.
+ones that bind the flat default.
+
+**Nine tenths of one per cent of a frame, and it lands in the mesh pass.**
+Measured 2026-11-22 on the arcade's own staged hall shot, which is 1,202
+draws and 4,329,236 triangles at 1200 by 948 with no bump asked for
+anywhere in it. The engine at `d9afbe4`, where this works, against
+`b05de4d`, the commit before any of it, with one game build between them:
+capriccio at `8bc0fe5`, which predates the village street and so binds the
+flat default on every surface it has. That is the case this paragraph is
+about, a game paying for a feature it does not use.
+
+| | before | after | |
+| --- | --- | --- | --- |
+| the whole GPU frame | 3.0025 ms | 3.0305 ms | +0.028, +0.9% |
+| the mesh pass | 1.5840 ms | 1.6220 ms | +0.038, +2.4% |
+
+Six runs of each, the median of the last 240 frames of each run, and the
+median of the six. The mesh pass is the number to read: its six befores run
+1.5755 to 1.5925 and its six afters 1.5995 to 1.6320, which do not overlap,
+where the frame totals do. Within one run a single frame's mesh pass runs
+from 0.87 to 2.76 ms, so a median over the window is the only reading worth
+taking and one frame says nothing at all.
+
+Three runs were taken with the old engine first and three with the new one
+first, because the first measurement had the new build second in every
+round and a machine that warms up would have produced this result on its
+own. Both orders give the same answer to within a hundredth of a
+millisecond.
+
+What is not explained is that the overlay and lens passes rose by about the
+same absolute amount as the mesh pass, 0.044 and 0.041, and neither runs
+`mesh.wgsl`. The passes also sum to more than the frame they are in, so
+they are not disjoint stretches of the timeline and only the total is a
+frame cost. Worth knowing before anybody reads a column of `--cost` as a
+budget.
+
+So: nothing need be done, and the answers below stay written down for the
+day a scene makes them necessary rather than being tried now.
 
 Spec 0068 refused a second field on every instance in a scene of sixty four
 thousand for a thing a handful use, and the same objection applies here. The
@@ -157,10 +192,6 @@ before somebody reads the near field and expects the far one.
   village references now draw through a real bump map and would move if the
   bend died, which is a guard this repo cannot cite and should not be told
   it has.
-- The measurement. A texture fetch per fragment on every surface in every
-  game is what this costs, and the number is not taken yet. The whole engine
-  suite and capriccio's 1080 tests pass unchanged against it, which says the
-  flat default changes no pixel, and says nothing at all about what it costs.
 
 ## Acceptance criteria
 
@@ -178,7 +209,13 @@ before somebody reads the near field and expects the far one.
   Run capriccio, walk to the village, and watch the grooves as the hour goes
   round: the test of it is that they change. Capriccio's spec 0125 is that
   street.
-- What it costs on the arcade, with `--cost`, against the same frame before.
+- What it costs on the arcade, against the same frame before. Taken
+  2026-11-22 and written into "What it costs" above. Not with `--cost` in
+  the end: that flag puts the readout in the window, and six runs of a
+  number read off six photographs is worse than six runs of a number
+  printed. The readout's own figures come from `Renderer::gpu_passes` and
+  `gpu_seconds`, so a print beside the line that fills the readout reads
+  the same clock.
 
 ## Out of scope
 
