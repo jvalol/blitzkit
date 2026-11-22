@@ -194,6 +194,45 @@ if [ -n "$behind" ]; then
   # project root above it, so `./build-web` is a path that resolves here and
   # nowhere the person reading it is standing. On 2026-11-14 Jake ran exactly
   # what this printed, from the repo, and got "no such file or directory".
+
+  # **Whether those repos are pushed themselves, which is the half of this
+  # the refusal used to leave out.** `./build-web` compiles a game's working
+  # tree, so the commit that carries the bytes here names a commit of that
+  # game's. With the game unpushed that is a commit nobody can fetch, and
+  # what goes on the site is a build of a state no repo has: the message
+  # points at nothing and the bytes cannot be reproduced from anything
+  # public. Jake hit it on 2026-11-21, pushing the engine while the arcade
+  # stood three commits ahead of its own origin, and the only reason it came
+  # out right is that somebody noticed the order.
+  # The same names the rebuild above works from, read again here: that one
+  # only sets them while the engine is level, and with `set -u` on, reusing
+  # it would abort this hook on the one push where the engine itself moved.
+  theirs=$(printf '%s\n' "$behind" | sed 's/^ *//; s/,.*//' | tr '\n' ' ' | sed 's/ *$//')
+
+  # **Through `./list-repos` and not off the name.** The lines above say
+  # "capriccio" and "starry", and the first of those is a directory at the
+  # project root while the second is under `games/`. Read as bare names, every
+  # game silently fell through the `-d` below and the one repo this could ever
+  # warn about was the arcade.
+  unpushed=""
+  for name in $theirs; do
+    where=$(./list-repos 2>/dev/null | grep -E "(^|/)$name\$" | head -1)
+    [ -n "$where" ] && [ -d "$root/$where" ] || continue
+
+    ahead=$(git -C "$root/$where" rev-list --count '@{u}..HEAD' 2>/dev/null) || continue
+    [ "${ahead:-0}" -gt 0 ] 2>/dev/null || continue
+
+    unpushed="$unpushed  (cd $root/$where && git push)    # $ahead unpushed"$'\n'
+  done
+
+  if [ -n "$unpushed" ]; then
+    echo "Those repos are ahead of their own origin, so push them first or the"
+    echo "rebuild names a commit nobody else can fetch:"
+    echo
+    printf '%s' "$unpushed"
+    echo
+  fi
+
   echo "build-web is a directory above this repo, so it wants its path."
   echo "It takes a game's name to do one rather than all eighteen:"
   echo
