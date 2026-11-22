@@ -26,7 +26,21 @@ pub struct TextureId(pub(crate) usize);
 impl TextureId {
     /// The one white pixel every untextured mesh is drawn with.
     pub const WHITE: TextureId = TextureId(0);
+
+    /// And the one flat pixel every unbumped surface has for a bump map, per
+    /// spec 0110. Straight out of the surface, so the shader's arithmetic
+    /// comes back as the vertex normal.
+    pub const FLAT: TextureId = TextureId(1);
 }
+
+/// What a draw call is keyed by: a mesh, the texture on it and the bump map
+/// that bends its normals.
+///
+/// **The bump is part of the key and not part of the instance**, per spec
+/// 0110, for the reason every other texture is: it is bound once for a batch
+/// and not per copy. Two draws of one mesh with different bump maps are two
+/// batches, which is one more draw call and no wrong pixels.
+pub(crate) type Keyed = (MeshId, TextureId, TextureId);
 
 /// One copy of a mesh: where it is, and what color it is drawn in.
 #[repr(C)]
@@ -268,6 +282,9 @@ pub fn backdrop_reach(far: f32) -> f32 {
 pub(crate) struct Batch {
     pub(crate) mesh: MeshId,
     pub(crate) texture: TextureId,
+    /// The bump map on it, per spec 0110. `TextureId::FLAT` for everything
+    /// that does not ask for one, which is almost everything.
+    pub(crate) bump: TextureId,
     pub(crate) first: u32,
     pub(crate) count: u32,
     /// Which of the two instance buffers this run lies in. Spec 0063: a
@@ -295,11 +312,11 @@ pub(crate) enum Where {
 pub struct Scene {
     /// Batched by mesh and texture together, since a draw call can only have
     /// one of each.
-    instances: HashMap<(MeshId, TextureId), Vec<Instance>>,
+    instances: HashMap<Keyed, Vec<Instance>>,
     /// The ones that belong in a reflection and not on the screen, per spec
     /// 0091. Kept apart rather than flagged, because `draw_into` uploads
     /// per pass anyway, so two sets are two uploads and not two scenes.
-    reflected: HashMap<(MeshId, TextureId), Vec<Instance>>,
+    reflected: HashMap<Keyed, Vec<Instance>>,
     /// Which of those two the next push goes in. Spec 0091.
     into_reflections: bool,
     /// The mirrors this frame has. Spec 0091.
@@ -720,7 +737,44 @@ impl Scene {
         let mut instance = Instance::new(transform, color, shininess);
         instance.specular = specular;
 
-        into.entry((mesh, texture)).or_default().push(instance);
+        into.entry((mesh, texture, TextureId::FLAT))
+            .or_default()
+            .push(instance);
+    }
+
+    /// The same again with a bump map on it, per spec 0110.
+    ///
+    /// `bump` is a texture read as a direction in the surface's own frame:
+    /// x and y about a half in red and green, z in blue. What it does is bend
+    /// the normal the fragment shades with, so the shadow offset, the
+    /// specular and spec 0098's tracer all get the bent one without being
+    /// told.
+    ///
+    /// **Its own push rather than a parameter on [`push_surface`].** That one
+    /// is the funnel every other push goes through and sixteen games call it
+    /// and its four neighbours by name; a parameter there would be a
+    /// `TextureId::FLAT` typed out at every one of those call sites for a
+    /// thing a handful of surfaces use.
+    ///
+    /// [`push_surface`]: Scene::push_surface
+    pub fn push_bumped(
+        &mut self,
+        mesh: MeshId,
+        texture: TextureId,
+        bump: TextureId,
+        transform: &Transform,
+        color: Vec4,
+        shininess: f32,
+    ) {
+        let into = if self.into_reflections {
+            &mut self.reflected
+        } else {
+            &mut self.instances
+        };
+
+        into.entry((mesh, texture, bump))
+            .or_default()
+            .push(Instance::new(transform, color, shininess));
     }
 
     /// Draws `mesh` as a thing with light of its own: a lamp's glass, a
@@ -746,7 +800,7 @@ impl Scene {
         let mut instance = Instance::new(transform, color, shininess);
         instance.glow = glow;
 
-        into.entry((mesh, TextureId::WHITE))
+        into.entry((mesh, TextureId::WHITE, TextureId::FLAT))
             .or_default()
             .push(instance);
     }
@@ -956,6 +1010,7 @@ impl Scene {
             version: 0,
             mesh,
             texture,
+            bump: TextureId::FLAT,
             round,
             quarters: quarters_of(&instances),
             instances,
@@ -1022,7 +1077,7 @@ impl Scene {
                     let instances = instances.clone();
 
                     self.instances
-                        .entry((*mesh, *texture))
+                        .entry((*mesh, *texture, TextureId::FLAT))
                         .or_default()
                         .extend_from_slice(&instances);
                 }
@@ -1042,7 +1097,7 @@ impl Scene {
 
         let as_ = if building.len() < WORTH_A_DRAW {
             self.instances
-                .entry((mesh, texture))
+                .entry((mesh, texture, TextureId::FLAT))
                 .or_default()
                 .extend_from_slice(&building);
 
@@ -1201,21 +1256,26 @@ impl Scene {
     /// `reflections` adds the ones spec 0091 keeps for a target frame. A
     /// key in both sets comes back as two batches rather than one, which is
     /// one more draw call and no wrong pixels.
-    pub(crate) fn batches(&self, reflections: bool) -> Vec<(MeshId, TextureId, &[Instance])> {
+    pub(crate) fn batches(
+        &self,
+        reflections: bool,
+    ) -> Vec<(MeshId, TextureId, TextureId, &[Instance])> {
         let also = if reflections {
             Some(self.reflected.iter())
         } else {
             None
         };
 
-        let mut batches: Vec<(MeshId, TextureId, &[Instance])> = self
+        let mut batches: Vec<(MeshId, TextureId, TextureId, &[Instance])> = self
             .instances
             .iter()
             .chain(also.into_iter().flatten())
             .filter(|(_, instances)| !instances.is_empty())
-            .map(|((mesh, texture), instances)| (*mesh, *texture, instances.as_slice()))
+            .map(|((mesh, texture, bump), instances)| {
+                (*mesh, *texture, *bump, instances.as_slice())
+            })
             .collect();
-        batches.sort_by_key(|(mesh, texture, _)| (*mesh, *texture));
+        batches.sort_by_key(|(mesh, texture, bump, _)| (*mesh, *texture, *bump));
         batches
     }
 
@@ -1473,6 +1533,11 @@ pub(crate) struct Keeping {
     pub(crate) version: u64,
     pub(crate) mesh: MeshId,
     pub(crate) texture: TextureId,
+    /// And its bump map, which a kept run does not carry its own of yet, per
+    /// spec 0110: spec 0059's standing runs are the one path that does not
+    /// take one, so this is always `TextureId::FLAT` until something needs
+    /// otherwise.
+    pub(crate) bump: TextureId,
     pub(crate) instances: Vec<Instance>,
     pub(crate) round: Round,
     /// Where each kind of instance lies inside the run, when each kind lies
@@ -2052,7 +2117,7 @@ mod tests {
         let batches = scene.batches(false);
 
         assert_eq!(batches.len(), 1, "three small runs were not one batch");
-        assert_eq!(batches[0].2.len(), 12);
+        assert_eq!(batches[0].3.len(), 12);
     }
 
     /// Spec 0064: and it is pushed again every frame, without being built
@@ -2074,7 +2139,7 @@ mod tests {
             });
 
             assert_eq!(
-                scene.batches(false).first().map(|batch| batch.2.len()),
+                scene.batches(false).first().map(|batch| batch.3.len()),
                 Some(4),
                 "a small run stopped being drawn"
             );
@@ -2309,8 +2374,8 @@ mod tests {
         // one draw per mesh, not one per thing drawn
         assert_eq!(batches.len(), 2);
         assert_eq!(batches[0].0, cube);
-        assert_eq!(batches[0].2.len(), 2);
-        assert_eq!(batches[1].2.len(), 1);
+        assert_eq!(batches[0].3.len(), 2);
+        assert_eq!(batches[1].3.len(), 1);
     }
 
     #[test]
@@ -2814,18 +2879,18 @@ mod tests {
         let on_screen = scene.batches(false);
         let in_glass = scene.batches(true);
 
-        let count = |batches: &[(MeshId, TextureId, &[Instance])]| -> usize {
-            batches.iter().map(|(_, _, held)| held.len()).sum()
+        let count = |batches: &[(MeshId, TextureId, TextureId, &[Instance])]| -> usize {
+            batches.iter().map(|(_, _, _, held)| held.len()).sum()
         };
 
         assert_eq!(count(&on_screen), 2, "the bracket leaked onto the screen");
         assert_eq!(count(&in_glass), 4, "the bracket is missing from the glass");
         assert!(
-            !on_screen.iter().any(|(mesh, _, _)| *mesh == MeshId(1)),
+            !on_screen.iter().any(|(mesh, _, _, _)| *mesh == MeshId(1)),
             "mesh 1 is on the screen and should only be in reflections"
         );
         assert!(
-            in_glass.iter().any(|(mesh, _, _)| *mesh == MeshId(1)),
+            in_glass.iter().any(|(mesh, _, _, _)| *mesh == MeshId(1)),
             "mesh 1 is not in the reflection it was pushed for"
         );
     }
@@ -2898,6 +2963,48 @@ mod tests {
         assert!(
             bright.glows(),
             "a tint past white should glow, like neon does"
+        );
+    }
+
+    /// Spec 0110: two draws of one mesh with different bump maps are two
+    /// batches.
+    ///
+    /// **Which is the whole reason the bump is in the key.** A bump map is
+    /// bound once for a draw call and not per copy, like the texture beside
+    /// it, so two surfaces that want different ones cannot share a run. The
+    /// cost of getting this wrong is not a wrong pixel in one place, it is
+    /// every instance of a batch wearing whichever map happened to be bound
+    /// for it.
+    #[test]
+    fn a_bump_map_keys_a_batch() {
+        let mut scene = Scene::new();
+        let mesh = MeshId(3);
+        let skin = TextureId(4);
+
+        scene.push_bumped(mesh, skin, TextureId(5), &Transform::new(), Vec4::ONE, 32.0);
+        scene.push_bumped(mesh, skin, TextureId(6), &Transform::new(), Vec4::ONE, 32.0);
+        scene.push_bumped(mesh, skin, TextureId(5), &Transform::new(), Vec4::ONE, 32.0);
+
+        let batches = scene.batches(false);
+
+        assert_eq!(batches.len(), 2, "two bump maps should be two batches");
+        assert_eq!(
+            batches
+                .iter()
+                .map(|(_, _, _, held)| held.len())
+                .sum::<usize>(),
+            3,
+            "and all three copies should still be drawn"
+        );
+
+        // and a push with no bump of its own is a third, because the flat
+        // map is a map like any other
+        scene.push_textured(mesh, skin, &Transform::new(), Vec4::ONE, 32.0);
+
+        assert_eq!(
+            scene.batches(false).len(),
+            3,
+            "an unbumped push should not land in a bumped batch"
         );
     }
 }

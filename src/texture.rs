@@ -7,6 +7,16 @@
 /// picks, so a texture looks the way the image file looks.
 pub const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
+/// And the same bytes read as numbers rather than as a colour, per spec 0110.
+///
+/// **A bump map is a direction.** Read through [`FORMAT`], its flat pixel of
+/// 128 comes back as 0.216 instead of a half, so the normal it describes
+/// leans a long way off the surface and every draw in the engine is bent by
+/// the default that was meant to bend nothing. Every texture is made with
+/// this in its view formats so the bump binding can read the same upload
+/// without a second copy of it.
+pub const DATA: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
 /// One level of an image: RGBA bytes and how wide a row is.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MipLevel {
@@ -47,6 +57,21 @@ impl TextureData {
     /// shader can multiply by it and there is one pipeline rather than two.
     pub fn white() -> Self {
         Self::from_pixels(1, 1, vec![255, 255, 255, 255])
+    }
+
+    /// And the stand-in for a surface with no bumps in it, per spec 0110.
+    ///
+    /// **What [`white`] is to the colour, this is to the normal.** A bump map
+    /// is read as a direction about a half in red and green and one in blue,
+    /// so 128, 128, 255 is straight out of the surface: a draw that says
+    /// nothing about bumps binds this, the shader does the same arithmetic it
+    /// does for everything else, and the answer comes back as the vertex
+    /// normal to within a rounding. One pipeline rather than two, which is
+    /// the same argument `white` is here for.
+    ///
+    /// [`white`]: TextureData::white
+    pub fn flat() -> Self {
+        Self::from_pixels(1, 1, vec![128, 128, 255, 255])
     }
 
     pub fn width(&self) -> u32 {

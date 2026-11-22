@@ -150,6 +150,9 @@ static EMPTY_RUNS: Runs = Runs {
 pub(crate) struct Pushed<'a> {
     pub(crate) mesh: MeshId,
     pub(crate) texture: TextureId,
+    /// The bump map on it, per spec 0110, which is `TextureId::FLAT` for
+    /// everything that does not ask for one.
+    pub(crate) bump: TextureId,
     pub(crate) bounds: Aabb,
     pub(crate) instances: &'a [Instance],
     /// Where each kind of instance lies inside this run, when each kind lies
@@ -215,6 +218,7 @@ pub(crate) fn of_a_keeping<'a>(
     Pushed {
         mesh: keeping.mesh,
         texture: keeping.texture,
+        bump: keeping.bump,
         bounds,
         instances: &keeping.instances,
         quarters: keeping.quarters,
@@ -372,6 +376,7 @@ pub(crate) fn pick(
                             Batch {
                                 mesh: one.mesh,
                                 texture: one.texture,
+                                bump: one.bump,
                                 first: home.base + first,
                                 count,
                                 from: Where::Kept,
@@ -392,6 +397,7 @@ pub(crate) fn pick(
                             Batch {
                                 mesh: one.mesh,
                                 texture: one.texture,
+                                bump: one.bump,
                                 first,
                                 count,
                                 from: Where::Frame,
@@ -450,6 +456,7 @@ pub(crate) fn pick(
                 let run = Batch {
                     mesh: one.mesh,
                     texture: one.texture,
+                    bump: one.bump,
                     first,
                     count,
                     from: Where::Frame,
@@ -713,6 +720,7 @@ mod tests {
         let pushed = vec![Pushed {
             mesh: MeshId(0),
             texture: TextureId::WHITE,
+            bump: TextureId::FLAT,
             bounds,
             instances: &instances,
             quarters: None,
@@ -763,6 +771,7 @@ mod tests {
         let pushed = vec![Pushed {
             mesh: MeshId(0),
             texture: TextureId::WHITE,
+            bump: TextureId::FLAT,
             bounds,
             instances: &instances,
             quarters: None,
@@ -821,6 +830,7 @@ mod tests {
         let pushed = vec![Pushed {
             mesh: MeshId(0),
             texture: TextureId::WHITE,
+            bump: TextureId::FLAT,
             bounds,
             instances: &instances,
             quarters: None,
@@ -846,6 +856,7 @@ mod tests {
         let pushed = vec![Pushed {
             mesh: MeshId(0),
             texture: TextureId::WHITE,
+            bump: TextureId::FLAT,
             bounds,
             instances: &instances,
             quarters: None,
@@ -896,6 +907,7 @@ mod tests {
         let as_pushed = vec![Pushed {
             mesh: MeshId(0),
             texture: TextureId::WHITE,
+            bump: TextureId::FLAT,
             bounds,
             instances: &instances,
             quarters: None,
@@ -907,6 +919,7 @@ mod tests {
         let as_kept = vec![Pushed {
             mesh: MeshId(0),
             texture: TextureId::WHITE,
+            bump: TextureId::FLAT,
             bounds,
             instances: &instances,
             quarters: None,
@@ -961,6 +974,7 @@ mod tests {
         let kept = vec![Pushed {
             mesh: MeshId(0),
             texture: TextureId::WHITE,
+            bump: TextureId::FLAT,
             bounds,
             instances: &instances,
             quarters: None,
@@ -990,6 +1004,7 @@ mod tests {
         let kept = vec![Pushed {
             mesh: MeshId(0),
             texture: TextureId::WHITE,
+            bump: TextureId::FLAT,
             bounds,
             instances: &instances,
             quarters: crate::renderer::scene::quarters_of(&instances),
@@ -1036,6 +1051,7 @@ mod tests {
         let kept = vec![Pushed {
             mesh: MeshId(0),
             texture: TextureId::WHITE,
+            bump: TextureId::FLAT,
             bounds,
             instances: &instances,
             quarters: None,
@@ -1065,6 +1081,7 @@ mod tests {
         let kept = vec![Pushed {
             mesh: MeshId(0),
             texture: TextureId::WHITE,
+            bump: TextureId::FLAT,
             bounds,
             instances: &instances,
             quarters: None,
@@ -1162,6 +1179,7 @@ mod tests {
         let kept = vec![Pushed {
             mesh: MeshId(0),
             texture: TextureId::WHITE,
+            bump: TextureId::FLAT,
             bounds,
             instances: &instances,
             quarters: crate::renderer::scene::quarters_of(&instances),
@@ -1204,6 +1222,7 @@ mod tests {
         let kept = vec![Pushed {
             mesh: MeshId(0),
             texture: TextureId::WHITE,
+            bump: TextureId::FLAT,
             bounds,
             instances: &instances,
             quarters: crate::renderer::scene::quarters_of(&instances),

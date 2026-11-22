@@ -121,6 +121,10 @@ struct Standing {
 // White by default, so an untextured mesh multiplies by one, per spec 0011.
 @group(1) @binding(0) var surface_texture: texture_2d<f32>;
 @group(1) @binding(1) var surface_sampler: sampler;
+// the bump map, per spec 0110: a direction in the surface's own frame, x and
+// y about a half in red and green and z in blue. Every draw binds one, and
+// all but a handful bind the flat pixel that means no bend at all.
+@group(1) @binding(2) var bump_texture: texture_2d<f32>;
 
 // What the light can see, per spec 0015.
 @group(2) @binding(0) var shadow_map: texture_depth_2d;
@@ -827,8 +831,56 @@ struct Lit {
     light: vec3<f32>,
 }
 
+// The normal a bump map leaves, per spec 0110.
+//
+// **The frame comes off the derivatives and not off a tangent attribute.**
+// A tangent on every vertex would change the vertex format sixteen games
+// build against, every mesh builder and the OBJ loader, for a thing a
+// handful of surfaces use. Taken from how the world position and the texture
+// coordinate change across the screen, it costs nothing outside this file.
+//
+// What it gives up is that the frame is the plane's and not the mesh's: it
+// is right for a floor, a wall and a road, and wrong where the uv is
+// stretched hard or the surface folds inside a triangle.
+//
+// **The derivatives are taken before anything branches.** They are only
+// defined in uniform control flow, so reading them after a return on a
+// per-fragment test is a frame built out of whatever the neighbouring
+// fragment happened to be doing.
+fn bent(normal: vec3<f32>, world: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
+    let along_x = dpdx(world);
+    let along_y = dpdy(world);
+    let uv_x = dpdx(uv);
+    let uv_y = dpdy(uv);
+
+    let bump = textureSample(bump_texture, surface_sampler, uv).xyz * 2.0 - 1.0;
+
+    // the flat pixel, which is what all but a handful of draws bind
+    if abs(bump.x) < 0.01 && abs(bump.y) < 0.01 {
+        return normal;
+    }
+
+    let across_y = cross(along_y, normal);
+    let across_x = cross(normal, along_x);
+    let tangent = across_y * uv_x.x + across_x * uv_y.x;
+    let bitangent = across_y * uv_x.y + across_x * uv_y.y;
+
+    // a uv that does not change across the screen leaves a frame of nothing,
+    // and a normal built out of it would be noise
+    let longest = max(dot(tangent, tangent), dot(bitangent, bitangent));
+    if longest <= 0.0 {
+        return normal;
+    }
+
+    let scale = inverseSqrt(longest);
+
+    return normalize(
+        tangent * (bump.x * scale) + bitangent * (bump.y * scale) + normal * bump.z
+    );
+}
+
 fn lit_surface(in: VertexOutput) -> Lit {
-    let normal = normalize(in.normal);
+    let normal = bent(normalize(in.normal), in.world_position, in.uv);
     let to_light = normalize(-uniforms.light_direction.xyz);
     let to_viewer = normalize(uniforms.camera_position.xyz - in.world_position);
 

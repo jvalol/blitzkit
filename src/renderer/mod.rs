@@ -243,6 +243,19 @@ pub struct Renderer {
     /// picture that changed had to become a second texture that nothing
     /// ever freed.
     images: Vec<wgpu::Texture>,
+    /// Every uploaded texture's view, kept so spec 0110 can build the bind
+    /// group for a surface and a bump map without uploading either again.
+    views: Vec<wgpu::TextureView>,
+    /// One bind group per pair of them, built the first frame that asks and
+    /// kept: in practice a scene has one or two bumped surfaces, and a map
+    /// of pairs is what stops a draw call rebuilding a bind group.
+    bumped: std::collections::HashMap<(usize, usize), wgpu::BindGroup>,
+    /// The flat bump every other draw binds, made before the first upload
+    /// because a bind group cannot wait for `TextureId::FLAT` to exist.
+    ///
+    /// The view and not the texture: a `TextureView` holds its own, so a
+    /// field for the texture beside it is a field nothing ever reads.
+    flat_view: wgpu::TextureView,
     shadow_pipeline: wgpu::RenderPipeline,
     /// A second one for a lamp's six faces: it has a fragment stage, because
     /// what goes in those maps is distance rather than depth. See spec 0022.
@@ -756,6 +769,51 @@ impl Renderer {
         };
         let depth = depth::DepthTexture::new(&device, config.width, config.height, samples);
         let colour = multisampled(&device, config.width, config.height, drawn, samples);
+        // **The flat bump, made here and not looked up by id.** Spec 0110
+        // binds a bump map on every draw, so a texture's own bind group needs
+        // one the moment it is built, including the first two this renderer
+        // uploads to itself. `TextureId::FLAT` does not exist until those
+        // uploads happen and a bind group cannot wait for it.
+        let flat_bump = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Flat Bump"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: crate::texture::FORMAT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[crate::texture::DATA],
+        });
+
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &flat_bump,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[128, 128, 255, 255],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let flat_view = flat_bump.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(crate::texture::DATA),
+            ..Default::default()
+        });
+
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Texture Bind Group Layout"),
@@ -774,6 +832,20 @@ impl Renderer {
                         binding: 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    // the bump map, per spec 0110, on the same sampler. Bound
+                    // for every draw whether or not anything asked for one,
+                    // because a layout is a promise and a draw that left it
+                    // empty would be a different pipeline.
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
                         count: None,
                     },
                 ],
@@ -1325,11 +1397,71 @@ impl Renderer {
             texture_bind_group_layout,
             sampler,
             instance_buffer,
+            views: Vec::new(),
+            bumped: std::collections::HashMap::new(),
+            flat_view,
         };
 
-        // TextureId::WHITE, what an untextured mesh is drawn with
+        // TextureId::WHITE, what an untextured mesh is drawn with, and
+        // TextureId::FLAT, what a surface with no bumps in it has for a bump
+        // map. In this order and before anything a game uploads, because
+        // both are constants on TextureId and a renderer that took them in
+        // any other order would hand a game the wrong picture for nothing.
         renderer.add_texture(&TextureData::white());
+        renderer.add_texture(&TextureData::flat());
         renderer
+    }
+
+    /// Makes sure the bind group for a surface and a bump map exists, per
+    /// spec 0110.
+    ///
+    /// **Built before the pass and never inside it.** A render pass holds
+    /// this renderer immutably, so a draw that wanted a bind group it had
+    /// not got could not make one. Every batch of a frame is walked while
+    /// the instances go up, which is where this is called from, and by the
+    /// time anything is drawn the map has what it needs.
+    ///
+    /// A pair and not a texture, because the bump is bound in the surface's
+    /// own group: one bind group per texture is what `add_texture` leaves,
+    /// and asking for a second bump on the same texture is what makes a
+    /// second group. In practice a scene has one or two bumped surfaces.
+    fn want_surface(&mut self, texture: TextureId, bump: TextureId) {
+        if bump == TextureId::FLAT
+            || texture.0 >= self.views.len()
+            || bump.0 >= self.views.len()
+            || self.bumped.contains_key(&(texture.0, bump.0))
+        {
+            return;
+        }
+
+        let group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Bumped Texture Bind Group"),
+            layout: &self.texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&self.views[texture.0]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&self.views[bump.0]),
+                },
+            ],
+        });
+
+        self.bumped.insert((texture.0, bump.0), group);
+    }
+
+    /// And the one to bind for that pair: the pair's own if it was asked
+    /// for, and the texture's own, which carries the flat bump, if not.
+    fn surface_group(&self, texture: TextureId, bump: TextureId) -> &wgpu::BindGroup {
+        self.bumped
+            .get(&(texture.0, bump.0))
+            .unwrap_or(&self.textures[texture.0])
     }
 
     /// Uploads an image and its mip chain, and hands back the handle a game
@@ -1350,7 +1482,13 @@ impl Renderer {
             dimension: wgpu::TextureDimension::D2,
             format: crate::texture::FORMAT,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
+            // **And the same bytes read as numbers**, per spec 0110. A bump
+            // map is a direction and not a colour: read through the sRGB
+            // format every picture here wears, its flat pixel comes back as
+            // 0.216 rather than a half and every surface in the engine
+            // leans. The colour binding keeps the sRGB view and the bump
+            // binding takes this one.
+            view_formats: &[crate::texture::DATA],
         });
 
         for (level, mip) in data.levels.iter().enumerate() {
@@ -1376,6 +1514,10 @@ impl Renderer {
         }
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let data_view = texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(crate::texture::DATA),
+            ..Default::default()
+        });
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Texture Bind Group"),
             layout: &self.texture_bind_group_layout,
@@ -1388,10 +1530,17 @@ impl Renderer {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&self.sampler),
                 },
+                // and no bumps, which is what all but a handful of surfaces
+                // want. `surface_group` builds the pair when one asks.
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&self.flat_view),
+                },
             ],
         });
 
         self.textures.push(bind_group);
+        self.views.push(data_view);
         self.images.push(texture);
         TextureId(self.textures.len() - 1)
     }
@@ -1453,6 +1602,12 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+                // a target wears the flat bump like anything else: it is a
+                // texture a game draws with, and the layout is one layout.
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&self.flat_view),
                 },
             ],
         });
@@ -2137,7 +2292,7 @@ impl Renderer {
 
         let mut shaped = 0;
 
-        for (mesh, _, instances) in scene.batches(false) {
+        for (mesh, _, _, instances) in scene.batches(false) {
             let Some(gpu) = self.meshes.get(mesh.0) else {
                 continue;
             };
@@ -3224,7 +3379,7 @@ impl Renderer {
                     {
                         continue;
                     }
-                    prepass.set_bind_group(1, &self.textures[texture_id.0], &[]);
+                    prepass.set_bind_group(1, self.surface_group(*texture_id, batch.bump), &[]);
                     as_it_stands(
                         &mut prepass,
                         batch,
@@ -3404,7 +3559,11 @@ impl Renderer {
                             mesh_pass.set_pipeline(wanted);
                             set = at;
                         }
-                        mesh_pass.set_bind_group(1, &self.textures[texture_id.0], &[]);
+                        mesh_pass.set_bind_group(
+                            1,
+                            self.surface_group(*texture_id, batch.bump),
+                            &[],
+                        );
                         mesh_pass.set_bind_group(2, &self.shadow_bind_group, &[]);
                         mesh_pass.set_bind_group(3, &self.scene_depth_bind_group, &[]);
                         as_it_stands(
@@ -3639,7 +3798,11 @@ impl Renderer {
                     .set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
 
                 for run in geometry.runs() {
-                    render_pass.set_bind_group(1, &self.textures[run.texture.0], &[]);
+                    render_pass.set_bind_group(
+                        1,
+                        self.surface_group(run.texture, TextureId::FLAT),
+                        &[],
+                    );
                     counted.saw(run.count, 1);
                     render_pass.draw_indexed(run.first..(run.first + run.count), 0, 0..1);
                 }
@@ -3977,7 +4140,7 @@ impl Renderer {
         let batches = scene.batches(matches!(frame, Frame::Target(_)));
         let mut pushed: Vec<culling::Pushed> = Vec::with_capacity(batches.len());
 
-        for (mesh, texture, instances) in batches {
+        for (mesh, texture, bump, instances) in batches {
             if mesh.0 >= self.meshes.len() {
                 log::warn!("a scene asked for mesh {:?}, which was never added", mesh);
                 continue;
@@ -3990,9 +4153,11 @@ impl Renderer {
                 continue;
             }
 
+            self.want_surface(texture, bump);
             pushed.push(culling::Pushed {
                 mesh,
                 texture,
+                bump,
                 bounds: self.meshes[mesh.0].bounds,
                 instances,
                 quarters: None,
@@ -4056,6 +4221,7 @@ impl Renderer {
                 culling::Pushed {
                     mesh: behind.mesh,
                     texture: behind.texture,
+                    bump: TextureId::FLAT,
                     bounds: *bounds,
                     instances: held,
                     quarters: None,
@@ -4415,7 +4581,7 @@ impl Renderer {
             boxes.push(round);
         };
 
-        for (mesh, _, instances) in scene.batches(true) {
+        for (mesh, _, _, instances) in scene.batches(true) {
             for instance in instances {
                 take(mesh, instance, glam::Vec3::ZERO);
             }

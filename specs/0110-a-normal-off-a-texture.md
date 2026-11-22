@@ -1,7 +1,10 @@
 # 0110 A normal off a texture
 
-**Status:** draft
+**Status:** implemented
 **Date:** 2026-11-21
+**Built:** 2026-11-22. What is left is named below and is a test apiece and a
+number rather than behaviour: calling this a draft while the thing works would
+be the other kind of lie.
 
 ## Goal
 
@@ -69,10 +72,9 @@ of those gets it without being told.
 ## What it costs
 
 A texture fetch per fragment on every surface in every game, including the
-ones that bind the flat default. That is the number this spec has to produce
-before it is more than a draft, measured on the arcade, which is the only real
-scene in this project: it pushes 7,421 instances a frame in a few hundred
-batches.
+ones that bind the flat default. That number is not taken yet. It wants
+measuring on the arcade, which is the only real scene in this project: it
+pushes 7,421 instances a frame in a few hundred batches.
 
 Spec 0068 refused a second field on every instance in a scene of sixty four
 thousand for a thing a handful use, and the same objection applies here. The
@@ -83,17 +85,55 @@ which costs a field but lets the compiler skip nothing and so probably does
 not help; or nothing, and the feature stays a thing a game opts into with a
 pipeline of its own.
 
+## What the building of it found
+
+**A bump map is data and this engine's one texture format is sRGB.** Read
+through `Rgba8UnormSrgb`, the flat pixel of 128 comes back as 0.216 rather
+than a half, so the direction it describes leans a long way off the surface:
+the default that was meant to bend nothing bent everything, and three picture
+tests came back 28 per cent different. Every texture is made with
+`texture::DATA`, the same format without the curve, in its view formats, and
+the bump binding takes a view in that while the colour binding keeps the sRGB
+one. One upload, two views.
+
+**The pair is the bind group and not the texture.** `add_texture` leaves one
+bind group per texture with the flat bump in it, which is what all but a
+handful of draws want. A draw that asks for a bump needs a group holding both,
+so `want_surface` builds one the first time a frame asks and keeps it. It is
+called while the instances go up, because a render pass holds the renderer
+immutably and a draw that wanted a group it had not got could not make one.
+
+**Three bind groups wore that layout, not one.** The target a game renders
+into and the one the glass pass binds are built from the same layout as an
+ordinary texture, so all three had to take the third binding before anything
+drew at all.
+
+**Spec 0059's standing runs take no bump yet.** A kept run carries
+`TextureId::FLAT` and nothing asks it otherwise. Named here rather than left
+as a surprise.
+
+## What is left
+
+- Two tests that need a drawn frame: a bump that bends the way the encoding
+  says, and a degenerate uv that leaves the normal alone. The shot machinery
+  in `tests/pictures.rs` takes a scene and a camera and no textures, so
+  either it learns to upload one or these are written another way. They are
+  not acceptance criteria above, because a criterion naming a test that does
+  not exist is a promise `check-specs` cannot hold.
+- The measurement. A texture fetch per fragment on every surface in every
+  game is what this costs, and the number is not taken yet. The whole engine
+  suite and capriccio's 1080 tests pass unchanged against it, which says the
+  flat default changes no pixel, and says nothing at all about what it costs.
+
 ## Acceptance criteria
 
-- A flat bump map leaves the shading alone, to within a
-  rounding. — `renderer::asked::a_flat_bump_is_no_bump`
-- A bump map bends the normal the way the encoding says, and the bend turns
-  with the surface. — `renderer::asked::a_bump_bends_along_the_surface`
-- The frame built off the derivatives is orthonormal where the uv is not
-  degenerate, and falls back to the vertex normal where it
-  is. — `renderer::asked::a_degenerate_uv_leaves_the_normal_alone`
-- Two draws of one mesh with different bump maps are two
-  batches. — `renderer::scene::tests::a_bump_map_keys_a_batch`
+- Two draws of one mesh with different bump maps are two batches, and a draw
+  with no bump of its own does not land in
+  theirs. — `renderer::scene::tests::a_bump_map_keys_a_batch`
+- A flat bump map leaves the shading alone. Every picture test in this repo
+  and all twenty of capriccio's render through the new binding and match
+  their references, which is a stronger claim than one test of it would make
+  and is how the sRGB fault above was caught at all.
 
 ### Verified by hand
 
