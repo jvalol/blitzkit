@@ -243,9 +243,6 @@ pub struct Renderer {
     /// picture that changed had to become a second texture that nothing
     /// ever freed.
     images: Vec<wgpu::Texture>,
-    /// Every uploaded texture's view, kept so spec 0110 can build the bind
-    /// group for a surface and a bump map without uploading either again.
-    views: Vec<wgpu::TextureView>,
     /// One bind group per pair of them, built the first frame that asks and
     /// kept: in practice a scene has one or two bumped surfaces, and a map
     /// of pairs is what stops a draw call rebuilding a bind group.
@@ -1397,7 +1394,6 @@ impl Renderer {
             texture_bind_group_layout,
             sampler,
             instance_buffer,
-            views: Vec::new(),
             bumped: std::collections::HashMap::new(),
             flat_view,
         };
@@ -1427,20 +1423,41 @@ impl Renderer {
     /// second group. In practice a scene has one or two bumped surfaces.
     fn want_surface(&mut self, texture: TextureId, bump: TextureId) {
         if bump == TextureId::FLAT
-            || texture.0 >= self.views.len()
-            || bump.0 >= self.views.len()
+            || texture.0 >= self.images.len()
+            || bump.0 >= self.images.len()
+            // **A target neither is a bump map nor wears one.** Its texture
+            // is made for a pass to draw into and carries only the view
+            // formats that needs, so asking it for a view as data is a
+            // validation error rather than a wrong picture.
+            || self.targets.contains_key(&texture.0)
+            || self.targets.contains_key(&bump.0)
             || self.bumped.contains_key(&(texture.0, bump.0))
         {
             return;
         }
 
+        // **Off `images` and not off a list of views kept beside it.** There
+        // was one, and `add_target` pushed to `textures` and `images` and
+        // not to it, so from the first target a game added every later
+        // texture's view was somebody else's: the arcade's street came out
+        // bound to a page of glyphs. Two lists of one thing drift, and the
+        // fix is the same one it always is, which is to keep the one list
+        // that cannot.
+        let colour = self.images[texture.0].create_view(&Default::default());
+        // and the bump read as numbers, per spec 0110. The colour above is
+        // the texture's own view and so is read as a colour, which is the
+        // other half of that spec: one upload, two ways of reading it.
+        let data = self.images[bump.0].create_view(&wgpu::TextureViewDescriptor {
+            format: Some(crate::texture::DATA),
+            ..Default::default()
+        });
         let group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Bumped Texture Bind Group"),
             layout: &self.texture_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&self.views[texture.0]),
+                    resource: wgpu::BindingResource::TextureView(&colour),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -1448,7 +1465,7 @@ impl Renderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&self.views[bump.0]),
+                    resource: wgpu::BindingResource::TextureView(&data),
                 },
             ],
         });
@@ -1514,10 +1531,6 @@ impl Renderer {
         }
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let data_view = texture.create_view(&wgpu::TextureViewDescriptor {
-            format: Some(crate::texture::DATA),
-            ..Default::default()
-        });
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Texture Bind Group"),
             layout: &self.texture_bind_group_layout,
@@ -1540,7 +1553,6 @@ impl Renderer {
         });
 
         self.textures.push(bind_group);
-        self.views.push(data_view);
         self.images.push(texture);
         TextureId(self.textures.len() - 1)
     }

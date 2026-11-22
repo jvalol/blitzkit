@@ -867,15 +867,23 @@ fn bent(normal: vec3<f32>, world: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
 
     // a uv that does not change across the screen leaves a frame of nothing,
     // and a normal built out of it would be noise
-    let longest = max(dot(tangent, tangent), dot(bitangent, bitangent));
-    if longest <= 0.0 {
+    let along_u = dot(tangent, tangent);
+    let along_v = dot(bitangent, bitangent);
+    if along_u <= 0.0 || along_v <= 0.0 {
         return normal;
     }
 
-    let scale = inverseSqrt(longest);
-
+    // **Each of the two to its own length, and not both to the longer.** A
+    // bump map is written in tangent space, where a half in red means half
+    // a unit along u whatever u is worth in metres. Scaled by the longer of
+    // the two, the shorter axis keeps the ratio between them, so on the
+    // arcade's village street, 72 metres of u against 10 of v, the green
+    // channel came through at a seventh of what it asked for and the street
+    // read flat.
     return normalize(
-        tangent * (bump.x * scale) + bitangent * (bump.y * scale) + normal * bump.z
+        tangent * (bump.x * inverseSqrt(along_u))
+            + bitangent * (bump.y * inverseSqrt(along_v))
+            + normal * bump.z
     );
 }
 

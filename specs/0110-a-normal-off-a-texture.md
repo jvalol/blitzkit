@@ -112,6 +112,40 @@ drew at all.
 `TextureId::FLAT` and nothing asks it otherwise. Named here rather than left
 as a surprise.
 
+## What using it found
+
+The first game to ask for one was capriccio's village street, the day after
+this was built, and it came back wrong twice. Both faults are the kind that
+only a user finds, which is the argument for building the feature and the
+street in that order.
+
+**Two lists of one thing drift, and this had one.** Every uploaded texture's
+view was kept in a `views` vector beside `textures` and `images` so a bumped
+bind group could be built without a second upload. `add_texture` pushed to all
+three and `add_target` pushed to two, so from the first target a game adds,
+every later texture's view belonged to somebody else. The street came out
+bound to a page of glyphs. There is no second list now: `want_surface` takes
+both views off `images`, which is the one list that is pushed in both places,
+and it refuses a pair where either side is a target, a target's texture
+carrying only the view formats a render pass needs.
+
+**And the tangent frame was scaled by the longer of its two axes.** The
+derivative frame comes out with the uv's own anisotropy in it: on a quad 72
+metres along by 10 across with its texture running nought to one each way, the
+tangent is seven times the bitangent. Scaled by the longer, as the usual
+snippet does, the green channel arrived at a seventh of what it asked for.
+A bump map is written in tangent space, where a half in green means half a
+unit along v whatever v is worth in metres, so each axis is scaled to its own
+length now. What the street did between those two numbers is the whole of the
+difference between reading flat and reading like stone.
+
+**It reads up close and not down the road.** The mips average a normal map
+toward flat, which is what stops it crawling at distance and also means the
+far end of a 72 metre street is lit as the flat quad it is. The albedo still
+carries the joints there, so the street does not lose them; what it loses is
+the part that moves when the sun does. Nothing to fix, but worth writing down
+before somebody reads the near field and expects the far one.
+
 ## What is left
 
 - Two tests that need a drawn frame: a bump that bends the way the encoding
@@ -119,7 +153,10 @@ as a surprise.
   in `tests/pictures.rs` takes a scene and a camera and no textures, so
   either it learns to upload one or these are written another way. They are
   not acceptance criteria above, because a criterion naming a test that does
-  not exist is a promise `check-specs` cannot hold.
+  not exist is a promise `check-specs` cannot hold. Three of capriccio's
+  village references now draw through a real bump map and would move if the
+  bend died, which is a guard this repo cannot cite and should not be told
+  it has.
 - The measurement. A texture fetch per fragment on every surface in every
   game is what this costs, and the number is not taken yet. The whole engine
   suite and capriccio's 1080 tests pass unchanged against it, which says the
@@ -139,7 +176,8 @@ as a surprise.
 
 - Whether a cobbled street reads as stone, which is the thing this is for.
   Run capriccio, walk to the village, and watch the grooves as the hour goes
-  round: the test of it is that they change.
+  round: the test of it is that they change. Capriccio's spec 0125 is that
+  street.
 - What it costs on the arcade, with `--cost`, against the same frame before.
 
 ## Out of scope
