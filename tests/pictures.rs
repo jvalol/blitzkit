@@ -1551,3 +1551,207 @@ mod clock {
         }
     }
 }
+
+/// What a bump map does to the light, per spec 0110.
+///
+/// **Not a blessed picture, because the claim here is a direction and not a
+/// likeness.** Every shot above says this is what it looked like when
+/// somebody was happy with it, which is the right test for a lens or a
+/// highlight and the wrong one for this: a bump map bent the opposite way
+/// draws a cobbled street that reads just as much like stone, so a
+/// reference of it would hold the mistake for ever and look right doing it.
+/// These draw one floor several ways instead and compare the frames with
+/// each other.
+mod bumps {
+    pub mod tests {
+        use super::super::*;
+
+        /// How big the floor is, in metres. Enough to fill the frame, so
+        /// every pixel compared is floor and there is no silhouette for
+        /// multisampling to decide twice.
+        const FLOOR: f32 = 200.0;
+
+        /// How many levels of the eight bit frame count as a difference.
+        ///
+        /// The gaps this is asked about are tens of levels wide: the five
+        /// frames below come to 167 flat, 198 leaning into the sun and 78
+        /// leaning away, on either axis. It is here so that a bend which
+        /// barely registers fails rather than passing on rounding.
+        const MARGIN: f32 = 8.0;
+
+        /// Draws a floor that fills the frame with `bump` bound to it, lit
+        /// by a sun travelling in `sun`.
+        ///
+        /// That is the whole instrument: the frame's brightness is the dot
+        /// product of the normal and the light, and nothing else in here
+        /// moves.
+        fn floor_with(
+            renderer: &mut Renderer,
+            mesh: MeshId,
+            bump: TextureId,
+            sun: Vec3,
+        ) -> Picture {
+            let mut scene = Scene::new();
+
+            scene.light.direction = sun;
+            scene.push_bumped(
+                mesh,
+                TextureId::WHITE,
+                bump,
+                &Transform::at(Vec3::ZERO).with_scale(vec3(FLOOR, 1.0, FLOOR)),
+                vec4(0.5, 0.5, 0.5, 1.0),
+                // no highlight, so the frame is the diffuse term and nothing
+                // else: a specular moves with the bend as well, and there
+                // would be no saying which of the two the brightness came
+                // from
+                0.0,
+            );
+
+            let mut camera = Camera::new();
+
+            camera.position = vec3(0.0, 10.0, 6.0);
+            camera.target = Vec3::ZERO;
+            renderer.set_camera(camera);
+
+            renderer.picture(&scene, &Geometry::new(), &TextRenderer::new())
+        }
+
+        /// The mean of every colour channel in the frame, in levels.
+        fn brightness(picture: &Picture) -> f32 {
+            let mut total = 0.0;
+            let mut count = 0usize;
+
+            for pixel in picture.pixels.chunks_exact(4) {
+                for level in &pixel[..3] {
+                    total += *level as f32;
+                    count += 1;
+                }
+            }
+
+            total / count.max(1) as f32
+        }
+
+        /// A one pixel bump map leaning by `red` along u and `green` along
+        /// v, where 128 is each axis asking for nothing.
+        fn leaning(renderer: &mut Renderer, red: u8, green: u8) -> TextureId {
+            renderer.add_texture(&blitzkit::texture::TextureData::from_pixels(
+                1,
+                1,
+                vec![red, green, 255, 255],
+            ))
+        }
+
+        /// Spec 0110: a channel above a half leans the normal along its own
+        /// axis of the surface, which on `MeshData::plane()` is +x for u and
+        /// +z for v.
+        ///
+        /// **The one thing a flat bump map cannot tell you.** Every picture
+        /// in this repo and all twenty of capriccio's draw through the bump
+        /// binding and so hold that a flat one changes nothing, which was
+        /// the whole of the evidence. Nothing asked which way a bump that is
+        /// not flat bends, and it bent the wrong way for a day: both axes of
+        /// the derivative frame came out negated, which is the map turned
+        /// half a turn about the normal.
+        ///
+        /// Both axes, because one of them cannot tell a frame that is
+        /// negated from a frame whose axes are swapped.
+        #[test]
+        fn a_bump_leans_the_normal_the_way_its_channels_say() {
+            let Some(mut renderer) = pollster::block_on(Renderer::offscreen(WIDE, TALL)) else {
+                eprintln!("no adapter here, so nothing was drawn");
+                return;
+            };
+
+            let floor = renderer.add_mesh(&MeshData::plane());
+            let along_u = leaning(&mut renderer, 230, 128);
+            let against_u = leaning(&mut renderer, 26, 128);
+            let along_v = leaning(&mut renderer, 128, 230);
+            let against_v = leaning(&mut renderer, 128, 26);
+
+            // where the light travels, so each of these is up and off
+            // toward the far end of one axis of the surface
+            let over_u = vec3(-1.0, -0.8, 0.0).normalize();
+            let over_v = vec3(0.0, -0.8, -1.0).normalize();
+
+            let flat = brightness(&floor_with(&mut renderer, floor, TextureId::FLAT, over_u));
+            let into_u = brightness(&floor_with(&mut renderer, floor, along_u, over_u));
+            let out_of_u = brightness(&floor_with(&mut renderer, floor, against_u, over_u));
+            let into_v = brightness(&floor_with(&mut renderer, floor, along_v, over_v));
+            let out_of_v = brightness(&floor_with(&mut renderer, floor, against_v, over_v));
+
+            assert!(
+                into_u > flat + MARGIN,
+                "leaning along u into the sun read {} against {} flat",
+                into_u,
+                flat
+            );
+            assert!(
+                out_of_u + MARGIN < flat,
+                "leaning along u away from it read {} against {} flat",
+                out_of_u,
+                flat
+            );
+            assert!(
+                into_v > flat + MARGIN,
+                "leaning along v into the sun read {} against {} flat",
+                into_v,
+                flat
+            );
+            assert!(
+                out_of_v + MARGIN < flat,
+                "leaning along v away from it read {} against {} flat",
+                out_of_v,
+                flat
+            );
+        }
+
+        /// Spec 0110: a uv that does not change across the screen leaves a
+        /// tangent frame of nothing, and the normal is left as it was.
+        ///
+        /// **Without the guard this is not a flat floor but a NaN.** Both
+        /// axes of the frame come out as zero vectors and their lengths with
+        /// them, so the scaling is an inverse square root of nought: the
+        /// bend is zero times infinity in two channels, and the sum that
+        /// reaches `normalize` is not a direction at all.
+        #[test]
+        fn a_surface_whose_uv_never_changes_is_left_alone() {
+            let Some(mut renderer) = pollster::block_on(Renderer::offscreen(WIDE, TALL)) else {
+                eprintln!("no adapter here, so nothing was drawn");
+                return;
+            };
+
+            let up = [0.0, 1.0, 0.0];
+            let corners = [
+                [-0.5, 0.0, 0.5],
+                [0.5, 0.0, 0.5],
+                [0.5, 0.0, -0.5],
+                [-0.5, 0.0, -0.5],
+            ];
+            let still = renderer.add_mesh(&MeshData::new(
+                corners
+                    .iter()
+                    .map(|at| blitzkit::mesh::Vertex::new(*at, up, [0.0, 0.0]))
+                    .collect(),
+                vec![0, 1, 2, 0, 2, 3],
+            ));
+            let ordinary = renderer.add_mesh(&MeshData::plane());
+            let bump = leaning(&mut renderer, 230, 230);
+            let sun = vec3(-1.0, -0.8, 0.0).normalize();
+
+            let bent = floor_with(&mut renderer, still, bump, sun);
+            let left = floor_with(&mut renderer, still, TextureId::FLAT, sun);
+            let plain = floor_with(&mut renderer, ordinary, TextureId::FLAT, sun);
+
+            assert_eq!(
+                blitzkit::picture::how_far_apart(&bent, &left),
+                0.0,
+                "a bump moved the light on a surface whose uv never changes"
+            );
+            assert_eq!(
+                blitzkit::picture::how_far_apart(&left, &plain),
+                0.0,
+                "the still floor is not the plain one, so neither is the test above"
+            );
+        }
+    }
+}

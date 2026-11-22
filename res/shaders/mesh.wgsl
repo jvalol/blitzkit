@@ -848,10 +848,21 @@ struct Lit {
 // per-fragment test is a frame built out of whatever the neighbouring
 // fragment happened to be doing.
 fn bent(normal: vec3<f32>, world: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
+    // **Along a y that runs up the picture, which is not the y the
+    // derivative is taken along.** The usual snippet for this frame is
+    // written for OpenGL, whose window y points up, and this engine's
+    // points down. Taken straight across, both axes of the frame come out
+    // negated, which is the bump map turned half a turn about the normal:
+    // a bend asked for along +u arrives along -u, and a height field read
+    // through it is lit as its own negative. Wrong since 277a12a, where
+    // this was written, and found 2026-11-22 by
+    // `bumps::tests::a_bump_leans_the_normal_the_way_its_channels_say`:
+    // a street of domes lit as a street of hollows still reads as a
+    // cobbled street, so there was nothing to see.
     let along_x = dpdx(world);
-    let along_y = dpdy(world);
+    let along_y = -dpdy(world);
     let uv_x = dpdx(uv);
-    let uv_y = dpdy(uv);
+    let uv_y = -dpdy(uv);
 
     let bump = textureSample(bump_texture, surface_sampler, uv).xyz * 2.0 - 1.0;
 

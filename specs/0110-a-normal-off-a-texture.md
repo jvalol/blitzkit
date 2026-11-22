@@ -2,9 +2,7 @@
 
 **Status:** implemented
 **Date:** 2026-11-21
-**Built:** 2026-11-22. What is left is named below and is a test apiece and a
-number rather than behaviour: calling this a draft while the thing works would
-be the other kind of lie.
+**Built:** 2026-11-22.
 
 ## Goal
 
@@ -181,17 +179,33 @@ carries the joints there, so the street does not lose them; what it loses is
 the part that moves when the sun does. Nothing to fix, but worth writing down
 before somebody reads the near field and expects the far one.
 
-## What is left
+## What writing the tests found
 
-- Two tests that need a drawn frame: a bump that bends the way the encoding
-  says, and a degenerate uv that leaves the normal alone. The shot machinery
-  in `tests/pictures.rs` takes a scene and a camera and no textures, so
-  either it learns to upload one or these are written another way. They are
-  not acceptance criteria above, because a criterion naming a test that does
-  not exist is a promise `check-specs` cannot hold. Three of capriccio's
-  village references now draw through a real bump map and would move if the
-  bend died, which is a guard this repo cannot cite and should not be told
-  it has.
+**Both axes of the tangent frame were backwards, and had been from the
+first day.** The frame is built the way the published snippet for it builds
+one, and that snippet is written for OpenGL, whose window y runs up the
+picture. This engine's runs down, so `dpdy` is the negative of the
+derivative the formula asks for: taken across unchanged, the tangent and the
+bitangent both come out negated, which is the bump map turned half a turn
+about the normal. A bend asked for along +u arrived along -u.
+
+**And a half turn about the normal is a height field negated.** The map
+capriccio lays on its street is the textbook one, `(-dh/du, -dh/dv, 1)`
+normalised, so what the street was lit as was the negative of the stones it
+was cut from: proud setts and sunken joints, read as sunken setts and proud
+joints.
+
+**Nothing that was watching could have caught it.** Every picture test in
+both repos passed, because a reference says only that this is what it looked
+like when somebody was happy with it, and a street of domes lit as a street
+of hollows still reads as a cobbled street. A blessed picture of the wrong
+one would have held it for ever and looked right doing it. That is why the
+two tests below compare frames with each other rather than with a reference,
+and it is the argument for having written them at all rather than leaving
+them on a list.
+
+The three capriccio references that draw through a real bump map differ by
+2.0, 2.6 and 17.2 per cent of their pixels between the two.
 
 ## Acceptance criteria
 
@@ -202,6 +216,11 @@ before somebody reads the near field and expects the far one.
   and all twenty of capriccio's render through the new binding and match
   their references, which is a stronger claim than one test of it would make
   and is how the sRGB fault above was caught at all.
+- A bump map that is not flat leans the normal the way its channels say, on
+  both axes, which one axis alone cannot tell from a frame whose axes are
+  swapped. — `bumps::tests::a_bump_leans_the_normal_the_way_its_channels_say`
+- And a uv that does not change across the screen leaves the normal
+  alone. — `bumps::tests::a_surface_whose_uv_never_changes_is_left_alone`
 
 ### Verified by hand
 
@@ -209,6 +228,10 @@ before somebody reads the near field and expects the far one.
   Run capriccio, walk to the village, and watch the grooves as the hour goes
   round: the test of it is that they change. Capriccio's spec 0125 is that
   street.
+- And whether it still reads right now the bend has been turned round. The
+  street's own bump map was drawn against the engine that bent it backwards,
+  so whatever the two of them agreed on, they agreed in the wrong frame.
+  Capriccio's three references wait on that judgment.
 - What it costs on the arcade, against the same frame before. Taken
   2026-11-22 and written into "What it costs" above. Not with `--cost` in
   the end: that flag puts the readout in the window, and six runs of a
