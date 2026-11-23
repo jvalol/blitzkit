@@ -18,6 +18,8 @@ pub struct Quad {
     pub texture: TextureId,
     pub uv_min: glam::Vec2,
     pub uv_max: glam::Vec2,
+    pub turn: f32,
+    pub clip: Option<(glam::Vec2, glam::Vec2)>,
 }
 
 /// Opaque white, what a quad is drawn in unless it says otherwise.
@@ -35,6 +37,40 @@ impl Quad {
             texture: TextureId::WHITE,
             uv_min: WHOLE.0,
             uv_max: WHOLE.1,
+            turn: 0.0,
+            clip: None,
+        }
+    }
+
+    /// The same rectangle turned about its own middle, in radians.
+    ///
+    /// **Clockwise, because y points down here.** The sign follows the space
+    /// the rest of this struct is written in rather than the one a maths
+    /// book is, and the two disagree. Said out loud because a turn that goes
+    /// the wrong way looks like a sign error anywhere else in the caller.
+    ///
+    /// The uv does not turn with it. A turned quad shows its image turned,
+    /// which is the whole point, and a quad wanting its image turned inside
+    /// a rectangle that is not wants two of these.
+    pub fn turned(self, radians: f32) -> Quad {
+        Quad {
+            turn: radians,
+            ..self
+        }
+    }
+
+    /// Drawn only inside this rectangle of the window, given as two corners
+    /// in the same pixels as `position`.
+    ///
+    /// **What a turned quad is for.** Rectangles square to the screen can be
+    /// cut to a panel by shrinking them, which is what a map in a corner did
+    /// while it was north up. A turned one cannot: the overlap of a turned
+    /// rectangle and a panel is a polygon with up to eight sides, and the
+    /// thing that used to clip it was arithmetic on two corners.
+    pub fn clipped_to(self, least: glam::Vec2, most: glam::Vec2) -> Quad {
+        Quad {
+            clip: Some((least, most)),
+            ..self
         }
     }
 

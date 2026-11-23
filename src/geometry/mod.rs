@@ -17,6 +17,8 @@ pub struct Run {
     pub texture: TextureId,
     pub first: u32,
     pub count: u32,
+    /// The window it is cut to, or the whole window. Spec 0113.
+    pub clip: Option<(glam::Vec2, glam::Vec2)>,
 }
 
 pub struct Geometry {
@@ -56,31 +58,44 @@ impl Geometry {
     }
 
     pub fn push_quad(&mut self, quad: &Quad) {
-        let min_x = quad.position.x - quad.size.x * 0.5;
-        let min_y = quad.position.y - quad.size.y * 0.5;
-        let max_x = quad.position.x + quad.size.x * 0.5;
-        let max_y = quad.position.y + quad.size.y * 0.5;
+        // **The corners are worked out here and not in the shader.** The
+        // vertex buffer already carries a position a pixel at a time, so a
+        // quad that turns is four corners turned on the way in and no change
+        // to the pipeline at all. Spec 0112.
+        let (sin, cos) = quad.turn.sin_cos();
+        let half = quad.size * 0.5;
+        let corner = |x: f32, y: f32| {
+            let off = glam::vec2(x * half.x, y * half.y);
+
+            quad.position + glam::vec2(off.x * cos - off.y * sin, off.x * sin + off.y * cos)
+        };
 
         // uv_min at the top-left corner, which is the one that is not
         // obvious: y points down in this space, so min_y is the top.
+        //
+        // The uv does not turn with the corners, so the image turns with the
+        // rectangle rather than sliding about inside it.
+        let (top_left, top_right) = (corner(-1.0, -1.0), corner(1.0, -1.0));
+        let (bottom_right, bottom_left) = (corner(1.0, 1.0), corner(-1.0, 1.0));
+
         self.vertex_data.extend(&[
             vertex::Vertex {
-                position: [min_x, min_y],
+                position: top_left.to_array(),
                 color: quad.color.to_array(),
                 uv: [quad.uv_min.x, quad.uv_min.y],
             },
             vertex::Vertex {
-                position: [max_x, min_y],
+                position: top_right.to_array(),
                 color: quad.color.to_array(),
                 uv: [quad.uv_max.x, quad.uv_min.y],
             },
             vertex::Vertex {
-                position: [max_x, max_y],
+                position: bottom_right.to_array(),
                 color: quad.color.to_array(),
                 uv: [quad.uv_max.x, quad.uv_max.y],
             },
             vertex::Vertex {
-                position: [min_x, max_y],
+                position: bottom_left.to_array(),
                 color: quad.color.to_array(),
                 uv: [quad.uv_min.x, quad.uv_max.y],
             },
@@ -95,12 +110,15 @@ impl Geometry {
         ]);
         self.num_quads += 1;
 
+        // A run wears one texture and one scissor, so either one changing
+        // starts another draw.
         match self.runs.last_mut() {
-            Some(run) if run.texture == quad.texture => run.count += 6,
+            Some(run) if run.texture == quad.texture && run.clip == quad.clip => run.count += 6,
             _ => self.runs.push(Run {
                 texture: quad.texture,
                 first: self.index_data.len() as u32 - 6,
                 count: 6,
+                clip: quad.clip,
             }),
         }
     }
@@ -178,6 +196,85 @@ mod tests {
             .vertex_data()
             .iter()
             .all(|vertex| vertex.color == quad::WHITE.to_array()));
+    }
+
+    /// Spec 0112: a quarter turn puts each corner where the one before it
+    /// was, and the middle does not move.
+    ///
+    /// **Clockwise, which is what y pointing down makes it.** Written as the
+    /// corners it actually lands on rather than as a rotation applied twice,
+    /// so a sign flip in `push_quad` cannot agree with a sign flip here.
+    #[test]
+    fn a_turned_quad_puts_its_corners_round_its_middle() {
+        let mut geometry = Geometry::new();
+        geometry.push_quad(
+            &Quad::new((100.0, 50.0).into(), (20.0, 10.0).into())
+                .turned(std::f32::consts::FRAC_PI_2),
+        );
+
+        let got = corners(&geometry);
+        let want = [(105.0, 40.0), (105.0, 60.0), (95.0, 60.0), (95.0, 40.0)];
+
+        for (n, (at, should)) in got.iter().zip(want.iter()).enumerate() {
+            assert!(
+                (at.0 - should.0).abs() < 1e-3 && (at.1 - should.1).abs() < 1e-3,
+                "corner {} of a quarter turn is at {:?} and belongs at {:?}",
+                n,
+                at,
+                should
+            );
+        }
+    }
+
+    /// Spec 0112: no turn is the rectangle it always was.
+    #[test]
+    fn no_turn_is_the_square_rectangle() {
+        let mut geometry = Geometry::new();
+        geometry.push_quad(&Quad::new((100.0, 50.0).into(), (20.0, 10.0).into()).turned(0.0));
+
+        assert_eq!(
+            corners(&geometry),
+            vec![(90.0, 45.0), (110.0, 45.0), (110.0, 55.0), (90.0, 55.0)]
+        );
+    }
+
+    /// Spec 0112: the image turns with the rectangle rather than sliding
+    /// about inside it, which is what leaving the uv alone buys.
+    #[test]
+    fn a_turn_leaves_the_image_on_the_face_it_was_on() {
+        let mut turned = Geometry::new();
+        let mut square = Geometry::new();
+        let quad = Quad::new((100.0, 50.0).into(), (20.0, 10.0).into());
+
+        turned.push_quad(&quad.turned(0.9));
+        square.push_quad(&quad);
+
+        let uvs = |geometry: &Geometry| -> Vec<[f32; 2]> {
+            geometry.vertex_data().iter().map(|one| one.uv).collect()
+        };
+
+        assert_eq!(uvs(&turned), uvs(&square));
+    }
+
+    /// Spec 0113: one run wears one scissor, so changing it starts another
+    /// draw even where the texture is the same.
+    #[test]
+    fn a_run_breaks_when_the_window_it_is_cut_to_changes() {
+        let quad = Quad::new((10.0, 10.0).into(), (4.0, 4.0).into());
+        let panel = (glam::vec2(0.0, 0.0), glam::vec2(50.0, 50.0));
+
+        let mut same = Geometry::new();
+        same.push_quad(&quad.clipped_to(panel.0, panel.1));
+        same.push_quad(&quad.clipped_to(panel.0, panel.1));
+
+        let mut apart = Geometry::new();
+        apart.push_quad(&quad.clipped_to(panel.0, panel.1));
+        apart.push_quad(&quad);
+
+        assert_eq!(same.runs().len(), 1, "one window, and it drew twice");
+        assert_eq!(apart.runs().len(), 2, "two windows, and it drew once");
+        assert_eq!(apart.runs()[0].clip, Some(panel));
+        assert_eq!(apart.runs()[1].clip, None);
     }
 
     #[test]
@@ -272,6 +369,7 @@ mod tests {
                 texture: image(4),
                 first: 0,
                 count: 60,
+                clip: None,
             }]
         );
     }

@@ -3809,15 +3809,28 @@ impl Renderer {
                 render_pass
                     .set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
 
+                let whole = (self.config.width, self.config.height);
+
                 for run in geometry.runs() {
                     render_pass.set_bind_group(
                         1,
                         self.surface_group(run.texture, TextureId::FLAT),
                         &[],
                     );
+
+                    // **Set on every run and not only on the ones that ask.**
+                    // A scissor is pass state, so a run that says nothing
+                    // keeps whatever the run before it was cut to, and the
+                    // help text would come out trimmed to a map in the
+                    // corner. Spec 0113.
+                    let (x, y, wide, tall) = scissor_of(run.clip, whole);
+                    render_pass.set_scissor_rect(x, y, wide, tall);
+
                     counted.saw(run.count, 1);
                     render_pass.draw_indexed(run.first..(run.first + run.count), 0, 0..1);
                 }
+
+                render_pass.set_scissor_rect(0, 0, whole.0, whole.1);
             }
 
             self.text_brush.draw(&mut render_pass);
@@ -5009,6 +5022,26 @@ fn pane_wears(scene: &Scene, pane: TextureId, filling: Option<TextureId>) -> Tex
         .find(|mirror| mirror.target == pane)
         .map(|mirror| mirror.inside)
         .unwrap_or(pane)
+}
+
+/// A run's scissor in whole pixels, clamped to the frame it is drawn into.
+///
+/// **Clamped because wgpu will not have it otherwise.** A scissor reaching
+/// past the target is a validation error and takes the process with it, and
+/// the caller's rectangle is in the window's pixels, which a resize changes
+/// under it. An empty one is legal and draws nothing, which is the right
+/// answer for a panel that has been scrolled off the screen.
+fn scissor_of(clip: Option<(glam::Vec2, glam::Vec2)>, whole: (u32, u32)) -> (u32, u32, u32, u32) {
+    let Some((least, most)) = clip else {
+        return (0, 0, whole.0, whole.1);
+    };
+
+    let x = (least.x.floor().max(0.0) as u32).min(whole.0);
+    let y = (least.y.floor().max(0.0) as u32).min(whole.1);
+    let right = (most.x.ceil().max(0.0) as u32).min(whole.0);
+    let bottom = (most.y.ceil().max(0.0) as u32).min(whole.1);
+
+    (x, y, right.saturating_sub(x), bottom.saturating_sub(y))
 }
 
 /// Whether this pass is the deepest one, which is the second bounce.
@@ -6742,6 +6775,42 @@ pub struct Counted {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Spec 0113: a run that asks for no window gets the whole frame, and
+    /// one that asks for more than the frame gets the frame.
+    ///
+    /// **Because wgpu takes the process with it otherwise.** A scissor
+    /// reaching past its target is a validation error, and the rectangle
+    /// comes from a game that is working in the window's pixels while the
+    /// window is being dragged to another size.
+    #[test]
+    fn a_scissor_is_cut_to_the_frame_it_is_drawn_into() {
+        let whole = (800u32, 600u32);
+
+        assert_eq!(scissor_of(None, whole), (0, 0, 800, 600));
+        assert_eq!(
+            scissor_of(
+                Some((glam::vec2(10.0, 20.0), glam::vec2(110.0, 70.0))),
+                whole
+            ),
+            (10, 20, 100, 50)
+        );
+        assert_eq!(
+            scissor_of(
+                Some((glam::vec2(-50.0, -50.0), glam::vec2(9999.0, 9999.0))),
+                whole
+            ),
+            (0, 0, 800, 600)
+        );
+        assert_eq!(
+            scissor_of(
+                Some((glam::vec2(900.0, 700.0), glam::vec2(950.0, 750.0))),
+                whole
+            ),
+            (800, 600, 0, 0),
+            "a panel off the screen draws nothing rather than drawing everything"
+        );
+    }
 
     /// Spec 0107: every mesh's triangles are in the pool at the offset it
     /// recorded, and a mesh added after another does not move it.
