@@ -22,7 +22,7 @@ This is the other side of that. It deletes.
 
 - `Traced`, `MAX_TRACED` and the `boxy` flag go.
 - So does the game's duty of handing the engine a second account of its own
-  rooms. capriccio's `glass::solid` is the colliders, and its own comments
+  rooms. xanadu's `glass::solid` is the colliders, and its own comments
   say what that costs: *the colonnade stands in `solid` as boxes, for the
   walk and for the glass, and is drawn as turned columns*; *the balustrade
   stands in `solid` as upright boxes and is drawn as joinery*.
@@ -52,7 +52,7 @@ spec puts under it.
 
 ## What the arcade actually is
 
-Measured 2026-11-17, one frame of capriccio standing at the stair head:
+Measured 2026-11-17, one frame of xanadu standing at the stair head:
 
 - 163 meshes registered, 263,202 triangles between them.
 - 209 batches, 9,509 instances, 1,625,312 triangles standing in the world.
@@ -75,7 +75,7 @@ is appended.** A mesh rebuilt larger takes a new range and leaves its old
 one dead. Compaction is a question for the day something actually churns.
 
 This spec drafted that as the whole rule, on the grounds that nothing in
-sixteen games rebuilds a mesh per frame. Three things do, all in capriccio:
+sixteen games rebuilds a mesh per frame. Three things do, all in xanadu:
 the garden's pond, the baths' water and the tesseract are handed over on
 every single frame, so appending each time grew the pool for as long as the
 game ran. Writing over the range is what a surface that moves and keeps its
@@ -168,9 +168,9 @@ can see that, because a game cannot read back what it pushed.
 
 ### Verified by hand
 
-- **The sphere shows the turning.** capriccio's colonnade reflected as eight
+- **The sphere shows the turning.** xanadu's colonnade reflected as eight
   boxes a column, stepping along a profile the lathe draws as a curve. It is
-  the lathe now. capriccio's own `the_glass_room_is_drawn` moved with it,
+  the lathe now. xanadu's own `the_glass_room_is_drawn` moved with it,
   and Jake blessed the new reference on 2026-11-17. Named without its
   module, because ./check-specs reads any backticked path with tests in it
   citation and resolves it against this repo's own tests: a spec here
@@ -212,6 +212,6 @@ What goes is its second job of standing in for the drawn world.
 shader was written, and the answer is nothing: an instance whose colour has
 any transparency in it is left out of the top level. A ray meets a window
 and comes back as the room's ambient, which is what spec 0098's box list did
-by hand and what capriccio's own comment asks for, a slot being what a
+by hand and what xanadu's own comment asks for, a slot being what a
 window looks like from inside a marble. Tracing a pane as solid would put a
 grey sheet over whatever is behind it.

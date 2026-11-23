@@ -591,7 +591,7 @@ mod tests {
     /// holds the picture is left alone.
     ///
     /// `refresh-screenshots` has done this since spec 0083 and `BLESS` had
-    /// not, so one blessing of capriccio rewrote five references nobody had
+    /// not, so one blessing of xanadu rewrote five references nobody had
     /// asked about, each a tenth of a percent from the one it replaced.
     ///
     /// To the share the caller named rather than to `SHARE`, or a test

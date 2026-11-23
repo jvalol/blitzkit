@@ -2007,7 +2007,7 @@ impl Renderer {
         // 0107's out of scope says a mesh that grows takes a new range and
         // leaves its old one dead, and that is right for a mesh rebuilt
         // once. It is not right for one rebuilt every frame, and three
-        // are: capriccio hands over the garden's pond, the baths' water and
+        // are: xanadu hands over the garden's pond, the baths' water and
         // the tesseract on every single frame, so appending would grow the
         // pool for as long as the game ran.
         let put = if fits {
@@ -2134,7 +2134,7 @@ impl Renderer {
         // **This mesh's own ranges, rather than the whole pool.**
         //
         // `upload_pool` writes every vertex, index, node and triangle in the
-        // building, and this is the one path that runs per frame: capriccio
+        // building, and this is the one path that runs per frame: xanadu
         // hands over the pond, the baths' water and the tub every frame, so
         // the whole pool went onto the card three times a frame to change
         // three surfaces. On 2026-11-17 that was 2535 of 3471 samples of the
@@ -2856,7 +2856,7 @@ impl Renderer {
     ///
     /// **Called by both `render` and `drew`, which is the whole reason it
     /// is a function.** It lived inside `render` first, so a picture drew no
-    /// mirrors at all: capriccio's hall of mirrors came out as ten black
+    /// mirrors at all: xanadu's hall of mirrors came out as ten black
     /// rectangles in a lit room, and the film and the clip would have
     /// published that. The two paths are the same frame by spec 0062, and
     /// this is part of the frame.
@@ -3080,7 +3080,7 @@ impl Renderer {
                 // same text came out as eight different atlases in eight
                 // processes, 38 rows against 43, and the letters' edges moved
                 // by a level or two of grey wherever two runs disagreed. It is
-                // what made capriccio's clip and `load`'s refilm every time.
+                // what made xanadu's clip and `load`'s refilm every time.
                 //
                 // One section is one entry, so there is no order to get wrong.
                 // Queueing them singly settles every glyph into the atlas in a
@@ -4569,7 +4569,7 @@ impl Renderer {
             // **And a see-through thing is not traced at all.** A ray that
             // meets a window should go through it and come back as whatever
             // is beyond, which here is the room's own ambient. Spec 0098's
-            // box list left the glazing out by hand and capriccio's own
+            // box list left the glazing out by hand and xanadu's own
             // comment says why: a slot is what a window looks like from
             // inside a marble.
             //
@@ -4834,7 +4834,7 @@ impl Renderer {
             .unwrap_or(self.camera.position);
         // **And a lamp the traced thing cannot see does not light it.**
         // There is no shadow in `shade`, so every lamp within range reached
-        // every surface, through walls and floors: capriccio's ball stood
+        // every surface, through walls and floors: xanadu's ball stood
         // over the room below and wore four highlights from lamps under its
         // own floor. Jake, looking at it: there are lights being reflected
         // on the ball that have no obvious source. The source was a storey
@@ -4881,7 +4881,7 @@ impl Renderer {
         // **And the sun does not reach a traced thing under a roof.**
         // `shade` has no shadow, so the one light the mesh pass keeps out of
         // every room by shadowing it reached every traced surface through
-        // the roof. capriccio's storm rides its lightning on the sun for
+        // the roof. xanadu's storm rides its lightning on the sun for
         // exactly that reason, per its spec 0016: the sun is the light that
         // cannot get indoors. It got into the ball. Jake: the lightning from
         // the garden and field shows up in the sphere's reflections.
@@ -4906,7 +4906,7 @@ impl Renderer {
             // It still lights the room: a wall is lit by the lamp beside it
             // whether or not a mirror across the room has a clear line to
             // that lamp. Taking them out of the list altogether was the
-            // first go and put capriccio's whole reflected room out. What a
+            // first go and put xanadu's whole reflected room out. What a
             // lamp behind a floor may not do is put a highlight on the
             // mirror's own surface, which is the thing with no visible
             // source.
@@ -4991,7 +4991,7 @@ impl Renderer {
 /// other way, away from the half-space spec 0093's clip plane keeps, so what
 /// it draws is nothing at all. On the screen that costs nothing, because a
 /// mirror you are not looking at is not on the screen. Inside another
-/// mirror's reflection it is the whole picture: capriccio's corridor showed
+/// mirror's reflection it is the whole picture: xanadu's corridor showed
 /// its far wall as black rectangles, and only ever inside the near wall's
 /// glass.
 ///
@@ -5003,7 +5003,7 @@ impl Renderer {
 /// **Clipped at its own glass either way, per spec 0093.** Without it the
 /// reflection starts at the reflected eye, which is as far behind the glass
 /// as the viewer is in front, so everything standing back there is in the
-/// picture. That is what stopped capriccio's hall of mirrors being placed
+/// picture. That is what stopped xanadu's hall of mirrors being placed
 /// three times over.
 /// Which of a mirror's two textures a pane of it wears in this frame.
 ///
@@ -6887,7 +6887,7 @@ mod tests {
     /// **The leak this had, and the reason the spec's own out of scope is
     /// not the whole rule.** That paragraph says a mesh that grows takes a
     /// new range and leaves its old one dead, on the grounds that nothing
-    /// rebuilds a mesh per frame. Three things do: capriccio hands over the
+    /// rebuilds a mesh per frame. Three things do: xanadu hands over the
     /// garden's pond, the baths' water and the tesseract on every single
     /// frame, so appending each time grew the pool for as long as the game
     /// ran.
@@ -8505,7 +8505,7 @@ mod asked {
 
     /// Spec 0092 and 0093, in the smallest room there is.
     ///
-    /// **Every diagnosis of capriccio's mirrors came from a room with
+    /// **Every diagnosis of xanadu's mirrors came from a room with
     /// thirteen other things in it**, read off a pane through a reflected
     /// camera and a screen-space sample. Seven of them were wrong. This is
     /// two quads and a block in an empty scene, read back as pixels.
@@ -8574,7 +8574,7 @@ mod asked {
     /// **The moment the moon clipped through the cloud.** This engine reads
     /// translucency off an instance's own alpha, which is right for
     /// everything a game tints and wrong for a cloud deck: a deck's tint is
-    /// its colour and its holes are in its picture. capriccio hands the
+    /// its colour and its holes are in its picture. xanadu hands the
     /// deck the share of the weather it is drawing, and for every second
     /// outside a turn that share is exactly one, so the deck was sorted
     /// solid. In the solid run the batches go out in the order their meshes
@@ -8606,7 +8606,7 @@ mod asked {
             )
         };
         // the deck first, so it is earlier in the solid run than the thing
-        // it has to cover. That is the arrangement capriccio had by
+        // it has to cover. That is the arrangement xanadu had by
         // accident and it is the whole of what this holds.
         let deck = renderer.add_sky_mesh(&wall(-1.0));
         let beyond = renderer.add_mesh(&wall(-3.0));
@@ -8835,7 +8835,7 @@ mod asked {
 
     /// Spec 0086: the sun does not move the sky.
     ///
-    /// **capriccio had the sun on its sky dome for a fortnight and it read
+    /// **xanadu had the sun on its sky dome for a fortnight and it read
     /// as a fault in the weather.** A backdrop went through `fs_main` like
     /// any other mesh, so the half of the dome turned toward the sun came
     /// out brighter, and where `max(dot(N, L), 0)` clipped at nought there
@@ -8930,7 +8930,7 @@ mod asked {
     ///
     /// **A mirror shows what is behind you and a lens shows what is in
     /// front**, so the two are told apart by putting something behind the
-    /// eye and nothing in front. capriccio's ball was a lens and read as a
+    /// eye and nothing in front. xanadu's ball was a lens and read as a
     /// smear of bands in the room's floor colour; what its spec 0064 wants
     /// is the room, the right way up.
     #[test]
@@ -9080,7 +9080,7 @@ mod asked {
     ///
     /// **`shade` has no shadow**, so the one light the mesh pass keeps out
     /// of every room by shadowing it reached every traced surface through
-    /// the roof. capriccio rides its lightning on the sun for exactly that
+    /// the roof. xanadu rides its lightning on the sun for exactly that
     /// reason, its spec 0016 being that the sun is the light that cannot
     /// get indoors, and the storm outside flashed in a ball two floors in.
     ///
@@ -9167,7 +9167,7 @@ mod asked {
     }
 
     /// Spec 0091's cap of two, in the same empty room: two mirrors facing
-    /// each other, which is what a hall of mirrors is and what capriccio's
+    /// each other, which is what a hall of mirrors is and what xanadu's
     /// corridor does not do.
     ///
     /// The one-mirror version above passes, so whatever is wrong there is

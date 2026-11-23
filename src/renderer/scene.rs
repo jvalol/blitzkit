@@ -59,7 +59,7 @@ pub struct Instance {
     /// enough.** The highlight is added on top of the colour at the lamp's
     /// full intensity, so a near black floor still takes a full white spot,
     /// and the only way to quieten one was to make it so small it missed the
-    /// pixel. capriccio ran `aim::VOID` to a quarter of a million doing that.
+    /// pixel. xanadu ran `aim::VOID` to a quarter of a million doing that.
     /// This is the other knob: one multiplies the lobe's width, this one its
     /// height.
     pub specular: f32,
@@ -68,7 +68,7 @@ pub struct Instance {
     ///
     /// **Because a light source could not be drawn as one.** The shader is
     /// `base * (ambient + diffuse * lit) + specular * lit`, so a colour
-    /// past one glows only in so far as the ambient lifts it: capriccio's
+    /// past one glows only in so far as the ambient lifts it: xanadu's
     /// lamps read as lit glass under a bright sky and as grey boxes under
     /// a dim one, and the day it pinned its indoor fill they went out. A
     /// fitting is not a surface that happens to be bright. It is the thing
@@ -495,7 +495,7 @@ impl Scene {
         // **Worse than it has ever been, not merely different.** This said
         // something whenever the count changed, which for a cap you walk
         // into and out of is every frame: one turn on the spot at
-        // capriccio's way in bought two hundred lines in fourteen seconds
+        // xanadu's way in bought two hundred lines in fourteen seconds
         // and buried everything else in the log. Jake, 2026-11-09, twice in
         // one morning, by pasting the log and saying nothing.
         //
@@ -631,7 +631,7 @@ impl Scene {
     /// Which lamp lost its shadow and which ones have the slots, in a
     /// sentence the warning can carry.
     ///
-    /// **A count sends a reader to the wrong room.** capriccio printed
+    /// **A count sends a reader to the wrong room.** xanadu printed
     /// `asked 1 more point lights to cast than the 2 it carries` under
     /// every staged picture of its arcade for as long as its trail could be
     /// finished, and nothing in that line says the lamp holding a slot is a
@@ -2555,7 +2555,7 @@ mod tests {
     ///
     /// **A high-water mark and not a change.** Saying something whenever the
     /// count moved meant a line a frame for a cap you walk in and out of:
-    /// one turn on the spot at capriccio's way in bought two hundred lines
+    /// one turn on the spot at xanadu's way in bought two hundred lines
     /// in fourteen seconds. It climbs to the worst now and goes quiet, which
     /// is the number anybody reading the log was after.
     ///

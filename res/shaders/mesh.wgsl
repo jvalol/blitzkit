@@ -1004,7 +1004,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 // through `fs_main` a dome takes the directional light like a solid, so the
 // half of it turned toward the sun is brighter, and where `max(dot(N, L), 0)`
 // clips at nought there is a hard edge across the sky in the shape of the
-// dome's own terminator. capriccio had that edge over its garden and it was
+// dome's own terminator. xanadu had that edge over its garden and it was
 // read as a fault in the storm's picture four times before anybody turned the
 // sun off and watched it go.
 //

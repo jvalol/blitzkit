@@ -30,11 +30,11 @@ blitzkit::picture::drawn_looks_right(&reference, picture::SIZE, |renderer| {
 });
 ```
 
-capriccio demonstrates it, like with cascada and poolhall.
+xanadu demonstrates it, like with cascada and poolhall.
 
 ## Games built on it
 
-[capriccio](https://github.com/jvalol/capriccio) is, well, an arcade, a building with more room than sense, and ultimately a (nested) demonstration of blitzkit. It has the games built with this engine in a room to explore them.
+[xanadu](https://github.com/jvalol/xanadu) is, well, an arcade, a building with more room than sense, and ultimately a (nested) demonstration of blitzkit. It has the games built with this engine in a room to explore them.
 
 - [pong](https://github.com/jvalol/pong)
 - [snake](https://github.com/jvalol/snake)

@@ -1,5 +1,5 @@
 ---
-title: capriccio
+title: xanadu
 type: arcadium
 layout: single
 # Every string a reader sees is on this page, body and front matter both, so
@@ -10,7 +10,7 @@ no_webgpu: "This browser has no WebGPU, so there is nothing here to draw with. C
 needs_keyboard: "This wants a keyboard and a mouse. On a phone there is no way to walk or look around, so there is nothing to show you."
 ---
 
-# capriccio
+# xanadu
 
 A building that could not stand up in the real world, with a cabinet in the
 hall for every game built on [blitzkit](https://blitzkit.jva.lol). It runs in
@@ -26,4 +26,4 @@ past the door. Hold **Escape** to leave.
 The cabinets are scenery. Starting one means running a program. Four of the games run in a browser on their own
 page: [starry, snake, slider and poolhall](https://blitzkit.jva.lol/docs/games/).
 
-[GitHub](https://github.com/jvalol/capriccio)
+[GitHub](https://github.com/jvalol/xanadu)

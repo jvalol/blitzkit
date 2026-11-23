@@ -234,7 +234,7 @@ impl Camera {
     /// the reflected eye two metres into whatever is back there, and
     /// everything between it and the glass lands in the picture. No wall
     /// thickness helps. Without this a mirror can only hang on the outside
-    /// of a building, which is what blocked three placements of capriccio's
+    /// of a building, which is what blocked three placements of xanadu's
     /// own hall of mirrors.
     pub fn clipped_at(&self, on_plane: Vec3, normal: Vec3) -> Self {
         let Some(n) = normal.try_normalize() else {
@@ -1163,7 +1163,7 @@ mod tests {
     /// The five tests above all pass against a shear that keeps almost
     /// nothing: they sample a handful of points, and the one that walks away
     /// from the glass walks straight down the view axis, dead centre, where
-    /// the shear does least. capriccio's mirrors came back holding one
+    /// the shear does least. xanadu's mirrors came back holding one
     /// figure standing near the glass and nothing else, and every one of
     /// these was green.
     ///

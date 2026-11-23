@@ -3,7 +3,7 @@
 //! **A file of its own because the gate signs bytes.** `check-voice` holds a
 //! file to a hash, so copy sharing a file with code is copy that comes
 //! unsigned on the next edit to the code beside it. Jake would be signing
-//! `lib.rs` again after every change to the renderer. capriccio answered this
+//! `lib.rs` again after every change to the renderer. xanadu answered this
 //! with its own `says.rs` and this is that answer: the words here change when
 //! the words change, and `.copy-files` names this file and the readme.
 

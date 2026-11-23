@@ -51,7 +51,7 @@ picture, and the test for a picture is a picture.
 Three builds of the arcade at 512, 1024 and 2048, same frame:
 
 ```
-./target/release/capriccio --pose "2.395 0 -12.6 1.55 0.0 -12.0 120.0" \
+./target/release/xanadu --pose "2.395 0 -12.6 1.55 0.0 -12.0 120.0" \
   --picture-for 2 --picture-to /tmp/a.png
 ```
 

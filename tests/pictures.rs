@@ -1646,7 +1646,7 @@ mod bumps {
         /// +z for v.
         ///
         /// **The one thing a flat bump map cannot tell you.** Every picture
-        /// in this repo and all twenty of capriccio's draw through the bump
+        /// in this repo and all twenty of xanadu's draw through the bump
         /// binding and so hold that a flat one changes nothing, which was
         /// the whole of the evidence. Nothing asked which way a bump that is
         /// not flat bends, and it bent the wrong way for a day: both axes of

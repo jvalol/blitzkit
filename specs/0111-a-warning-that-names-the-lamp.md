@@ -12,7 +12,7 @@ wrong building: now do the engine warning that says which lamp.
 
 **A count is half an answer and the wrong half.** `a scene asked 1 more
 point lights to cast than the 2 it carries` is true, cheap and says
-nothing anybody can act on. capriccio printed it under every staged
+nothing anybody can act on. xanadu printed it under every staged
 picture of its arcade for as long as its trail could be finished, and
 what it turned out to mean was that a hearth a hundred and sixty four
 metres west and twenty seven up, in a building you cannot see from the
@@ -51,7 +51,7 @@ Nothing here, and an afternoon downstream. The guess this line invites is
 that the two lamps fighting are the two in the room you are looking at,
 because those are the ones you can see. The answer was a lamp that is not
 in the frame, which no amount of staring at the frame produces. See
-capriccio's spec 0128 for the fix at that end.
+xanadu's spec 0128 for the fix at that end.
 
 ## Acceptance criteria
 
@@ -60,7 +60,7 @@ capriccio's spec 0128 for the fix at that end.
 
 ### Verified by hand
 
-- capriccio's own case, with its spec 0128 cull taken back out: the line names the refused gallery lamp at `[3.345, 2.82, -15.0]` and the two holding slots, one of them the hearth at `[-163.85, 27.08, 15.15]`. One line where a hand-placed print was needed before.
+- xanadu's own case, with its spec 0128 cull taken back out: the line names the refused gallery lamp at `[3.345, 2.82, -15.0]` and the two holding slots, one of them the hearth at `[-163.85, 27.08, 15.15]`. One line where a hand-placed print was needed before.
 
 ## Out of scope
 

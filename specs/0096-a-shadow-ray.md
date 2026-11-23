@@ -270,7 +270,7 @@ nothing. The spike's value is that the next person to ask does not have to
 find out whether the stack works, and `ray-spike` runs in a second.
 
 **The spike is not in the gate.** `./list-repos` finds the engine, its
-shapes, capriccio and `games/*`, and nothing at the project root, so
+shapes, xanadu and `games/*`, and nothing at the project root, so
 `./check-all` never builds this. It will rot the first time wgpu's
 experimental API changes, which it is documented to intend. That is the
 right trade for a thing whose job was to answer one question once, and it is

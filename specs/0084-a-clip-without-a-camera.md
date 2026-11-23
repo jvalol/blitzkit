@@ -250,7 +250,7 @@ can state.
 
 ## 2026-11-16: it is multisampling, and the refresh has a gate
 
-Jake asked for it to be chased down, after capriccio's clip started drifting
+Jake asked for it to be chased down, after xanadu's clip started drifting
 too and made it two.
 
 **Reproduced in minutes rather than gigabytes.** Films go to `/dev/stdout`
@@ -318,7 +318,7 @@ recorded that same 46 of 212, which is how far back this goes.
 
 What follows from that is that the gate keeps fourteen of the sixteen clips
 and not all of them. menger is over the tolerance whenever the tie has
-flipped since the committed clip was filmed, and `load` and capriccio are
+flipped since the committed clip was filmed, and `load` and xanadu are
 over it every time, from the text fault below.
 
 ### Filming flat, built and backed out
@@ -348,12 +348,12 @@ where the drift it was meant to cure reads 46 frames at 0.0058; and it is
 soft ones.
 
 **And it would not have fixed the two that churn most.** `load` differs in
-all 420 frames across three streams at one sample, and capriccio in all 240
+all 420 frames across three streams at one sample, and xanadu in all 240
 across two. Those are the glyph fault and multisampling was never theirs.
 
 ### The glyph fault, with a sharper handle
 
-capriccio's text drift is there in frame 0. menger's first three frames
+xanadu's text drift is there in frame 0. menger's first three frames
 always agreed, which is what made its fault look like something that
 accumulates; this one does not accumulate at all. Two processes drawing the
 same first frame of text disagree, so what varies is seeded per process
@@ -364,7 +364,7 @@ That is where to start, and it is not small.
 
 ## 2026-11-20: it is the section hasher, and the atlas is where it lands
 
-capriccio, chased down to a cause. 2026-11-13's entry says it is not the
+xanadu, chased down to a cause. 2026-11-13's entry says it is not the
 section hasher. It is, and the measurement that cleared it was read off films
 of menger and load, where menger is the multisample fault and no hasher was
 ever going to move it.
@@ -383,7 +383,7 @@ it is settled once per process and does not accumulate.
 
 `glyph_brush` lays out, rasterises and packs on the CPU and hands a GPU
 nothing but finished rects, so all of this needs no device and runs in
-milliseconds. Eight processes a condition, capriccio's own numbers
+milliseconds. Eight processes a condition, xanadu's own numbers
 (`SAYS_AT` 20 by 20, `SAYS_LINE` 24, `SAYS_SIZE` 18, the plain face).
 
 **The layout is identical**, bit for bit, in all eight. 152 glyphs, every
@@ -439,11 +439,11 @@ each:
 
 | | 300 frames, four runs |
 | --- | --- |
-| capriccio | one stream, no frame differs |
+| xanadu | one stream, no frame differs |
 | `load` | four streams, worst pair differs in 226 frames |
 | menger | two streams, worst pair differs in two frames |
 
-**So capriccio is fixed and `load` is not.** capriccio's help lines are the
+**So xanadu is fixed and `load` is not.** xanadu's help lines are the
 same text every frame, so one warm-up settles every variant for good. `load`
 counts as it runs, so a glyph nobody has seen arrives mid-run, the atlas
 evicts to make room, and what it keeps is held in a set keyed by that same
@@ -454,11 +454,11 @@ menger is the control and behaves: it is the multisample tie and no atlas
 change touches it.
 
 **It costs nothing measurable.** Two builds, three films of 300 frames each.
-capriccio 5.30 to 5.50s with the warm-up against 5.26 to 5.80s without,
+xanadu 5.30 to 5.50s with the warm-up against 5.26 to 5.80s without,
 `load` 1.66 to 1.67s against 1.62 to 1.87s. The ranges overlap.
 
 **And a three frame film proves nothing**, which is this spec's own lesson
-learned twice more today. Eight short films read as capriccio fixed, `load`
+learned twice more today. Eight short films read as xanadu fixed, `load`
 fixed and menger fixed, and two of those three were wrong: menger's first
 three frames always agree, and `load`'s drift needs a run long enough for its
 readout to turn over.

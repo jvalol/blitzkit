@@ -58,7 +58,7 @@ wrong.
 
 ## A backdrop is not lit, 2026-11-12
 
-Jake, playing capriccio: *the shift from day to night has a border like thing
+Jake, playing xanadu: *the shift from day to night has a border like thing
 going on.* A pale wedge in the sky over the garden, with a hard edge down one
 side of it, in the same place every evening.
 
@@ -91,7 +91,7 @@ the same shape as a solid wants a second mesh.
 
 **What this moves in a game.** The colour handed to `backdrop` is now what
 lands rather than what the light multiplies, which is what `aim::SKY`'s own
-note in capriccio already claimed it was and the arithmetic was not. capriccio
+note in xanadu already claimed it was and the arithmetic was not. xanadu
 divides its fill out through `garden::gives_off`, the same way its moon and
 its runestone already did. Nothing else in the project draws a backdrop.
 

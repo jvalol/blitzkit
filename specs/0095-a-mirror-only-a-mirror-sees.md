@@ -8,7 +8,7 @@
 Two mirrors facing each other show each other. Until this, the far one came
 back as a black rectangle inside the near one's glass, and only there.
 
-**It did not finish the job.** Measured in capriccio's window on 2026-11-09:
+**It did not finish the job.** Measured in xanadu's window on 2026-11-09:
 the black moved one level deeper and stayed. The pane in front of you holds
 the corridor now, where before it was black at arm's length, and the panes
 inside that reflection are black. The rest of this spec is what was wrong and
@@ -17,7 +17,7 @@ the thing in the title.
 
 ## Why it belongs here
 
-**It is the last thing wrong with capriccio's hall of mirrors**, and the one
+**It is the last thing wrong with xanadu's hall of mirrors**, and the one
 Jake reported four times in a day: the mirrors do not reflect each other.
 Everything else about the room had been built and the glass worked when you
 looked at it straight on.
@@ -156,5 +156,5 @@ the lamps in question do not cast, so no shadow map is in play.
 
 ### Verified by hand
 
-- Standing in capriccio's corridor at Jake's own pose, the panes that were black show the corridor, the figure and the far wall. Taken as a picture from that exact position, before and after.
+- Standing in xanadu's corridor at Jake's own pose, the panes that were black show the corridor, the figure and the far wall. Taken as a picture from that exact position, before and after.
 - And the panes inside that reflection are still black, from every pose tried on 2026-11-09. The recession is one bounce, not two.

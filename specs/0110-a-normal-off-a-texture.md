@@ -21,7 +21,7 @@ spec 0029's contact shadows, which is a short march through the depth buffer
 and is the occlusion family. What it has no way to do at all is perturb a
 normal per fragment, and that is the one a cobbled street wants.
 
-The want is concrete rather than theoretical. capriccio's spec 0124 laid a
+The want is concrete rather than theoretical. xanadu's spec 0124 laid a
 village street in fan-set cobbles and could not make them read as stone.
 Baking a dome into the albedo gets most of the way at a glance and never
 changes when the sun crosses the sky, which is the one thing a stone floor
@@ -77,7 +77,7 @@ Measured 2026-11-22 on the arcade's own staged hall shot, which is 1,202
 draws and 4,329,236 triangles at 1200 by 948 with no bump asked for
 anywhere in it. The engine at `d9afbe4`, where this works, against
 `b05de4d`, the commit before any of it, with one game build between them:
-capriccio at `8bc0fe5`, which predates the village street and so binds the
+xanadu at `8bc0fe5`, which predates the village street and so binds the
 flat default on every surface it has. That is the case this paragraph is
 about, a game paying for a feature it does not use.
 
@@ -147,7 +147,7 @@ as a surprise.
 
 ## What using it found
 
-The first game to ask for one was capriccio's village street, the day after
+The first game to ask for one was xanadu's village street, the day after
 this was built, and it came back wrong twice. Both faults are the kind that
 only a user finds, which is the argument for building the feature and the
 street in that order.
@@ -190,7 +190,7 @@ bitangent both come out negated, which is the bump map turned half a turn
 about the normal. A bend asked for along +u arrived along -u.
 
 **And a half turn about the normal is a height field negated.** The map
-capriccio lays on its street is the textbook one, `(-dh/du, -dh/dv, 1)`
+xanadu lays on its street is the textbook one, `(-dh/du, -dh/dv, 1)`
 normalised, so what the street was lit as was the negative of the stones it
 was cut from: proud setts and sunken joints, read as sunken setts and proud
 joints.
@@ -204,7 +204,7 @@ two tests below compare frames with each other rather than with a reference,
 and it is the argument for having written them at all rather than leaving
 them on a list.
 
-The three capriccio references that draw through a real bump map differ by
+The three xanadu references that draw through a real bump map differ by
 2.0, 2.6 and 17.2 per cent of their pixels between the two.
 
 ## Acceptance criteria
@@ -213,7 +213,7 @@ The three capriccio references that draw through a real bump map differ by
   with no bump of its own does not land in
   theirs. — `renderer::scene::tests::a_bump_map_keys_a_batch`
 - A flat bump map leaves the shading alone. Every picture test in this repo
-  and all twenty of capriccio's render through the new binding and match
+  and all twenty of xanadu's render through the new binding and match
   their references, which is a stronger claim than one test of it would make
   and is how the sRGB fault above was caught at all.
 - A bump map that is not flat leans the normal the way its channels say, on
@@ -225,13 +225,13 @@ The three capriccio references that draw through a real bump map differ by
 ### Verified by hand
 
 - Whether a cobbled street reads as stone, which is the thing this is for.
-  Run capriccio, walk to the village, and watch the grooves as the hour goes
-  round: the test of it is that they change. Capriccio's spec 0125 is that
+  Run xanadu, walk to the village, and watch the grooves as the hour goes
+  round: the test of it is that they change. Xanadu's spec 0125 is that
   street.
 - And whether it still reads right now the bend has been turned round. The
   street's own bump map was drawn against the engine that bent it backwards,
   so whatever the two of them agreed on, they agreed in the wrong frame.
-  Capriccio's three references wait on that judgment.
+  Xanadu's three references wait on that judgment.
 - What it costs on the arcade, against the same frame before. Taken
   2026-11-22 and written into "What it costs" above. Not with `--cost` in
   the end: that flag puts the readout in the window, and six runs of a
@@ -244,7 +244,7 @@ The three capriccio references that draw through a real bump map differ by
 
 - **A tangent attribute on `Vertex`.** Named above and deliberately not
   taken.
-- **Occlusion.** The engine has spec 0029's contact shadows and capriccio
+- **Occlusion.** The engine has spec 0029's contact shadows and xanadu
   turns them off in one line, because the bath house ceiling is eleven ribs
   under a lid lit from below and the march stripes them. The real want there
   is not a new feature but a switch per draw rather than per frame, so a

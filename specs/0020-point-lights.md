@@ -32,7 +32,7 @@ It was sixty four until 2026-11-09, and the paragraphs below were written
 against that number and left as they were, because what they are about is the
 shape of the rule rather than its size. Spec 0089 measured sixty four against a
 hundred and twenty eight twice: the first time the pictures were byte for byte
-the same and sixty four stayed, and the second time, after capriccio's hall got
+the same and sixty four stayed, and the second time, after xanadu's hall got
 a lit ceiling, four views of eleven differed and this moved.
 
 **The warning is once a frame and only when the number moves.** It was once
@@ -98,7 +98,7 @@ now asked it twice and answered it differently each time.
 
 **A cap reports a high-water mark, not a change.** Saying something whenever
 the count moved is a line a frame for a cap you walk in and out of: one turn
-on the spot at capriccio's way in wrote 226 lines in fourteen seconds and
+on the spot at xanadu's way in wrote 226 lines in fourteen seconds and
 buried everything else in the log. Jake, 2026-11-09, by pasting it twice and
 saying nothing. The same turn now writes 45, climbing to the worst and going
 quiet, and the worst is the number anybody reading the log was after.

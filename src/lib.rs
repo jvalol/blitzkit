@@ -445,7 +445,7 @@ impl Said {
             // arguments, so the readout came up and nothing looked wrong.
             // Jake lost a recording that way on 2026-11-18, and the only
             // sign of it was a file named after an option sitting in
-            // capriccio's root.
+            // xanadu's root.
             //
             // Refused rather than taken, because a value that looks like an
             // option is a mistake every time at this size: the things handed
@@ -653,7 +653,7 @@ fn as_help(blocks: &[&Options]) -> String {
 ///
 /// **Public because a game can answer an option before the engine sees
 /// one.** [`start`] calls this, so a game that does nothing has it anyway;
-/// but capriccio reads `--walk`, `--tour`, `--film` and `--screenshots` in
+/// but xanadu reads `--walk`, `--tour`, `--film` and `--screenshots` in
 /// its own `main` and returns without ever calling `start`, so a typo of
 /// one of those four fell through to a window. A game that answers anything
 /// itself calls this first.
@@ -1757,7 +1757,7 @@ mod tests {
     /// ignored the path, and still raised the readout, `asked_for` finding
     /// the flag in the arguments whatever `--record` had done with it. The
     /// only sign was a file named after an option turning up in
-    /// capriccio's root.
+    /// xanadu's root.
     #[test]
     fn an_option_does_not_swallow_the_next_one() {
         // **Written with the engine's own flags**, this test's strings
@@ -1916,7 +1916,7 @@ mod tests {
 
     /// Spec 0109: a value that begins with a dash is not a typo.
     ///
-    /// **The reason this needs the list at all.** capriccio is run with
+    /// **The reason this needs the list at all.** xanadu is run with
     /// `--at -0.5` and the engine with `--picture-for -5`, and anything
     /// that found a typo by looking for a leading dash would refuse both.
     /// Only the list can say that the word before them swallows them.

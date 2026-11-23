@@ -247,7 +247,7 @@ impl Water {
     /// node working out a slope, six chop waves and a normalize, and hands
     /// back an allocated [`MeshData`]. Asked once a frame for five minutes
     /// of simulated wading at four frame rates, that was fifty-seven
-    /// seconds of capriccio's sixty-two second suite.
+    /// seconds of xanadu's sixty-two second suite.
     ///
     /// The height field is the simulation, and the mesh's own height is
     /// that field unchanged: the chop is in the normals and not in the
@@ -258,7 +258,7 @@ impl Water {
     /// **And the field has no skirt.** The mesh hangs one from the rim down
     /// to the basin floor, per spec 0043, so a caller asking the whole of
     /// it how far off still the water is gets the depth of the pool
-    /// instead. Every one of capriccio's three callers sliced the vertices
+    /// instead. Every one of xanadu's three callers sliced the vertices
     /// by hand to dodge that, and the slice is the sort of thing that is
     /// right until somebody adds a vertex.
     pub fn off_still(&self) -> f32 {
@@ -853,7 +853,7 @@ mod tests {
     /// anything is happening at all.
     ///
     /// **[`Water::off_still`] now, which this used to be.** Spec 0101: it
-    /// sat here private while capriccio's pool tests asked the same
+    /// sat here private while xanadu's pool tests asked the same
     /// question of a freshly built mesh, once a frame for five minutes.
     fn stirring(water: &Water) -> f32 {
         water.off_still()

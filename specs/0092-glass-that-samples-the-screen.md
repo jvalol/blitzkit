@@ -59,7 +59,7 @@ normalised coordinates un-stretch it exactly on the way out.
 Set to the target's own size at first, which is what a target read back for
 anything else would want. With a square target and a wider screen the glass
 read normalised screen coordinates against a square picture, sampled mostly
-outside it, and came back black. That is what stopped capriccio's two walls
+outside it, and came back black. That is what stopped xanadu's two walls
 reflecting each other through four wrong diagnoses, and what found it was
 hanging a target on a wall as an ordinary textured quad and seeing content in
 it: the measurement the guesses had been standing in for.
@@ -90,7 +90,7 @@ worse with nothing saying why.
 ### Verified by hand
 
 **None of these is done, because there is no glass hung yet.** The engine's
-half is built and tested; the panels are capriccio's.
+half is built and tested; the panels are xanadu's.
 
 **This is the half no test reaches**, because there is no way to read a target
 back and a mirror is judged by whether it moves right.

@@ -5,7 +5,7 @@
 
 ## Goal
 
-Jake, in capriccio's gallery with the fittings still reading as pale boxes:
+Jake, in xanadu's gallery with the fittings still reading as pale boxes:
 all the light sources should glow.
 
 ## Behavior
@@ -16,7 +16,7 @@ it that owes nothing to the room. A game saying a surface is a light has only
 one lever, a colour past one, and that colour is multiplied by the light
 landing on the surface: it glows in so far as the ambient lifts it and no
 further. So the same fitting reads as lit glass in a bright room and as a
-grey box in a dim one, and capriccio's lamps went out the day that game
+grey box in a dim one, and xanadu's lamps went out the day that game
 pinned its indoor fill to one hour.
 
 A lamp's glass is not a surface that happens to be bright. It is where the
@@ -53,7 +53,7 @@ attribute, or added in the wrong place, fails it.
 
 ### Verified by hand
 
-In capriccio's gallery, which is the room that asked:
+In xanadu's gallery, which is the room that asked:
 
 - Before, looking up at the ceiling: six fittings shaded like any other box, one face darker than the next.
 - After: six fittings flat and blown out, with their pools on the wall under them.
@@ -66,4 +66,4 @@ does not make the air around it read as lit.
 
 Whether a glowing thing should light its neighbours. It does not: this is an
 emissive term and not a light, and a game that wants both pushes a lamp as
-well, which is what every fitting in capriccio already does.
+well, which is what every fitting in xanadu already does.

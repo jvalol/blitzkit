@@ -438,7 +438,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         // lens: it bends the room twice, turns it over and squeezes it into
         // a disc, which is true and reads as a smear of bands rather than
         // as a room. A mirror shows the room the right way up and in its
-        // own colours, and a room is what capriccio's spec 0064 built one
+        // own colours, and a room is what xanadu's spec 0064 built one
         // of these to show. Jake, 2026-11-12: the reflections aren't
         // accurate, and it could look a lot more like a mirror.
         onward = reflect(way, normal);
@@ -505,7 +505,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let what_it_is = tracing.lamps[n * 2u + 1u];
         // **Only the lamps this thing can see.** There is no shadow in a
         // traced surface, so a lamp behind a floor put a highlight on
-        // capriccio's ball from a storey down, with nothing in the room to
+        // xanadu's ball from a storey down, with nothing in the room to
         // account for it. The renderer marks those with a negative range.
         if (where_it_is.w <= 0.0) {
             continue;

@@ -61,7 +61,7 @@ nothing accumulates.
 ## What this does not decide
 
 **Where the mirror goes, what it is framed in, and what the figure in it
-looks like.** Those are capriccio's, and the figure is the part that has
+looks like.** Those are xanadu's, and the figure is the part that has
 failed before: every version of a person in this building was wrong at close
 range first, and a mirror is nothing but close range.
 
@@ -76,9 +76,9 @@ range first, and a mirror is nothing but close range.
 ### Verified by hand
 
 **Neither of these is done, because there is no mirror to stand in front of
-yet.** The engine's half is built and tested; the glass is capriccio's.
+yet.** The engine's half is built and tested; the glass is xanadu's.
 
-- A mirror shows the room. — run capriccio and stand in front of one.
+- A mirror shows the room. — run xanadu and stand in front of one.
 - You are in it, and the screen does not show the inside of your head. — walk at one and look down on the way.
 
 ## Out of scope

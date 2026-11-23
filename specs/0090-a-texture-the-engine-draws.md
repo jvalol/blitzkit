@@ -102,7 +102,7 @@ rather than a thing to fix: nobody plays a game that is never drawn.
 
 **Cost is a second mesh pass and the game is told so.** `gpu_passes` gains a
 slot named `target`, so the price is readable in the same column as every
-other pass instead of arriving as a frame time that got worse. capriccio's
+other pass instead of arriving as a frame time that got worse. xanadu's
 mesh pass is 3.3 ms on the median and 4.7 ms on the 95th at 64 lamps (spec
 0089), and a mirror at half the window's width is a quarter of the fragments
 and all of the draw calls, so the two ends of that are worth measuring rather
@@ -142,7 +142,7 @@ Found by trying to build the room, like the gap spec 0091 closed.
 **Everything behind the glass is in the reflection.** A true planar mirror
 wants the near plane sheared onto the glass's own plane, and this does not do
 that. What saves a mirror hung flush on a solid wall is the wall, and this
-building has rooms behind walls (capriccio spec 0011), so a mirror on the
+building has rooms behind walls (xanadu spec 0011), so a mirror on the
 wrong wall shows the room through it.
 
 Named here because it is the first thing anybody hanging one of these will
@@ -169,9 +169,9 @@ this one.
 
 **None of these is done yet, because there is no mirror to stand in front
 of.** The engine's half of this spec is built and tested; the glass is
-capriccio's, and these are the checks to make at the window when it exists.
+xanadu's, and these are the checks to make at the window when it exists.
 
-- A mirror shows the room and not a black rectangle. — run capriccio and stand in front of one.
+- A mirror shows the room and not a black rectangle. — run xanadu and stand in front of one.
 - The reflection is the right way round. — raise one hand at it and watch which hand the figure raises.
 - A target frame paints no interface over itself. — stand at a mirror with the help text up and read what the glass shows.
 - A mirror on a wall with a room behind it shows that room through it, which is the limit above. — hang one on the hall's near wall and look.

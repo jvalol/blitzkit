@@ -14,7 +14,7 @@ which is a thing a dense building does not have.
 Spec 0090 left this out and said so: "anything behind the glass is in the
 reflection ... the fix is a spec of its own rather than a line in this one."
 
-**It has since blocked three placements in a row.** capriccio spec 0061 tried
+**It has since blocked three placements in a row.** xanadu spec 0061 tried
 the hall's east wall, then the strip east of it, then the nook's west wall,
 and each time the test that says nothing stands behind the glass found
 something: a fitting in the nook 30 cm the far side of a borrowed wall, the

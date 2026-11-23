@@ -60,7 +60,7 @@ back for a suite that would rather count.
 
 ## Where this is used
 
-[capriccio]({{< relref "docs/capriccio" >}}) holds fifteen rooms this way,
+[xanadu]({{< relref "docs/xanadu" >}}) holds fifteen rooms this way,
 one committed picture each in its `tests/rooms`, which is where to count them.
 cascada holds a run of dominoes going over, and poolhall a table after the
 break. Each of those is one call and a committed picture.

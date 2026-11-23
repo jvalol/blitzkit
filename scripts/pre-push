@@ -148,7 +148,7 @@ behind=$(./check-fresh 2>/dev/null |
 
 # **A build behind only its own repo may be one nobody could tell from the
 # one in the tree.** Nothing here can read a test out of a source file. The
-# capriccio keeps a `#[cfg(test)]` const near the top of main.rs,
+# xanadu keeps a `#[cfg(test)]` const near the top of main.rs,
 # `REACH_PAST`, with seventeen thousand lines of game after it, so there is
 # no line to cut at and no path to exclude, the way specs and markdown are
 # excluded in `behind_source`.
@@ -210,7 +210,7 @@ if [ -n "$behind" ]; then
   theirs=$(printf '%s\n' "$behind" | sed 's/^ *//; s/,.*//' | tr '\n' ' ' | sed 's/ *$//')
 
   # **Through `./list-repos` and not off the name.** The lines above say
-  # "capriccio" and "starry", and the first of those is a directory at the
+  # "xanadu" and "starry", and the first of those is a directory at the
   # project root while the second is under `games/`. Read as bare names, every
   # game silently fell through the `-d` below and the one repo this could ever
   # warn about was the arcade.
@@ -237,7 +237,7 @@ if [ -n "$behind" ]; then
   echo "It takes a game's name to do one rather than all eighteen:"
   echo
   echo "  (cd $root && ./build-web)"
-  echo "  (cd $root && ./build-web capriccio)"
+  echo "  (cd $root && ./build-web xanadu)"
   echo
   echo "then commit web/ here and push again. git push --no-verify skips this."
   exit 1

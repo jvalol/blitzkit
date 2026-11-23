@@ -9,7 +9,7 @@ corrected three things in it.
 
 A shader that traces rays against a list of axis-aligned boxes, so that a
 surface in a game can show what no camera in the scene is pointed at. Written
-for capriccio's spec 0064, which wants a glass sphere you can walk round.
+for xanadu's spec 0064, which wants a glass sphere you can walk round.
 
 ## Why this is not spec 0096
 
@@ -42,7 +42,7 @@ first thing that path made redundant.
 
 ## What it costs instead, which is the real question
 
-**It sees boxes and nothing else.** Everything in capriccio that is turned
+**It sees boxes and nothing else.** Everything in xanadu that is turned
 on a wheel is invisible to it: the cellar's bottles and urns, the fountain,
 the candles, the hearth's flames. So are the people, the Mandelbrot panel's
 picture, the sky, and every mesh a game uploads.
@@ -103,7 +103,7 @@ grows a hole where the sky should be.
 
 **A cap, held by a test.** The number of boxes a shader will read is a
 constant in both places, the way `MAX_POINT_LIGHTS` already is. A thousand,
-which is well past capriccio's whole building at 635 and is 48 kilobytes.
+which is well past xanadu's whole building at 635 and is 48 kilobytes.
 Clamped rather than grown: a game that hands over more loses the tail rather
 than the frame.
 
@@ -140,7 +140,7 @@ what came back was two flat regions rather than a room.
 **Nothing here caught it and the picture is why.** `a-lens-bends-what-is-
 behind-it` was blessed by eye, and a wrong bend looks like a bend: the fix
 moved 0.7% of that picture's pixels, which is a change you would not notice
-and would bless again. What found it was capriccio's spec 0064 building a
+and would bless again. What found it was xanadu's spec 0064 building a
 room round one of these, where the ball is large against its surroundings
 and the error is not subtle.
 
@@ -151,13 +151,13 @@ radius, which the old line was not for any mesh but one.
 
 **What is still not held** is the shading inside the glass. `shade` knows the
 ambient and the one directional light, so a traced room lit by lamps comes
-back at its colours times the ambient alone. capriccio's room multiplies the
+back at its colours times the ambient alone. xanadu's room multiplies the
 whole thing by five to make up for it, which is a fudge in a game making up
 for a gap in an engine. Point lights in the tracer are their own spec.
 
 ## A mirror as well as a lens, 2026-11-12
 
-Jake, standing in capriccio's room over the nook: *the reflections aren't
+Jake, standing in xanadu's room over the nook: *the reflections aren't
 accurate, and the colour of the ball could look a lot more like a mirror
 like reflective surface instead of the blue, which isn't accurate for the
 room either.*
@@ -174,15 +174,15 @@ that spec built one of these to show.
 
 **The blue was this spec's own arithmetic showing through.** `shade` has the
 ambient and the one directional light and nothing else, and the ambient a
-game hands it is the sky's: at capriccio's night that is three hundredths
+game hands it is the sky's: at xanadu's night that is three hundredths
 red against nine hundredths blue, so everything the ball showed came back
 blue over a room of warm stone. A game can divide that out in the tint, and
-capriccio does, but it is worth saying here that the tint is where the
+xanadu does, but it is worth saying here that the tint is where the
 world's own colour has to be undone until the tracer has lamps.
 
 ## And the lamps, for the highlight, 2026-11-12
 
-Jake, looking at capriccio's ball: *there should be specular highlights on
+Jake, looking at xanadu's ball: *there should be specular highlights on
 the sphere from the lighting in the room as well.*
 
 **This spec said the tracer reads none of the camera's lamps and that was
@@ -198,12 +198,12 @@ another loop over every fragment of the ball.
 
 **The lamps are not in the box list and could not be.** A lamp is a point
 and the list is boxes. What is in the list is whatever the game draws round
-them, which is why capriccio's bays show up in the ball as the lit panels
+them, which is why xanadu's bays show up in the ball as the lit panels
 they are, and this is the glint that no panel can give.
 
 ## A round shape in the list, 2026-11-12
 
-Jake went up to capriccio's ball: *this is not a faithful reflection. The
+Jake went up to xanadu's ball: *this is not a faithful reflection. The
 columns are wrong. The shape isn't true.*
 
 It was not, and no arrangement of boxes was going to make it so. A turned
@@ -258,7 +258,7 @@ pass asks it.
 
 ### A lamp the traced thing cannot see, 2026-11-13
 
-Jake, looking at capriccio's ball: *there are lights being reflected on the
+Jake, looking at xanadu's ball: *there are lights being reflected on the
 ball that have no obvious source.* The source was a storey down. There is
 no shadow in `shade`, so every lamp within range reached every surface
 through walls and floors, and the ball wore highlights from the lamps under
@@ -283,7 +283,7 @@ point costs, and a ball an arm's length across can live with it.
 Jake: *the lightning from the garden and field shows up in the sphere's
 reflections.*
 
-capriccio rides its storm's flash on the sun rather than on the ambient,
+xanadu rides its storm's flash on the sun rather than on the ambient,
 and its spec 0016 says why in as many words: the ambient is added
 everywhere and a flash riding on it would light the cellar, while the sun
 is shadowed by the roof and so is the one light in the building that cannot
@@ -336,7 +336,7 @@ the slot is there is that the mirrors were not measured either.
 
 ### Verified by hand
 
-- **A glass sphere in capriccio**, per spec 0064, once that room exists.
+- **A glass sphere in xanadu**, per spec 0064, once that room exists.
 - **The frame's timings with the surface in shot and out of it**, from the same spot.
 
 ## Out of scope
@@ -356,7 +356,7 @@ nothing has asked for it.
 
 ## 2026-11-11: the spike, and four things it found
 
-**Jake: do the spike.** It is `zz_spike` in capriccio, ignored by default and
+**Jake: do the spike.** It is `zz_spike` in xanadu, ignored by default and
 compiled with the suite so it cannot rot the way `ray-spike` is expected to.
 It traces the arcade's own boxes on one CPU core and writes pictures. No
 renderer, no shader, no feature.

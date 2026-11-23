@@ -108,7 +108,7 @@
       // Fetched here and not in the head, which is the point: five megabytes
       // over the wire, and a visitor who opened the page to see what it was
       // should not pay it to find out.
-      import('/web/capriccio.js')
+      import('/web/xanadu.js')
         .then((module) => module.default())
         .then(function () {
           canvas.removeAttribute('data-blitzkit');

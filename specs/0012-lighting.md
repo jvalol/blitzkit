@@ -61,7 +61,7 @@ rendering, and ambient occlusion.
 ## 2026-11-09: a shininess of nought is no highlight
 
 The power only makes the spot smaller. A small spot at full strength sliding
-over anything curved is a bead of plastic, which is what capriccio's people
+over anything curved is a bead of plastic, which is what xanadu's people
 looked like at 900, the tightest number there was: Jake, 2026-11-09, the
 figure is too reflective, it looks like plastic.
 
@@ -91,7 +91,7 @@ Nothing on screen moved, because the shader was already right. What was wrong
 is everything that reads the shading in Rust, which is the picture tests, the
 probes and anything a game works out before it draws.
 
-**The default stays 32.** capriccio asked for nought on 196 surfaces and now
+**The default stays 32.** xanadu asked for nought on 196 surfaces and now
 says so itself, in its own `aim::Plain`, which is the right place for a
 building to disagree with an engine. Eight other games take the default and
 want it.
@@ -103,7 +103,7 @@ want it.
 ## 2026-11-09: on a flat surface, 32 is the only shading there is
 
 **Jake: measure lantern and poolhall.** Then: measure the other six.
-capriccio had just stopped taking this default on 196 surfaces and the
+xanadu had just stopped taking this default on 196 surfaces and the
 question was whether the other games should too.
 
 Set to nought, eight games, six move:
@@ -136,7 +136,7 @@ So this default is not a surface finish. On flat geometry lit by the sun it
 is the whole of the shading, and a game that draws a floor and nothing else
 is relying on it without anyone having said so.
 
-That also says which rooms were safe. capriccio's mostly did not move,
+That also says which rooms were safe. xanadu's mostly did not move,
 because they are lit by point lamps and a lamp's falloff varies with
 distance and gives a plane its gradient honestly. The cellar's baize looked
 like the exception, and the section below measured it and found it is not.
@@ -150,7 +150,7 @@ Two things would have to change before the number could:
   a pool.
 - **A specular strength**, which this engine did not have until the section
   below. It had tightness only, so every highlight sat at the lamp's full
-  intensity. capriccio found this twice without naming it: `aim::DULL` notes
+  intensity. xanadu found this twice without naming it: `aim::DULL` notes
   that 64 is small and bright and a hot spot, and `aim::VOID` has to run to a
   quarter of a million because the shader adds the highlight on top of the
   surface rather than multiplying it in, so a near black floor still takes a

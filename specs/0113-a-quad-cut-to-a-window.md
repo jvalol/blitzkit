@@ -13,7 +13,7 @@ a list that scrolls, anything inside a frame.
 
 Because until spec 0112 nothing needed it. A rectangle square to the screen is
 cut to a panel by shrinking it, which is arithmetic on two corners and is what
-capriccio's map in the corner did while it was north up.
+xanadu's map in the corner did while it was north up.
 
 A turned rectangle cannot be. The overlap of a turned rectangle and a square
 panel is a polygon of up to eight sides, and a quad is four corners. So the
@@ -53,7 +53,7 @@ nought wide, which is legal and is the right answer.
 
 ### Verified by hand
 
-- capriccio's map in the corner stops at its own border rather than running
+- xanadu's map in the corner stops at its own border rather than running
   out across the floor. Run it and press N.
 
 ## Out of scope

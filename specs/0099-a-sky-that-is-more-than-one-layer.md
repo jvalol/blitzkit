@@ -10,7 +10,7 @@ so that what is between the two is between the two.
 
 ## Why
 
-Jake, 2026-11-13, playing capriccio: the moon still appears to be in front of
+Jake, 2026-11-13, playing xanadu: the moon still appears to be in front of
 the clouds. It was, and it had to be. Spec 0086's backdrop is one opaque
 surface at the far plane, and a moon has to be nearer than the far plane to be
 drawn at all, so the moon was in front of the weather and no cloud could ever
@@ -66,7 +66,7 @@ appears to just clip through the clouds.
 
 This engine reads translucency off an instance's own alpha, which is right for
 everything a game tints and wrong for a deck. A deck's tint is its colour and
-its holes are in its picture, so capriccio handed it the share of the weather
+its holes are in its picture, so xanadu handed it the share of the weather
 it was drawing, and for every second outside a weather's turn that share is
 exactly one. Sorted solid, the deck went into the run where batches go out in
 the order their meshes were uploaded, and the deck's mesh happened to be made
@@ -98,7 +98,7 @@ wants a second mesh.
 ### Verified by hand
 
 - A cloud crosses the moon rather than the moon crossing the cloud. Run
-  capriccio at `AT=0.75` and watch, per its spec 0066.
+  xanadu at `AT=0.75` and watch, per its spec 0066.
 
 ## Out of scope
 

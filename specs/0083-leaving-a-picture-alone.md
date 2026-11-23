@@ -79,7 +79,7 @@ That last sentence was wrong, and the section below says why.
 
 **Jake: fix the bless guard too.**
 
-Blessing capriccio's ten changed rooms rewrote fifteen references. The extra
+Blessing xanadu's ten changed rooms rewrote fifteen references. The extra
 five were `figure`, `garden`, `mirrors`, `register` and `valhalla-hall`, none
 of which had failed, and `./same-picture` puts the worst of them a tenth of a
 percent from the file it replaced, against a threshold of two tenths. Five

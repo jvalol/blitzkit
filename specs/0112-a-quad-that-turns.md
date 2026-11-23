@@ -16,7 +16,7 @@ since has been two corners. That is right for what the overlay is mostly for,
 which is plates, bars and panels, and it was never a decision to leave
 rotation out. It was simply never wanted.
 
-capriccio's spec 0132 wanted it and wrote down that it could not have it. A
+xanadu's spec 0132 wanted it and wrote down that it could not have it. A
 map in the corner that turns under a fixed arrow is the shape everybody knows
 from a driving game, and what it ran into was that a quad is axis aligned and
 so is its uv, so the only way to draw a turned map was to rasterise the whole
@@ -53,13 +53,13 @@ they were.
 
 ### Verified by hand
 
-- capriccio's map in the corner turns under the mark as you walk. Run it and
+- xanadu's map in the corner turns under the mark as you walk. Run it and
   press N.
 
 ## Out of scope
 
 **Turning the text.** `wgpu_text` draws the help and the labels, and it is
-rented per capriccio's own note on it. A turned caption is a different
+rented per xanadu's own note on it. A turned caption is a different
 question and nobody has asked it.
 
 **Cutting a turned quad to anything.** That is spec 0113, and the two were

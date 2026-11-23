@@ -57,7 +57,7 @@ that shares a file with code is copy that comes unsigned the next time
 anything else in that file changes, and signing `lib.rs` would mean signing it
 again after every change to the renderer. The repo had no `.copy-files` at
 all, so a marker in `src` was invisible to the gate and would have shipped
-unread. capriccio's own `says.rs` is the same answer to the same question.
+unread. xanadu's own `says.rs` is the same answer to the same question.
 
 ## Acceptance criteria
 
@@ -71,7 +71,7 @@ unread. capriccio's own `says.rs` is the same answer to the same question.
   the play log to a file called `--where`, never used the path, and still
   raised the readout, since `asked_for` finds the flag in the arguments
   whatever the option before it did with it. The only sign was a file named
-  after an option sitting in capriccio's root. A value beginning with two
+  after an option sitting in xanadu's root. A value beginning with two
   dashes is refused and warned about; one that really does begin that way is
   given as `--name=--value`, which this does not touch.
 - Every flag the engine itself reads is named in `OPTIONS`. — `tests::the_help_names_every_flag_the_engine_takes`

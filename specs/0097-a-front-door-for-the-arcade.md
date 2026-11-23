@@ -12,7 +12,7 @@ A link that puts a stranger inside the building, with nothing to install and
 nothing to read first.
 
 The arcade has been playable in a browser since spec 0053's work reached it,
-and the only way in is `blitzkit.jva.lol/docs/capriccio/?play=capriccio`: a
+and the only way in is `blitzkit.jva.lol/docs/xanadu/?play=xanadu`: a
 documentation page, a sidebar of other pages, a still of the hall, and a
 button under it. Everything on that page is addressed to somebody deciding
 whether to use the engine. Jake's reason for wanting the other door, in his
@@ -47,7 +47,7 @@ and a second build of one artifact is a second thing to keep aligned.
 
 **The rule names the root and nothing else, and the obvious `/*` is a trap.**
 Everything on the alias is served by this same site, the arcade's module
-included, so the page fetches `arcadium.jva.lol/web/capriccio.js`. A `/*`
+included, so the page fetches `arcadium.jva.lol/web/xanadu.js`. A `/*`
 rewrite answers that with the page's own HTML, and what the reader gets is a
 module error about an unexpected `<`. The module cannot be fetched from the
 canonical host instead, because a cross-origin `import()` wants CORS headers
@@ -95,7 +95,7 @@ megabytes on something they cannot move.
 ### And one thing the page has to admit
 
 The cabinets do not work in a browser. `Cabinet::found` keeps a binary only
-when `binary.is_file()` (`capriccio/src/cabinet.rs:32`), a browser has no
+when `binary.is_file()` (`xanadu/src/cabinet.rs:32`), a browser has no
 files, so `is_built` is false for every cabinet and `start` returns false
 before it reaches `Command::new` (`cabinet.rs:75`). The hall is a hall of
 screenshots, which is most of what a cabinet is, and pressing Return at one
@@ -104,7 +104,7 @@ does nothing at all.
 Saying so on the page is the cheap half of the answer. The other half is
 making a cabinet in a browser send the reader to that game's own build, which
 four of the games have (`starry`, `snake`, `slider`, `poolhall`, offered on
-the games page), and that is a change in capriccio rather than in this site.
+the games page), and that is a change in xanadu rather than in this site.
 It is not in this spec.
 
 ## Acceptance criteria
@@ -121,7 +121,7 @@ it. What the repo's own gates do cover:
 What they do not cover, and it is worth naming: `./check-listings` asks that
 every example the site offers to play is built and every build is offered, and
 it reads `play name=` out of `site/content/docs/*.md` only. This page offers
-the arcade without that shortcode. Nothing breaks today because the capriccio
+the arcade without that shortcode. Nothing breaks today because the xanadu
 docs page still offers it, and if that page ever stops, the gate goes quiet
 about 7.9 MB rather than failing.
 
@@ -131,7 +131,7 @@ Checked on `hugo server` 2026-11-09, in the browser the desktop app carries,
 which has WebGPU:
 
 - Nothing out of `/web` is fetched before the button is pressed, and after it
-  `capriccio.js` (93 KB) and `capriccio_bg.wasm` (8,091 KB) arrive and nothing
+  `xanadu.js` (93 KB) and `xanadu_bg.wasm` (8,091 KB) arrive and nothing
   else does.
 - The canvas comes up 1024 by 768 laid out and 2048 by 1536 backed, which is
   the window at this screen's pixel ratio and not spec 0053's one-pixel
@@ -147,7 +147,7 @@ And on the alias, once it answered, which is the half a local server cannot
 be asked about:
 
 - `arcadium.jva.lol/` answers 200 with the building and no docs chrome, and
-  `arcadium.jva.lol/web/capriccio.js` answers with 95,424 bytes of JavaScript
+  `arcadium.jva.lol/web/xanadu.js` answers with 95,424 bytes of JavaScript
   rather than with the page, which is the rewrite trap above and would have
   read as a code fault.
 - The canonical link on that host still names `blitzkit.jva.lol/arcadium/`,
@@ -155,7 +155,7 @@ be asked about:
 
 ## Out of scope
 
-**Making the cabinets play.** Named above. It is capriccio's to answer.
+**Making the cabinets play.** Named above. It is xanadu's to answer.
 
 **A second Netlify site, and a repo of its own.** The wasm is built here and
 committed here, and that is where it should stay while there is one page

@@ -7,12 +7,12 @@
 
 Jake, 2026-11-15: the gate. Engine spec 0081's measurement found where a
 picture test's second and a half goes, and the picture tests turned out not
-to be the question. capriccio's suite ran in 62 seconds. Run without the
+to be the question. xanadu's suite ran in 62 seconds. Run without the
 picture tests at all, it ran in 62 seconds.
 
 One test was the whole of it:
 
-| capriccio's own test, run on its own | |
+| xanadu's own test, run on its own | |
 | --- | --- |
 | `the_pool_settles_with_somebody_in_it` | 57.1 s |
 | `the_pool_settles_rather_than_building_up` | 15.9 s |
@@ -55,7 +55,7 @@ one.
 
 ## What it bought
 
-capriccio's suite: 62 seconds to 13.3. The `spa` module on its own: 59.4
+xanadu's suite: 62 seconds to 13.3. The `spa` module on its own: 59.4
 seconds to 1.77. Nothing about the water changed, and nothing about what
 those three tests guard changed: a control that made `off_still` answer nine
 failed all three at the first frame.

@@ -75,7 +75,7 @@ survive the cull against the cap, which is three lines in the arcade's
 
 ## 2026-11-09: it stopped being enough, two days later
 
-**The condition this spec named happened.** capriccio's hall had never had a
+**The condition this spec named happened.** xanadu's hall had never had a
 lamp of its own: its light was the cabinets' marquees and the sign over the
 door. On 2026-11-09 every other square of its ceiling grid became a lit panel,
 which is twenty seven lamps hanging in front of you rather than in rooms behind

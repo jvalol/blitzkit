@@ -69,7 +69,7 @@ a way to break a command nobody thought to try.
 - Every flag the engine reads is in the list. —
   `tests::the_help_names_every_flag_the_engine_takes`
 
-capriccio holds the same of its own list, in its spec 0069. It is not cited
+xanadu holds the same of its own list, in its spec 0069. It is not cited
 here as a criterion, because a citation is resolved inside the crate whose
 spec it is and that test is in another one.
 
@@ -79,9 +79,9 @@ spec it is and that test is in another one.
   printed, to the byte.
 - `cargo run --release --example cubes -- --flim-size` says so and exits 2,
   where it used to open a window.
-- `capriccio --at -0.5 --screenshots` still runs, so the walk does not refuse
+- `xanadu --at -0.5 --screenshots` still runs, so the walk does not refuse
   a negative number.
-- `capriccio --screenshotss` and `capriccio --wal /tmp/route` are refused and
+- `xanadu --screenshotss` and `xanadu --wal /tmp/route` are refused and
   exit 2, where both used to fall past the four answers. `--screenshots`
   still prints its list, and `--walk nonsense` still reaches the walking and
   not the refusal.
@@ -89,7 +89,7 @@ spec it is and that test is in another one.
 ## 2026-11-19: and before a game answers anything of its own
 
 The paragraph that was here said an option read before `start` was out of
-scope, because capriccio answers `--walk`, `--tour`, `--film` and
+scope, because xanadu answers `--walk`, `--tour`, `--film` and
 `--screenshots` in its own `main` and returns without ever calling `start`.
 That left the four options a person is most likely to mistype as the four
 the refusal could not see: `--screenshotss` printed nothing, fell past every
@@ -97,7 +97,7 @@ one of them, and opened the building.
 
 **`refuse_unknown` is public**, which is the refusal on its own, and `start`
 calls it so a game that does nothing has it anyway. A game that answers
-anything itself calls it first, which capriccio now does as the first line
+anything itself calls it first, which xanadu now does as the first line
 of its `main`. Written as one function rather than as advice, because the
 alternative is each game printing its own refusal and that is the second
 list this spec is about.
