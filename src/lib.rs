@@ -81,6 +81,16 @@ pub trait Game {
     fn options(&self) -> Options {
         Options::none()
     }
+    /// How this one's window opens.
+    ///
+    /// [`Opening::Window`], unless a game says otherwise. A game you walk
+    /// around in wants the screen and a game you watch does not, and the
+    /// engine has both: the arcade is a building and pong is a rectangle.
+    /// Asked of the game rather than decided here, because the engine cannot
+    /// tell which it is holding.
+    fn opening(&self) -> Opening {
+        Opening::Window
+    }
     /// Called at the start of every frame, for anything that needs the
     /// renderer: locking the cursor, or uploading a mesh mid-game.
     #[allow(unused_variables)]
@@ -1055,10 +1065,64 @@ fn talk() {
     let _ = console_log::init_with_level(log::Level::Info);
 }
 
+/// How a game's window opens.
+///
+/// **Three, because two of them are not the same thing.** Jake, 2026-11-23:
+/// fullscreen is different from a window filling the screen with the menubar
+/// still in place, both should be options. They are: one hands the display
+/// over and takes the system's own furniture off the screen with it, and the
+/// other is an ordinary window grown as large as the system will make it,
+/// with the menu bar, the dock or the taskbar where they were.
+///
+/// The default is the window this engine has always opened, per Jake on the
+/// same day: it should be what it currently is as a default in the engine,
+/// and an option for any consumers of the engine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Opening {
+    /// A window the system sizes and places.
+    #[default]
+    Window,
+    /// A window as large as the system will make it, with the menu bar, the
+    /// dock or the taskbar still on the screen.
+    Filled,
+    /// The whole display, with nothing of the system over it.
+    WholeScreen,
+}
+
 /// What the window is asked for.
+///
+/// **`Borderless` and not `Exclusive`.** Exclusive takes a video mode and
+/// changes what the display is doing, and winit's own note says macOS gives
+/// no task switching and no spaces while it is on. Borderless is what it
+/// calls the idiomatic way for a fullscreen game there, and there is nothing
+/// to gain here from a mode change: the surface is made at whatever size the
+/// window settles on, per `wanted`, and a borderless one settles on the
+/// screen.
+///
+/// **What this does on each system**, from winit's own notes rather than
+/// from guessing. macOS, Windows, X11 and Wayland all take both: Wayland
+/// refuses only `Exclusive`, which is not asked for here, and Windows turns
+/// the screen saver off while fullscreen. `Filled` is unsupported on iOS,
+/// Android and the web, and `WholeScreen` on Android and Orbital. On the web
+/// fullscreen does nothing at all without a gesture from the reader, which
+/// is one reason the `wasm32` half of this ignores the whole question: a
+/// canvas there is the size the page makes it.
+///
+/// **A borderless window takes the monitor it opens on**, which on a desk
+/// with two of them is wherever the system decided to put it. Nothing here
+/// names a monitor, because nothing here knows which one somebody is sitting
+/// in front of.
 #[cfg(not(target_arch = "wasm32"))]
-fn attributes(title: &str) -> winit::window::WindowAttributes {
-    Window::default_attributes().with_title(title)
+fn attributes(title: &str, opening: Opening) -> winit::window::WindowAttributes {
+    let asked = Window::default_attributes().with_title(title);
+
+    match opening {
+        Opening::Window => asked,
+        Opening::Filled => asked.with_maximized(true),
+        Opening::WholeScreen => {
+            asked.with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)))
+        }
+    }
 }
 
 /// What a page marks the canvas it wants drawn into with.
@@ -1088,7 +1152,7 @@ const MARKED: &str = "canvas[data-blitzkit]";
 /// from its own observer and in its own time. What matters is that the size
 /// it settles on is picked up whenever it lands, which is `wanted`.
 #[cfg(target_arch = "wasm32")]
-fn attributes(title: &str) -> winit::window::WindowAttributes {
+fn attributes(title: &str, _opening: Opening) -> winit::window::WindowAttributes {
     use wasm_bindgen::JsCast;
     use winit::platform::web::WindowAttributesExtWebSys;
 
@@ -1346,7 +1410,12 @@ impl ApplicationHandler for App {
 
         self.asked = true;
 
-        let window = Arc::new(event_loop.create_window(attributes(&self.title)).unwrap());
+        let opening = self.game.opening();
+        let window = Arc::new(
+            event_loop
+                .create_window(attributes(&self.title, opening))
+                .unwrap(),
+        );
         let instance_desc = wgpu::InstanceDescriptor::new_with_display_handle(Box::new(
             event_loop.owned_display_handle(),
         ));
@@ -2265,5 +2334,58 @@ mod tests {
             text_renderer.render_texts.is_empty(),
             "the readout carried over"
         );
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod opening_tests {
+    use super::*;
+
+    /// Each opening asks winit for its own thing, and the default asks for
+    /// neither.
+    ///
+    /// **What the engine controls is the asking.** What a system then does
+    /// with a fullscreen or a maximize is that system's, and winit's notes
+    /// are where that is written down; this holds the half that is ours, so
+    /// that a game saying `Filled` cannot quietly get `WholeScreen`.
+    ///
+    /// The two are not the same thing and the whole reason this enum has
+    /// three arms is that they were being treated as one: Jake, 2026-11-23,
+    /// fullscreen is different from a window filling the screen with the
+    /// menubar still in place.
+    #[test]
+    fn each_opening_asks_for_its_own_thing() {
+        let plain = attributes("a game", Opening::Window);
+
+        assert!(plain.fullscreen.is_none(), "a plain window went fullscreen");
+        assert!(!plain.maximized, "a plain window was maximized");
+
+        let filled = attributes("a game", Opening::Filled);
+
+        assert!(
+            filled.fullscreen.is_none(),
+            "a filled window went fullscreen"
+        );
+        assert!(filled.maximized, "a filled window was not maximized");
+
+        let whole = attributes("a game", Opening::WholeScreen);
+
+        assert!(
+            matches!(
+                whole.fullscreen,
+                Some(winit::window::Fullscreen::Borderless(None))
+            ),
+            "the whole screen was asked for as {:?}",
+            whole.fullscreen
+        );
+        assert!(!whole.maximized, "the whole screen was also maximized");
+    }
+
+    /// And a game that says nothing opens in a window, which is what the
+    /// engine did before any of this and what it has to go on doing for the
+    /// other seventeen games.
+    #[test]
+    fn a_game_that_says_nothing_opens_in_a_window() {
+        assert_eq!(Opening::default(), Opening::Window);
     }
 }

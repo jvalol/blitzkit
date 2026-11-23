@@ -40,4 +40,8 @@ Everything here needs a real window, so these are all verified by hand.
 
 ## Out of scope
 
-Fullscreen, multiple windows, cursor control, and suspend or resume on mobile.
+Multiple windows, cursor control, and suspend or resume on mobile.
+
+Fullscreen was on that list until 2026-11-23 and is spec 0114 now: a game says
+whether it opens in a window, in one as large as the system will make it, or on
+the whole display, and a window is still what it gets for saying nothing.
