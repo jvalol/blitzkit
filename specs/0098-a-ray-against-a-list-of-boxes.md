@@ -303,7 +303,7 @@ through a roof, and the flash rode in on the sun.
 ## Acceptance criteria
 
 - The sun does not reach a traced thing under a roof, so a storm outside does not flash in a room indoors. — `renderer::asked::the_sun_does_not_reach_a_traced_thing_under_a_roof`
-- A traced box can be a cylinder standing in it, which covers less of a mirror than the box does. — `renderer::asked::a_traced_box_can_be_round`
+- A traced box can be a cylinder standing in it, which covers less of a mirror than the box does. Spec 0107 took the flag away: the tracer reads the mesh itself now, so what holds this is that a round mesh reflects round. — `renderer::asked::a_round_mesh_reflects_round`
 - An index at or under nought draws a mirror, which shows what is behind the eye, and not a lens. — `renderer::asked::a_lens_with_no_index_is_a_mirror`
 - A lens shows the row behind it, inverted, which is the one thing spec 0092's glass cannot do. — `pictures::tests::a_lens_bends_what_is_behind_it`, which fails on 3.1% of its pixels with the index set to one
 - The box cap in Rust and the cap in the shader are the same number. — `renderer::scene::tests::the_tracer_holds_the_same_cap`
