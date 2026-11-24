@@ -460,7 +460,9 @@ mod tests {
         // is what catches the fix for that coming undone.
         let volume: f32 = pot
             .indices
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|triangle| {
                 let corner = |index: u32| Vec3::from(pot.vertices[index as usize].position);
                 let (a, b, c) = (
