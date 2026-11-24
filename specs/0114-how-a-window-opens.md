@@ -70,12 +70,23 @@ nothing here knows which one somebody is sitting in front of.
 
 ### Verified by hand
 
-- The arcade takes the display and snake does not. Run each and read the
-  size the renderer logs: 3456 by 2168 against 1600 by 1200 on the machine
-  this was written on.
-- **Whether `Filled` is worth having.** Nothing in this project asks for it
-  yet. It is here because it is the other half of the question, not because
-  a game wanted it.
+- The three are three different sizes. Run the arcade plain, with
+  `--windowed` and with `--fullscreen`, and read what the renderer logs:
+  3456 by 2104, 1600 by 1200 and 3456 by 2168 on the machine this was
+  written on. The 64 between the first and the last is the menu bar, which
+  is the whole distinction between `Filled` and `WholeScreen`.
+- A game that says nothing opens in a window. Run snake: 1600 by 1200.
+- **Whether `Filled` is worth having** was the open question when this was
+  written, and it was answered the same day. Jake: full screen should be a
+  cli option, but not the default. full screen window should be, with the
+  smaller window an engine default if one of the others is not provided. So
+  the arcade opens `Filled`, keeps `WholeScreen` behind `--fullscreen` and
+  `Window` behind `--windowed`, and the engine's own default is untouched.
+
+  The reason fullscreen is a flag rather than a default is worth keeping:
+  a borderless fullscreen window gets its own macOS space, which winit's
+  own note says, and `screencapture -l` cannot find it from another one. It
+  took the screenshot path out entirely for an afternoon.
 
 ## Out of scope
 
