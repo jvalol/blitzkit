@@ -1297,7 +1297,9 @@ mod pictures {
             let drawn = renderer.target_picture(target);
             let lit = drawn
                 .pixels
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .filter(|texel| texel[0] > 40 || texel[1] > 40 || texel[2] > 40)
                 .count();
 
@@ -1306,7 +1308,9 @@ mod pictures {
             assert_eq!(
                 blank
                     .pixels
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .filter(|texel| texel[0] > 40 || texel[1] > 40 || texel[2] > 40)
                     .count(),
                 0,
@@ -1621,7 +1625,7 @@ mod bumps {
             let mut total = 0.0;
             let mut count = 0usize;
 
-            for pixel in picture.pixels.chunks_exact(4) {
+            for pixel in picture.pixels.as_chunks::<4>().0 {
                 for level in &pixel[..3] {
                     total += *level as f32;
                     count += 1;

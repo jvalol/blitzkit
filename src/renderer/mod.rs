@@ -1739,7 +1739,7 @@ impl Renderer {
                 for line in 0..height {
                     let from = (line * padded) as usize;
 
-                    for texel in got[from..from + row as usize].chunks_exact(4) {
+                    for texel in got[from..from + row as usize].as_chunks::<4>().0 {
                         if swizzle {
                             pixels.extend_from_slice(&[texel[2], texel[1], texel[0], texel[3]]);
                         } else {
@@ -2192,7 +2192,9 @@ impl Renderer {
     fn tree_of(data: &MeshData) -> (Vec<crate::bvh::Node>, Vec<u32>) {
         let boxes: Vec<crate::collision::Aabb> = data
             .indices
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|face| {
                 let mut least = glam::Vec3::splat(f32::MAX);
                 let mut most = glam::Vec3::splat(f32::MIN);
@@ -7189,7 +7191,7 @@ mod tests {
         for one in &standing {
             let model = one.matrix();
 
-            for face in data.indices.chunks_exact(3) {
+            for face in data.indices.as_chunks::<3>().0 {
                 let corner = |n: usize| {
                     model.transform_point3(glam::Vec3::from(
                         data.vertices[face[n] as usize].position,

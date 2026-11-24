@@ -106,7 +106,7 @@ pub fn drawn(words: &str, tall: f32) -> TextureData {
     let (wide, high, mut pixels) = lettered(words, tall);
 
     // opaque, ground and all, per spec 0037
-    for texel in pixels.chunks_exact_mut(4) {
+    for texel in pixels.as_chunks_mut::<4>().0 {
         texel[3] = 255;
     }
 
@@ -270,7 +270,9 @@ mod tests {
         let level = &drawn.levels[0];
         let lit = level
             .pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|texel| texel[0] > 32)
             .count();
 
@@ -335,12 +337,16 @@ mod tests {
 
         let bare = level
             .pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|texel| texel[3] == 0)
             .count();
         let inked = level
             .pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|texel| texel[3] > 200)
             .count();
 
@@ -415,8 +421,10 @@ mod tests {
 
         for (one, other) in sign.levels[0]
             .pixels
-            .chunks_exact(4)
-            .zip(cut.levels[0].pixels.chunks_exact(4))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(cut.levels[0].pixels.as_chunks::<4>().0)
         {
             assert_eq!(
                 (one[0], one[1], one[2]),
@@ -624,7 +632,7 @@ mod tests {
         let sign = drawn("snake", 32.0);
         let level = &sign.levels[0];
 
-        for texel in level.pixels.chunks_exact(4) {
+        for texel in level.pixels.as_chunks::<4>().0 {
             assert_eq!(
                 (texel[0], texel[1], texel[2]),
                 (texel[0], texel[0], texel[0]),
@@ -635,13 +643,17 @@ mod tests {
 
         let darkest = level
             .pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|texel| texel[0])
             .min()
             .unwrap_or(255);
         let brightest = level
             .pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|texel| texel[0])
             .max()
             .unwrap_or(0);

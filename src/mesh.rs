@@ -261,7 +261,9 @@ impl MeshData {
 
         let flipped: Vec<u32> = self
             .indices
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|t| [t[0] + count, t[2] + count, t[1] + count])
             .collect();
 
@@ -303,7 +305,7 @@ impl MeshData {
         let mut indices = Vec::new();
         let mut moved_to = vec![u32::MAX; self.vertices.len()];
 
-        for triangle in self.indices.chunks_exact(3) {
+        for triangle in self.indices.as_chunks::<3>().0 {
             let uv = [triangle[0], triangle[1], triangle[2]]
                 .map(|index| self.vertices[index as usize].uv);
 
@@ -420,7 +422,7 @@ impl MeshData {
         }
 
         let mut found = vec![Vec3::ZERO; self.vertices.len()];
-        for triangle in self.indices.chunks_exact(3) {
+        for triangle in self.indices.as_chunks::<3>().0 {
             let [a, b, c] = [
                 triangle[0] as usize,
                 triangle[1] as usize,
@@ -451,7 +453,7 @@ impl MeshData {
         // with, which are the nearest thing that knows
         for index in still_missing {
             let mut borrowed = Vec3::ZERO;
-            for triangle in self.indices.chunks_exact(3) {
+            for triangle in self.indices.as_chunks::<3>().0 {
                 if !triangle.contains(&(index as u32)) {
                     continue;
                 }
@@ -468,7 +470,7 @@ impl MeshData {
     pub fn compute_normals(&mut self) {
         let mut normals = vec![Vec3::ZERO; self.vertices.len()];
 
-        for triangle in self.indices.chunks_exact(3) {
+        for triangle in self.indices.as_chunks::<3>().0 {
             let [a, b, c] = [
                 triangle[0] as usize,
                 triangle[1] as usize,
@@ -718,7 +720,7 @@ mod tests {
             let scaled = t * LINES as f32;
             (scaled - scaled.round()).abs() <= THICKNESS * 0.5
         };
-        for triangle in wire.indices.chunks_exact(3) {
+        for triangle in wire.indices.as_chunks::<3>().0 {
             let uv = [triangle[0], triangle[1], triangle[2]]
                 .map(|index| wire.vertices[index as usize].uv);
 

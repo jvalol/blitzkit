@@ -95,7 +95,9 @@ impl TextureData {
             .map(|level| {
                 level
                     .pixels
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .any(|texel| (texel[3] as f32) / 255.0 < crate::text::CUTOUT)
             })
             .unwrap_or(false)
