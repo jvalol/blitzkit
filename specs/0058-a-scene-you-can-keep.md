@@ -103,6 +103,9 @@ and in `load` go on meaning what they mean.
 
 - What is kept survives `reset` and is drawn in a frame that pushes
   nothing. — `renderer::scene::tests::what_is_kept_outlives_a_frame`
+- And a scene asked what it holds answers with the kept runs as well as
+  the pushed ones, in one set of
+  coordinates. — `renderer::scene::tests::a_scene_says_every_instance_it_holds`
 - A pushed scene and a kept scene of the same contents give the same runs,
   so keeping is an optimisation and not a second way to
   draw. — `renderer::culling::tests::keeping_draws_what_pushing_draws`

@@ -965,6 +965,46 @@ impl Scene {
         });
     }
 
+    /// Every instance this scene is holding, in no order worth relying on.
+    ///
+    /// **A read-back, like the six beside it.** `outlines`, `point_lights`,
+    /// `spot_lights`, `mirrors`, `glass_surfaces` and `lenses` all let a
+    /// game ask what it pushed; this is the same for the ordinary ones, and
+    /// it exists because xanadu's spec 0134 has two worlds standing on one
+    /// set of three coordinates and wanted to hold that neither draws the
+    /// other. There was no way to ask.
+    ///
+    /// **Both halves, or it answers with part of the scene.** What a game
+    /// pushes this frame and what it handed over once under spec 0058 are
+    /// two stores, and `is_empty` beside this reads both for the same
+    /// reason.
+    ///
+    /// **In one set of coordinates, which took finding.** A kept run is
+    /// stored relative to the middle of itself, per spec 0063, so what
+    /// reaches the GPU is a small number however far out the run stands.
+    /// Chained raw, this handed back world positions and run-local ones in
+    /// the same iterator: a single kept instance came out at the origin,
+    /// and a test asking where things were would have believed it. Each
+    /// run's own middle is added back.
+    ///
+    /// Yields values rather than references for that reason. Nothing in
+    /// the engine reads it; it is for whoever wants to know what they
+    /// asked for.
+    pub fn instances(&self) -> impl Iterator<Item = Instance> + '_ {
+        self.instances
+            .values()
+            .flatten()
+            .copied()
+            .chain(self.kept.iter().flatten().flat_map(|one| {
+                one.instances.iter().map(move |instance| {
+                    let mut moved = *instance;
+
+                    moved.shift(one.round.at);
+                    moved
+                })
+            }))
+    }
+
     pub fn lenses(&self) -> &[Lens] {
         &self.lenses
     }
@@ -1726,6 +1766,52 @@ impl Round {
 #[cfg(test)]
 mod tests {
     use super::{Placed, MAX_TRACED_LAMPS};
+
+    /// A scene says what it is holding, both halves of it.
+    ///
+    /// **Because the kept runs are the half that gets forgotten.** What a
+    /// game pushes this frame and what it handed over once under spec 0058
+    /// live in two stores, and an accessor that read only the first would
+    /// answer with part of the scene and look right in every test that
+    /// never used `keep`.
+    #[test]
+    fn a_scene_says_every_instance_it_holds() {
+        use super::{Instance, MeshId, Scene, TextureId};
+        use crate::mesh::Transform;
+
+        let mut scene = Scene::new();
+        let mesh = MeshId(0);
+        let here = glam::vec3(1.0, 2.0, 3.0);
+        let there = glam::vec3(-4.0, 5.0, -6.0);
+
+        assert_eq!(scene.instances().count(), 0, "a new scene holds something");
+
+        scene.push(mesh, &Transform::at(here));
+
+        let pushed: Vec<_> = scene.instances().collect();
+
+        assert_eq!(pushed.len(), 1, "one push, {} instances", pushed.len());
+        assert_eq!(
+            pushed[0].model[3],
+            [here.x, here.y, here.z],
+            "and it is not where it was put"
+        );
+
+        scene.keep(
+            mesh,
+            TextureId::WHITE,
+            vec![Instance::new(&Transform::at(there), glam::Vec4::ONE, 0.0)],
+        );
+
+        let both: Vec<[f32; 3]> = scene.instances().map(|one| one.model[3]).collect();
+
+        assert_eq!(both.len(), 2, "the kept run is not in the list");
+        assert!(
+            both.contains(&[there.x, there.y, there.z]),
+            "what was kept is not where it was kept: {:?}",
+            both
+        );
+    }
 
     /// Spec 0098: the cap in Rust and the cap in the shader are one number.
     #[test]
