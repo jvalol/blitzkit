@@ -9,7 +9,7 @@ weight: 1
 cargo add blitzkit
 ```
 
-Rust 1.87 or newer.
+Rust 1.90 or newer.
 
 ## A game is one trait
 

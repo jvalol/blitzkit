@@ -9,7 +9,7 @@ In which we build a cube you steer round a floor, picking up three marks.
 About a hundred and seventy lines, and it ends with a test that holds the
 frame against a picture of it.
 
-Rust 1.87 or newer.
+Rust 1.90 or newer.
 
 ```
 cargo new rover

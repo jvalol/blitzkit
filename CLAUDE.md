@@ -9,7 +9,14 @@ it: `pong`, `snake` and `tessera` in 2D, and `marble` and `slider` in 3D.
 
 ## Build and test
 
-Requires Rust 1.87 or newer (wgpu's MSRV).
+Requires Rust 1.90 or newer.
+
+Not wgpu's own number, which is still 1.87. `ordered-float` 5.5.0 wants
+1.90 and reaches the tree through `wgpu-hal`, so wgpu asks for more than it
+declares; `image` wants 1.88 on top of that. This said 1.87 and cited wgpu
+until 2026-11-24, when `cargo +1.87 check` turned out to fail at resolution
+rather than at a feature. The reason was right when it was written and the
+number stopped being the binding one without anything saying so.
 
 ```
 cargo build
