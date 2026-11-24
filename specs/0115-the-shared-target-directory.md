@@ -1,6 +1,6 @@
 # 0115 The shared target directory
 
-**Status:** draft
+**Status:** implemented
 **Date:** 2026-11-24
 
 ## Goal
@@ -62,6 +62,15 @@ on a missing binary. `cargo build --release --examples` in `blitzkit` is the
 fix, 18.56s cold on 2026-11-24. Doing it as part of the clean rather than
 discovering it is the whole of the difference between a chore and a morning.
 
+**What the gate costs either way**, measured 2026-11-24 on the tree
+emptied that morning: 511s cold, 13:55:45 to 14:04:16, with both the debug
+side and `target/msrv` built from nothing; 207s warm immediately after, at
+12,457 entries. The 182s in the table above is from 2026-11-20 and predates
+`./check-msrv`, which compiles every crate a second time under the declared
+floor, so about 25s of the warm figure is new work rather than a slower
+machine. The cold number is one sample and can only ever be: a tree is cold
+once.
+
 **The count is `ls -U target/debug/deps | wc -l`.** `-U` matters: without it
 `ls` sorts a million names before printing them.
 
@@ -73,24 +82,21 @@ knowledge that the number only goes one way.
 
 ## Acceptance criteria
 
-### Not built yet
-
-Nothing watches this. The count is known only when somebody thinks to ask
-for it, which on 2026-11-19 was two days after it started costing half an
-hour a run. What would implement this spec is one line of report, not a
-gate: `./check-all` or `./check-fresh` saying how many entries are in
-`target/debug/deps` when that number is past a threshold, the way
-`./check-fresh` says what is behind without refusing anything.
-
-- The count is reported when it passes the threshold, and not otherwise.
-  — no test yet
-- A tree emptied and then built is one `./check-all` can pass, examples
-  included. — no test yet
+**The report already existed when this spec was written**, at
+`./check-all:235`, and the first draft of this file said nothing watched
+the count. It prints the number every run and says a sentence about what it
+costs once the number is over 100,000. There are no tests, because what is
+being checked is a shell script counting a directory, so everything below
+is by hand.
 
 ### Verified by hand
 
 - The directory is empty after a clean, and `./check-film` passes.
   — `ls -U target/debug/deps | wc -l` then `./check-film`.
+- The count is in every gate run. — `./check-all`, last section.
+- A tree emptied and then built is one the gate passes, examples included.
+  — done on 2026-11-24: emptied at 12:10, `cargo build --release
+  --examples`, then `./check-all` green at 14:09.
 
 ## Out of scope
 
@@ -109,8 +115,11 @@ to empty the directory this project made.
 
 ## Open questions
 
-**What the threshold is.** 226,631 cost two and a half seconds and 2.78M
-cost half an hour, so it is somewhere between, and the dose-response says
-the curve is steep after a million. A first guess is 500,000, chosen because
-it is well under the point where the measured cost stops being seconds and
-is far enough above a day's work that it would not fire weekly.
+**Whether 100,000 is too eager.** The threshold was already chosen, by
+whoever wrote `./check-all:235`, and this spec's first draft proposed
+500,000 while not knowing that. The measurement says the lower number
+shouts early: 226,631 entries cost about two and a half seconds on a
+rebuild, which is not worth emptying 81 GiB for, and the gate had been
+saying "over 100,000" for some time before anybody did. A warning nobody
+acts on is the one that stops being read. Whether to raise it, or to keep
+it and treat the line as a count rather than an alarm, is not decided.
