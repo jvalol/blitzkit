@@ -113,11 +113,20 @@ menger and load do not. Every other example does, measured over two runs each
 of all sixteen on 2026-11-04, the arcade's 46 seconds and 90 metres of walking
 included. Three runs of menger gave three different streams.
 
-**The arcade fell out of this list and is back in it.** It stopped being
-stable some time after that measurement, nobody noticed until 2026-11-24,
-and it was fixed the same day: see the section dated that day below. The
-paragraph above is left as it was written, because the date on a measurement
-is half of what it says.
+**That heading is a date, not a count.** One of the two named in it was
+fixed six days later and the arcade joined and left the list after it, so a
+reader who stops here leaves with the wrong number. `load` was its `gpu`
+line, a figure measured on the card, and it has been out of a film since
+2026-11-20. The arcade stopped being stable some time after this
+measurement, nobody noticed until 2026-11-24, and it was fixed the same day.
+Both are sections below.
+
+As it stands: fifteen of the sixteen come back the clip they already were,
+and `menger` is the one that does not, which is the multisample tie this
+spec cannot fix without a sample a pixel.
+
+The paragraph above is left as it was written, because the date on a
+measurement is half of what it says.
 
 **This spec claimed otherwise first.** The claim was written off one example,
 `rolling`, which does match, and then stated as a property of all of them.
