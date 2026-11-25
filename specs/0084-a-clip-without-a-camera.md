@@ -577,6 +577,7 @@ in that window. So whatever moves is below the scene.
 | `MAX_MIRRORS` 2 to 3, so the third mirror is not turned away | warning gone, 30 frames still differ |
 | `MAX_POINT_LIGHTS` 128 to 192, so no lamp is dropped | warning gone, 31 frames still differ |
 | `BELIEVED` 10 to 0, which stops any occlusion answer being believed and so turns culling off | 31 frames still differ |
+| nothing: the planes check asked at the camera, by pressing P from the play log at 48.0s | nothing outlined, so no fighting pair there |
 
 The mirror one was the hypothesis going in, on the reasoning that a surface
 whose reflection was not drawn still samples its target and reads whatever is
@@ -584,12 +585,25 @@ in that memory. It is a good story and it is not what is happening.
 
 ### What is left
 
-Below the scene and not in the three budgets that fire near it. The engine
-draws with 8 samples a pixel, and sparse scattered pixels at this magnitude
-are what a coverage or depth tie looks like when it is resolved differently
-twice, which is the same family as menger above. `renderer/coplanar.rs`
-exists to find exactly that, and running it at the camera for frame 2900 is
-the next cheap step. Nobody has done it.
+Below the scene and not in the budgets that fire near it. The engine draws
+with 8 samples a pixel, and sparse scattered pixels at this magnitude are
+what a coverage or depth tie looks like resolved differently twice, which is
+the same family as menger above. That was the reason to ask `coplanar`, and
+it found nothing: pressing P from the play log at 48.0 seconds outlined no
+patch at all. The camera there is at `-16.90 -3.00 -5.48`, in the cellar
+looking at the baths' doorway.
+
+One caveat on that. The check is handed a reach body and throws out pairs
+nobody could stand and see, so a pair through the doorway and inside the
+baths could be filtered rather than absent. Asking it from inside the baths
+would close that off, and has not been done.
+
+Four mechanisms ruled out and the window still exactly where it was. What
+has not been tried is the one measurement that does not need a theory first:
+dumping the depth buffer, or the drawn list, for frame 2900 in two runs and
+diffing that rather than the picture. It would say whether the two runs ever
+disagree before the pixels, which is the question every one of these
+experiments has been circling.
 
 ## Acceptance criteria for the gate
 
