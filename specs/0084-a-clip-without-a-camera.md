@@ -659,6 +659,29 @@ theorising about what makes it, which here meant one dial instead of a
 renderer. And when a knob comes back unchanged, ask whether that knob could
 have changed the answer at all before writing down a no.
 
+### 2026-11-25: it held through the sampler change
+
+Three refreshes of xanadu at `98b77dd`, one after another, each came back
+the clip it already was, and `media/xanadu.mp4` is the same `296f1eeb` before
+the first and after the third. So the clock fix holds, and it holds across
+spec 0116, which put sixteen samples a texel under every textured surface in
+the building and moved every picture reference with it.
+
+**What these three runs are not is a byte comparison.** The fix above was
+measured by hashing every frame off `--film-to`. This was measured by
+`refresh-examples`, whose keep is `clips-apart` reporting the difference
+inside `picture::CHANNEL` and `picture::SHARE`, and which prints no numbers
+on a keep. Three runs each differing by a pixel of a frame would read exactly
+like this. What it says is that the arcade is back inside the gate and stayed
+there, not that the frames are identical.
+
+**And it retires a note in `refresh-examples`.** That file's header says
+xanadu is unstable, off three runs on 2026-11-24 with 49 frames of 1,802
+differing every time, and calls a clip coming back different the floor rather
+than a signal. Those runs were the clock, hours before `193886c` fixed it.
+The warning is right about how the number was misread and wrong about the
+clip, so it is corrected there rather than left to be read as current.
+
 ## menger keeps its multisampling
 
 Decided, and not a gap in the work. `menger` is the one clip a refresh can
