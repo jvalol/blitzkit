@@ -122,8 +122,9 @@ measurement, nobody noticed until 2026-11-24, and it was fixed the same day.
 Both are sections below.
 
 As it stands: fifteen of the sixteen come back the clip they already were,
-and `menger` is the one that does not, which is the multisample tie this
-spec cannot fix without a sample a pixel.
+and `menger` is the one that does not. That is the multisample tie, which one
+sample a pixel does fix and which Jake has decided against. The section
+**menger keeps its multisampling** below is where that stands.
 
 The paragraph above is left as it was written, because the date on a
 measurement is half of what it says.
@@ -657,6 +658,37 @@ Two things worth keeping from it. Look at where a difference is before
 theorising about what makes it, which here meant one dial instead of a
 renderer. And when a knob comes back unchanged, ask whether that knob could
 have changed the answer at all before writing down a no.
+
+## menger keeps its multisampling
+
+Decided, and not a gap in the work. `menger` is the one clip a refresh can
+rewrite for no reason anybody can state, and it stays that way because the
+alternative looks worse.
+
+**The cause is below the engine.** One pixel at the top of a vertical edge
+catches one multisample or does not: three frames of 420, one channel, three
+levels. `renderer::depth::samples` takes the best the device will give and
+this adapter gives eight. Which way the hardware resolves an exact coverage
+tie is nothing this engine can read or set, so there is no number here to pin
+the way `clock::SHOWN` pins the arcade's hour.
+
+**The fix works and is not wanted.** One sample a pixel has no tie to lose.
+`Renderer::offscreen_flat` was built for the film path alone, and three films
+of menger came back byte-identical. Jake looked at the two clips side by side
+on 2026-11-16 and the multisampled one lands better, so it came out; nothing
+in `src` carries it now. The numbers read the same way. A flat clip differs
+from the committed one in 212 of 212 frames, worst 0.0148, where the drift it
+was meant to cure reads 46 frames at 0.0058, and it is 580 KB against 505,
+because hard edges cost x264 more than soft ones.
+
+**So the price is one clip of sixteen.** A refresh writes a new
+`media/menger.mp4` whenever the tie has flipped since the committed one was
+filmed, and `clips_apart` cannot tell that from a real change. What is lost
+is reading a menger diff as meaning something, and what it bought is edge
+quality on a turning solid.
+
+Reopening it takes a reason the eye can give: a flat film Jake cannot tell
+from the committed one, or a way to settle the tie with the samples kept.
 
 ## Acceptance criteria for the gate
 
