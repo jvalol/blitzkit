@@ -408,6 +408,38 @@ impl Asked {
     }
 }
 
+/// How every texture this engine binds is read: linear and repeating, with
+/// mips, per spec 0011, and sixteen samples a texel, per spec 0116.
+///
+/// **Sixteen because that is the cap.** wgpu applies
+/// `anisotropy_clamp.min(16)` and a device that cannot filter
+/// anisotropically at all has the clamp brought back to 1 for it, so there
+/// is no capability to ask about here. Spec 0052's eight samples are the
+/// other kind and have to ask: that one fails validation rather than
+/// quietly giving less.
+///
+/// **One sampler, and every filter on it linear.** A clamp over one with
+/// any filter at `Nearest` is a sampler wgpu refuses, which is the one way
+/// this comes apart and is what `tests::sampling_more_than_once_wants_every
+/// _filter_linear` holds.
+///
+/// Written out here rather than inline at the one place it is used, because
+/// a descriptor built inside `made` needs a device to look at and this
+/// needs none.
+pub fn sampling() -> wgpu::SamplerDescriptor<'static> {
+    wgpu::SamplerDescriptor {
+        label: Some("Texture Sampler"),
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::Repeat,
+        address_mode_w: wgpu::AddressMode::Repeat,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::MipmapFilterMode::Linear,
+        anisotropy_clamp: 16,
+        ..Default::default()
+    }
+}
+
 impl Renderer {
     pub fn width(&self) -> f32 {
         self.config.width as f32
@@ -857,17 +889,7 @@ impl Renderer {
             &texture_bind_group_layout,
         );
 
-        // linear and repeating, with mips, per spec 0011
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("Texture Sampler"),
-            address_mode_u: wgpu::AddressMode::Repeat,
-            address_mode_v: wgpu::AddressMode::Repeat,
-            address_mode_w: wgpu::AddressMode::Repeat,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Linear,
-            ..Default::default()
-        });
+        let sampler = device.create_sampler(&sampling());
         let shadow_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Shadow Map"),
             size: wgpu::Extent3d {
@@ -6777,6 +6799,57 @@ pub struct Counted {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Spec 0116: a texel is sampled more than once.
+    ///
+    /// **A field nobody had named.** The sampler was trilinear from spec
+    /// 0011 and `..Default::default()` left the clamp at 1, so a street
+    /// running away from you was filtered as though it were minified as
+    /// hard across as along. The number is the whole of the change and
+    /// this is the line that says somebody chose it.
+    #[test]
+    fn a_texel_is_sampled_more_than_once() {
+        assert!(
+            sampling().anisotropy_clamp > 1,
+            "a texel is sampled {} time(s), which is no anisotropy at all",
+            sampling().anisotropy_clamp
+        );
+    }
+
+    /// Spec 0116: and every filter on that sampler is linear.
+    ///
+    /// **Which is wgpu's rule and not a preference.** A clamp over one with
+    /// any filter at `Nearest` is a sampler the library refuses, and the
+    /// refusal lands at device creation, so a game that wanted a crisp
+    /// texel and reached for `Nearest` here would take every game with it.
+    /// The two settings move together or neither moves.
+    #[test]
+    fn sampling_more_than_once_wants_every_filter_linear() {
+        let asked = sampling();
+
+        if asked.anisotropy_clamp <= 1 {
+            return;
+        }
+
+        assert_eq!(
+            asked.mag_filter,
+            wgpu::FilterMode::Linear,
+            "sampling a texel {} times wants a linear magnify",
+            asked.anisotropy_clamp
+        );
+        assert_eq!(
+            asked.min_filter,
+            wgpu::FilterMode::Linear,
+            "sampling a texel {} times wants a linear minify",
+            asked.anisotropy_clamp
+        );
+        assert_eq!(
+            asked.mipmap_filter,
+            wgpu::MipmapFilterMode::Linear,
+            "sampling a texel {} times wants a linear walk between mips",
+            asked.anisotropy_clamp
+        );
+    }
 
     /// Spec 0113: a run that asks for no window gets the whole frame, and
     /// one that asks for more than the frame gets the frame.

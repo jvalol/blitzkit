@@ -1,6 +1,6 @@
 # 0116 Anisotropic filtering
 
-**Status:** draft
+**Status:** implemented
 **Date:** 2026-11-25
 
 ## Goal
