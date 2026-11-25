@@ -583,7 +583,7 @@ The mirror one was the hypothesis going in, on the reasoning that a surface
 whose reflection was not drawn still samples its target and reads whatever is
 in that memory. It is a good story and it is not what is happening.
 
-### It is the cellar's clock
+### It is the cellar's clock, and not its hands
 
 Looking at where the pixels are, rather than guessing at another mechanism,
 ends it in one step. They are not scattered at all. Each frame's differences
@@ -601,19 +601,24 @@ That is one object in the room, tracking right and growing as the camera
 walks past it, and the window closes at 2930 because it leaves the edge of
 the screen. Magnified, the cluster sits on the dial of the cellar's clock.
 
-**So it is the multisample tie again**, the one menger has and the one this
-spec says it cannot fix without a sample a pixel.
-
 The cellar is the arcade's spec 0007 and this is its mantel clock, not the
-big one in the back room that spec 0130 is about. It carries its own
-`cellar::CLOCK_HAND_THICK` of 4 millimetres, because the back room's 14 on a
-dial a fifth the size would be a plank, and `cellar.rs:2126` has its seconds
-hand sweeping where the back room's steps. A hand four millimetres wide,
-across a room, moving smoothly rather than in steps, is about as near a
-sample boundary as anything in this building gets.
+big one in the back room that spec 0130 is about.
 
-Not the glyph fault: these numerals are strokes and corners rather than
-text.
+**The hands were the obvious answer and they are not it.** The clock carries
+its own `cellar::CLOCK_HAND_THICK` of 4 millimetres, a fifth of the back
+room's, and `cellar.rs:2126` sweeps its seconds hand where the back room's
+steps. A sweeping hair across a room is as near a sample boundary as
+anything in this building gets, so it looked like the multisample tie menger
+has.
+
+Tripled to 12 millimetres it is not. The hands are visibly thicker and 63
+pixels of frame 2925 change with them, so the knob works, and two films at
+12 millimetres differ on 33 frames in the same window as two at 4. Whatever
+is unstable on that dial is not its hands.
+
+What else is on it: the chapter ring, the minute track, the numerals as
+strokes and corners rather than text, the bezel, and whatever covers the
+face. Nobody has narrowed it past the dial.
 
 Frame 2900 being identical while 2884 and 2912 are not is the same reading
 rather than a problem with it. A tie only fights when an edge is near a
@@ -621,13 +626,18 @@ boundary, so some frames of the pass are quiet.
 
 ### What was ruled out on the way, and what it cost
 
-Four mechanisms were tested before anybody looked at where the pixels were:
-the third mirror, the point light over the cap, occlusion culling and
-coplanar faces. Each took a build and two films, about ten minutes, and each
-answered the question it was asked and not the one that mattered. The
-measurement that settled it was free and was available from the first hash
-comparison. Look at where a difference is before theorising about what makes
-it.
+Five mechanisms tested, each a build and two films, about ten minutes
+apiece: the third mirror, the point light over the cap, occlusion culling,
+coplanar faces, and the clock's hand thickness. Every one came back no.
+
+The first four were guesses made before anybody looked at where the pixels
+were, and looking cost nothing: the coordinates were in the first hash
+comparison, and they put the whole thing on one dial. That is the lesson
+worth keeping. Look at where a difference is before theorising about what
+makes it.
+
+It is also not finished. The dial is a place, not a mechanism, and the fifth
+guess was made after the looking and was wrong too.
 
 ## Acceptance criteria for the gate
 
