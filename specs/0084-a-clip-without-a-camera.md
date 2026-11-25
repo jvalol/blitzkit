@@ -113,6 +113,11 @@ menger and load do not. Every other example does, measured over two runs each
 of all sixteen on 2026-11-04, the arcade's 46 seconds and 90 metres of walking
 included. Three runs of menger gave three different streams.
 
+**The arcade is no longer one of the stable ones.** It stopped some time
+after that measurement and nobody noticed until 2026-11-24. See the section
+dated that day below; the paragraph above is left as it was written, because
+the date on a measurement is half of what it says.
+
 **This spec claimed otherwise first.** The claim was written off one example,
 `rolling`, which does match, and then stated as a property of all of them.
 That is the mistake spec 0079 made one day earlier, with `snake` standing in
@@ -523,6 +528,68 @@ public, so the example asks once in its own constructor.
 **Which leaves menger alone**, and menger is the multisample tie this spec
 cannot fix without a sample a pixel, which Jake looked at and turned down. Of
 the sixteen, fifteen now come back the clip they already were.
+
+## 2026-11-24: xanadu is not one of the fifteen any more
+
+**The arcade stopped filming the same twice.** The section above says the
+arcade's 46 seconds are stable, measured 2026-11-04. They are not, now. Six
+runs this day, same commit, same built games, nothing touched between them:
+every pair differs.
+
+What changed between the two dates has not been looked for, and nothing here
+guesses at it.
+
+### Where, exactly
+
+Always the same place and nowhere else. Frames 2884 to 2930 of 3600, which
+is 48.1 to 48.8 seconds into a sixty second film, and every one of the other
+3,553 frames matches to the byte. Four runs compared pairwise differ by 32 or
+33 frames each time, and at those frames there are up to four distinct values
+in four runs, so it is many-valued rather than a race between two outcomes.
+
+A frame in that window shows the cellar, looking through the doorway at the
+baths, with the second wine rack and the barrels to the right.
+
+Measured by hashing every frame off `--film-to` as it streams, which is how
+to compare two films without the 15 GB a run costs on disc.
+
+### How much
+
+About 35 pixels of 1,137,600 in each affected frame, 1,165 across the window,
+in a strip at x 668 to 1199 and y 449 to 511. Worst channel difference 48 of
+255, so it is visible where it lands rather than arithmetic in the last bit.
+Nobody watching the clip would see it. It defeats a byte comparison all the
+same, which is what the gate above is.
+
+**The still is outside the window.** `refresh-examples` pulls xanadu's still
+from 31.5 seconds, so `media/xanadu.png` comes back byte for byte every time
+while the clip never does. That had been noticed several times and read as
+the clip being fine.
+
+### Three things ruled out, each by changing it and filming twice
+
+The scene the game submits is identical between runs: stderr matches line for
+line, timestamps aside, including both of the over-budget warnings that fire
+in that window. So whatever moves is below the scene.
+
+| changed | what happened |
+| --- | --- |
+| `MAX_MIRRORS` 2 to 3, so the third mirror is not turned away | warning gone, 30 frames still differ |
+| `MAX_POINT_LIGHTS` 128 to 192, so no lamp is dropped | warning gone, 31 frames still differ |
+| `BELIEVED` 10 to 0, which stops any occlusion answer being believed and so turns culling off | 31 frames still differ |
+
+The mirror one was the hypothesis going in, on the reasoning that a surface
+whose reflection was not drawn still samples its target and reads whatever is
+in that memory. It is a good story and it is not what is happening.
+
+### What is left
+
+Below the scene and not in the three budgets that fire near it. The engine
+draws with 8 samples a pixel, and sparse scattered pixels at this magnitude
+are what a coverage or depth tie looks like when it is resolved differently
+twice, which is the same family as menger above. `renderer/coplanar.rs`
+exists to find exactly that, and running it at the camera for frame 2900 is
+the next cheap step. Nobody has done it.
 
 ## Acceptance criteria for the gate
 
