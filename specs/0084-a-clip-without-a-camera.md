@@ -599,8 +599,18 @@ or undefined anywhere. The arcade is a clock, and the film is a photograph
 of it taken twice.
 
 `clock::SHOWN` pins the hour at ten past ten so a reference picture holds
-still, and it is `#[cfg(test)]`: the picture tests pin the clock and a film
-does not. That is the fix, and it is a line.
+still, and it was `#[cfg(test)]`: the picture tests pinned the clock and a
+film did not.
+
+**Fixed in xanadu's `193886c`.** `SHOWN` is not test-only any more, and a run
+that is filming or staging a shot pins `wall_clock` to it on the first frame,
+beside `--layer` and before the pose. An hour given on purpose is left alone,
+and an ordinary run still reads the machine's hour, which is the whole point
+of spec 0130. Two films are now byte identical across all 3,600 frames with
+the hands drawn.
+
+What it changes in what is published: the arcade's clip and its still read
+ten past ten, where they used to read whenever the film happened to be made.
 
 ### The number that gave it away, and the test that hid it
 
