@@ -670,10 +670,16 @@ the building and moved every picture reference with it.
 **What these three runs are not is a byte comparison.** The fix above was
 measured by hashing every frame off `--film-to`. This was measured by
 `refresh-examples`, whose keep is `clips-apart` reporting the difference
-inside `picture::CHANNEL` and `picture::SHARE`, and which prints no numbers
-on a keep. Three runs each differing by a pixel of a frame would read exactly
-like this. What it says is that the arcade is back inside the gate and stayed
-there, not that the frames are identical.
+inside `picture::CHANNEL` and `picture::SHARE`. Three runs each differing by
+a pixel of a frame would have read exactly like this. What it says is that
+the arcade is back inside the gate and stayed there, not that the frames are
+identical.
+
+That last part is why the keep line now says the numbers. It used to print
+them only when it replaced a clip, so a clean run threw away the measurement
+it had just made and left nothing to tell a clip that is byte stable from
+one that is a pixel inside the tolerance. These three runs are the case: the
+verdict is on the record and the figures behind it are not.
 
 **And it retires a note in `refresh-examples`.** That file's header says
 xanadu is unstable, off three runs on 2026-11-24 with 49 frames of 1,802
