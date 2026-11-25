@@ -583,74 +583,58 @@ The mirror one was the hypothesis going in, on the reasoning that a surface
 whose reflection was not drawn still samples its target and reads whatever is
 in that memory. It is a good story and it is not what is happening.
 
-### It is the cellar's clock, and not its hands
-
-Looking at where the pixels are, rather than guessing at another mechanism,
-ends it in one step. They are not scattered at all. Each frame's differences
-are a single small cluster, and the cluster walks across the screen:
-
-| frame | pixels | where |
-| --- | --- | --- |
-| 2884 | 25 | x 668-676, y 503-511 |
-| 2900 | 0 | identical |
-| 2912 | 43 | x 1101-1114, y 453-464 |
-| 2925 | 53 | x 1168-1184, y 450-462 |
-| 2930 | 3 | x 1198-1199, y 449-450 |
-
-That is one object in the room, tracking right and growing as the camera
-walks past it, and the window closes at 2930 because it leaves the edge of
-the screen. Magnified, the cluster sits on the dial of the cellar's clock.
+### It is the cellar's clock, and it is reading the real time
 
 The cellar is the arcade's spec 0007 and this is its mantel clock, not the
-big one in the back room that spec 0130 is about.
+big one in the back room. Drawing its hands is the whole of it: with
+`cellar::clock_hands` left undrawn, two films are byte identical across all
+3,600 frames.
 
-**The hands were the obvious answer and they are not it.** The clock carries
-its own `cellar::CLOCK_HAND_THICK` of 4 millimetres, a fifth of the back
-room's, and `cellar.rs:2126` sweeps its seconds hand where the back room's
-steps. A sweeping hair across a room is as near a sample boundary as
-anything in this building gets, so it looked like the multisample tie menger
-has.
+**Because the clock says what time it actually is.** `Arcade::the_hour` is
+`self.wall_clock.unwrap_or_else(clock::now)` and `clock::now` reads
+`chrono::Local::now()` down to the nanosecond, which spec 0130 asks for by
+name: a clock that matches the real time of day. Two films started four
+minutes apart draw the hands four minutes apart. Nothing is unstable, random
+or undefined anywhere. The arcade is a clock, and the film is a photograph
+of it taken twice.
 
-Tripled to 12 millimetres it is not. The hands are visibly thicker and 63
-pixels of frame 2925 change with them, so the knob works, and two films at
-12 millimetres differ on 33 frames in the same window as two at 4. Whatever
-is unstable on that dial is not its hands.
+`clock::SHOWN` pins the hour at ten past ten so a reference picture holds
+still, and it is `#[cfg(test)]`: the picture tests pin the clock and a film
+does not. That is the fix, and it is a line.
 
-**Nor its marks.** This dial has no numerals: what stands for them is four
-cubes at the quarters, `main.rs:13869`, each 9 by 26 by 9 millimetres and
-standing 4 proud of the face, which puts a near-parallel edge where the
-camera grazes it. Not drawing them at all changes 97 pixels of frame 2925,
-in a box of x 1164-1194 and y 440-464 that covers the unstable cluster, and
-leaves two films differing on the same 33 frames.
+### The number that gave it away, and the test that hid it
 
-So the churn is behind or around them rather than on them. That is worth
-more than another no: the marks, the hands and the thing that is actually
-unstable are all inside about twenty pixels of each other.
+More pixels moved than the hands covered. Dropping the hands changes 38
+pixels of frame 2925, in a box of x 1168-1184 and y 450-462, and two films
+differ on up to 53 pixels in that same box. A coverage tie can only ever
+disagree on part of what a thing covers. A union larger than the thing means
+it is somewhere else in the second film.
 
-What is left on that dial is the bezel and the face, two discs pushed at
-`main.rs:13855` four and eight millimetres proud of the case, and the case
-behind them. Dropping both discs is the next test and would also say
-whether this is the clock at all.
+That number was there from the first pixel diff and went unread for four
+experiments, because "sparse pixels on thin geometry" is what a multisample
+tie looks like and menger had trained the eye for it.
 
-Frame 2900 being identical while 2884 and 2912 are not is the same reading
-rather than a problem with it. A tie only fights when an edge is near a
-boundary, so some frames of the pass are quiet.
+**And tripling the hand thickness was the wrong knob.** It was run as a test
+of the hands, came back unchanged, and was written up here as ruling them
+out. A thicker hand has the same two edges and the same angle, so the test
+could not have moved the number whichever way the truth lay. The hands were
+the answer for an hour while this spec said they were not.
 
 ### What was ruled out on the way, and what it cost
 
-Six mechanisms tested, each a build and two films, about ten minutes
+Seven changes, each a build and two or three films, about ten minutes
 apiece: the third mirror, the point light over the cap, occlusion culling,
-coplanar faces, the clock's hand thickness, and its quarter marks. Every one
-came back no.
+coplanar faces, the hand thickness, the quarter marks, and the bezel and
+face. Every one came back unchanged, and six of them were aimed at the right
+object by then.
 
-The first four were guesses made before anybody looked at where the pixels
-were, and looking cost nothing: the coordinates were in the first hash
-comparison, and they put the whole thing on one dial. That is the lesson
-worth keeping. Look at where a difference is before theorising about what
-makes it.
+The whole chase was four commands away from the start. `the_hour` is reached
+from the drawing in two hops, and what it calls is named `now`.
 
-It is also not finished. The dial is a place, not a mechanism, and the fifth
-guess was made after the looking and was wrong too.
+Two things worth keeping from it. Look at where a difference is before
+theorising about what makes it, which here meant one dial instead of a
+renderer. And when a knob comes back unchanged, ask whether that knob could
+have changed the answer at all before writing down a no.
 
 ## Acceptance criteria for the gate
 
