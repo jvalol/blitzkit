@@ -583,27 +583,51 @@ The mirror one was the hypothesis going in, on the reasoning that a surface
 whose reflection was not drawn still samples its target and reads whatever is
 in that memory. It is a good story and it is not what is happening.
 
-### What is left
+### It is the cellar's clock
 
-Below the scene and not in the budgets that fire near it. The engine draws
-with 8 samples a pixel, and sparse scattered pixels at this magnitude are
-what a coverage or depth tie looks like resolved differently twice, which is
-the same family as menger above. That was the reason to ask `coplanar`, and
-it found nothing: pressing P from the play log at 48.0 seconds outlined no
-patch at all. The camera there is at `-16.90 -3.00 -5.48`, in the cellar
-looking at the baths' doorway.
+Looking at where the pixels are, rather than guessing at another mechanism,
+ends it in one step. They are not scattered at all. Each frame's differences
+are a single small cluster, and the cluster walks across the screen:
 
-One caveat on that. The check is handed a reach body and throws out pairs
-nobody could stand and see, so a pair through the doorway and inside the
-baths could be filtered rather than absent. Asking it from inside the baths
-would close that off, and has not been done.
+| frame | pixels | where |
+| --- | --- | --- |
+| 2884 | 25 | x 668-676, y 503-511 |
+| 2900 | 0 | identical |
+| 2912 | 43 | x 1101-1114, y 453-464 |
+| 2925 | 53 | x 1168-1184, y 450-462 |
+| 2930 | 3 | x 1198-1199, y 449-450 |
 
-Four mechanisms ruled out and the window still exactly where it was. What
-has not been tried is the one measurement that does not need a theory first:
-dumping the depth buffer, or the drawn list, for frame 2900 in two runs and
-diffing that rather than the picture. It would say whether the two runs ever
-disagree before the pixels, which is the question every one of these
-experiments has been circling.
+That is one object in the room, tracking right and growing as the camera
+walks past it, and the window closes at 2930 because it leaves the edge of
+the screen. Magnified, the cluster sits on the dial of the cellar's clock.
+
+**So it is the multisample tie again**, the one menger has and the one this
+spec says it cannot fix without a sample a pixel.
+
+The cellar is the arcade's spec 0007 and this is its mantel clock, not the
+big one in the back room that spec 0130 is about. It carries its own
+`cellar::CLOCK_HAND_THICK` of 4 millimetres, because the back room's 14 on a
+dial a fifth the size would be a plank, and `cellar.rs:2126` has its seconds
+hand sweeping where the back room's steps. A hand four millimetres wide,
+across a room, moving smoothly rather than in steps, is about as near a
+sample boundary as anything in this building gets.
+
+Not the glyph fault: these numerals are strokes and corners rather than
+text.
+
+Frame 2900 being identical while 2884 and 2912 are not is the same reading
+rather than a problem with it. A tie only fights when an edge is near a
+boundary, so some frames of the pass are quiet.
+
+### What was ruled out on the way, and what it cost
+
+Four mechanisms were tested before anybody looked at where the pixels were:
+the third mirror, the point light over the cap, occlusion culling and
+coplanar faces. Each took a build and two films, about ten minutes, and each
+answered the question it was asked and not the one that mattered. The
+measurement that settled it was free and was available from the first hash
+comparison. Look at where a difference is before theorising about what makes
+it.
 
 ## Acceptance criteria for the gate
 
