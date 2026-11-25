@@ -616,9 +616,21 @@ pixels of frame 2925 change with them, so the knob works, and two films at
 12 millimetres differ on 33 frames in the same window as two at 4. Whatever
 is unstable on that dial is not its hands.
 
-What else is on it: the chapter ring, the minute track, the numerals as
-strokes and corners rather than text, the bezel, and whatever covers the
-face. Nobody has narrowed it past the dial.
+**Nor its marks.** This dial has no numerals: what stands for them is four
+cubes at the quarters, `main.rs:13869`, each 9 by 26 by 9 millimetres and
+standing 4 proud of the face, which puts a near-parallel edge where the
+camera grazes it. Not drawing them at all changes 97 pixels of frame 2925,
+in a box of x 1164-1194 and y 440-464 that covers the unstable cluster, and
+leaves two films differing on the same 33 frames.
+
+So the churn is behind or around them rather than on them. That is worth
+more than another no: the marks, the hands and the thing that is actually
+unstable are all inside about twenty pixels of each other.
+
+What is left on that dial is the bezel and the face, two discs pushed at
+`main.rs:13855` four and eight millimetres proud of the case, and the case
+behind them. Dropping both discs is the next test and would also say
+whether this is the clock at all.
 
 Frame 2900 being identical while 2884 and 2912 are not is the same reading
 rather than a problem with it. A tie only fights when an edge is near a
@@ -626,9 +638,10 @@ boundary, so some frames of the pass are quiet.
 
 ### What was ruled out on the way, and what it cost
 
-Five mechanisms tested, each a build and two films, about ten minutes
+Six mechanisms tested, each a build and two films, about ten minutes
 apiece: the third mirror, the point light over the cap, occlusion culling,
-coplanar faces, and the clock's hand thickness. Every one came back no.
+coplanar faces, the clock's hand thickness, and its quarter marks. Every one
+came back no.
 
 The first four were guesses made before anybody looked at where the pixels
 were, and looking cost nothing: the coordinates were in the first hash
