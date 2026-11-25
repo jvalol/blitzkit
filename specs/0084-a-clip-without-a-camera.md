@@ -113,10 +113,11 @@ menger and load do not. Every other example does, measured over two runs each
 of all sixteen on 2026-11-04, the arcade's 46 seconds and 90 metres of walking
 included. Three runs of menger gave three different streams.
 
-**The arcade is no longer one of the stable ones.** It stopped some time
-after that measurement and nobody noticed until 2026-11-24. See the section
-dated that day below; the paragraph above is left as it was written, because
-the date on a measurement is half of what it says.
+**The arcade fell out of this list and is back in it.** It stopped being
+stable some time after that measurement, nobody noticed until 2026-11-24,
+and it was fixed the same day: see the section dated that day below. The
+paragraph above is left as it was written, because the date on a measurement
+is half of what it says.
 
 **This spec claimed otherwise first.** The claim was written off one example,
 `rolling`, which does match, and then stated as a property of all of them.
@@ -529,12 +530,14 @@ public, so the example asks once in its own constructor.
 cannot fix without a sample a pixel, which Jake looked at and turned down. Of
 the sixteen, fifteen now come back the clip they already were.
 
-## 2026-11-24: xanadu is not one of the fifteen any more
+## 2026-11-24: the arcade fell out of the fifteen, and is back in
 
-**The arcade stopped filming the same twice.** The section above says the
-arcade's 46 seconds are stable, measured 2026-11-04. They are not, now. Six
-runs this day, same commit, same built games, nothing touched between them:
-every pair differs.
+**It stopped filming the same twice, and the cause is in here.** The section
+above says the arcade's 46 seconds are stable, measured 2026-11-04. They were
+not: six runs this day, same commit, same built games, nothing touched
+between them, every pair differing. It was its clock reading the real time,
+and the fix is at the end of this section. Both halves are kept because the
+hunt between them is most of what this is worth reading for.
 
 What changed between the two dates has not been looked for, and nothing here
 guesses at it.
