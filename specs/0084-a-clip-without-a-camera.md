@@ -776,6 +776,45 @@ run and giving up repeatability with it. If what that example is for is the
 wall time, this is the one of the sixteen that this spec makes worse, and it
 is Jake's call whether it matters.
 
+### 2026-11-26: it does not matter, and it was in the way
+
+Jake, asked: the wall time is unimportant, it's an incidental implementation
+of the concept, it shouldn't get in the way.
+
+Which closes the question above and opens a smaller one in the same breath.
+Nought is not nothing. `work 0.00 ms   95th 0.00 ms   worst 0.00 ms` reads as
+an engine that costs nothing, which is a claim, where `--` reads as a reading
+nobody took, which is the truth. The readout already had the second form for
+a figure it has not got, so the four wall-clock numbers now use it whenever
+the run is drawing something published.
+
+**And the predicate had to widen to say that.** It asked `--film-to`, because
+when the gpu line was left out a picture drew one frame and had no reading to
+carry. Spec 0085 made a picture draw every frame, so the still had been
+carrying a live gpu figure ever since, and `media/load.png` was a different
+file on every refresh without anything reporting it: `refresh-examples`
+compares clips and overwrites stills. Two renders a second apart read 0.67 ms
+and 0.62 ms.
+
+So one predicate covers both readings and `filming` is gone. The question it
+asks is not whether a run is a film but whether what it draws gets published,
+which a film and a picture both do and a window does not. The two readings
+want opposite things from it and the same answer: nothing timed against a
+wall clock has a number to give, and the card's own figure has a real one
+that is different every run.
+
+**Verified by hand.** Three renders of `load` a second apart are one file,
+where two before this were two. The readout reads `work --   95th --
+worst --   over 240 frames`, `between frames --` and `gpu --`, with every
+counted thing still a number: 240 frames, 8 samples a pixel at 1200 by 948,
+4 draws and 60312 triangles. A window is untouched and keeps every figure it
+ever had.
+
+**No test holds this.** `cargo test` does not run an example's tests and the
+example has none, so a harness for one fact would be the machinery rather
+than the check. What would hold it is the thing that already did not: a still
+that changes every refresh is invisible because nothing compares one.
+
 ## What a picture does not have that a film does
 
 `--picture-to` takes every step and draws only the last one, so a game that

@@ -402,10 +402,22 @@ struct Load {
     /// What the renderer counted, and what the GPU said, both asked of it at
     /// the top of the frame rather than worked out here.
     counted: (u32, u32),
-    /// Whether this run is being filmed, so the one measured number on the
-    /// readout can be left off a clip that has to come back the same twice.
-    /// Spec 0084.
-    filming: bool,
+    /// Whether this run is drawing something that gets published rather than
+    /// something somebody is watching, which is a film or a picture and is
+    /// not a window. Spec 0084.
+    ///
+    /// **One predicate and not two, because the two readings it governs want
+    /// the same answer.** Nothing timed against a wall clock has a number
+    /// here, since both take fixed steps and the loop they share reports no
+    /// frame time. The card's own figure is the opposite case: it is a real
+    /// reading, and it is a different one every run, which is why a clip of
+    /// this example used to come back a different file every refresh.
+    ///
+    /// This asked `--film-to` alone until 2026-11-26, which was right while a
+    /// picture drew one frame and had no reading to carry. Spec 0085 made a
+    /// picture draw every frame, so the still began carrying a live gpu
+    /// figure and two renders of it a second apart were two files.
+    published: bool,
     gpu: Option<f32>,
     /// What each pass of the last reported frame took. Spec 0067.
     passes: Vec<(&'static str, f32)>,
@@ -466,7 +478,8 @@ impl Load {
             window: (0.0, 0.0),
             sweeping,
             counted: (0, 0),
-            filming: blitzkit::one_argument("--film-to").is_some(),
+            published: blitzkit::one_argument("--film-to").is_some()
+                || blitzkit::one_argument("--picture-to").is_some(),
             gpu: None,
             passes: Vec::new(),
             ran: false,
@@ -486,13 +499,32 @@ impl Load {
             Some(ms) => format!("{:.2} ms", ms),
             None => String::from("--"),
         };
+        // **A film and a picture have no wall clock, so nothing timed against
+        // one says a number here.** Both take fixed steps, which is the whole
+        // reason a film comes back the same twice, and the loop they share
+        // reports no frame time at all: `work_seconds` and `frame_seconds`
+        // both stay at nought. Printed straight that is `0.00 ms` four times
+        // over, which reads as an engine that costs nothing rather than as a
+        // reading nobody took.
+        //
+        // Jake, 2026-11-26, asked what the clip loses by it: the wall time is
+        // unimportant, it's an incidental implementation of the concept, it
+        // shouldn't get in the way. So a published run says `--`, which is what
+        // this readout already says for a figure it has not got, and a window
+        // keeps every number it ever had.
+        //
+        // The gpu line below reaches the same `--` by its own route and for
+        // the opposite reason: not that nobody took a reading, but that the
+        // reading is real and is different every run. Spec 0084.
+        let wall = |got: Option<f32>| if self.published { ms(None) } else { ms(got) };
         // three answers and not two: a device that will not time a frame at
         // all, one that will and has not yet, and a number. The middle one
         // read as the first one until this was split, and the first frames
         // of every run reported a device fault that was not there.
-        // **Left out of a film, because it is the one number here that is
-        // measured.** Everything else on this readout is counted, or is nought
-        // in a film because there is no wall clock in a run on fixed steps.
+        // **Left out of anything published, because it is the one number here
+        // that is measured.** Everything else on this readout is counted, or is
+        // a wall-clock figure, and those say `--` here for the reason the
+        // paragraph above gives.
         // This is the card's own timing, so it is a different number every run,
         // and that is the whole of why this example's clip came back a
         // different file every time anybody refilmed it: two runs of 300 frames
@@ -504,10 +536,16 @@ impl Load {
         // plays the staging keys and works the card much harder, came back a
         // different file on the next refresh anyway.
         //
-        // So a film says what a device with no reading says, which is the `--`
-        // below, and the window keeps the figure. No new words for the voice
-        // gate and the line stays where it is.
-        let gpu = if self.filming {
+        // So a film or a picture says what a device with no reading says, which
+        // is the `--` below, and the window keeps the figure. No new words for
+        // the voice gate and the line stays where it is.
+        //
+        // This asked `--film-to` alone until 2026-11-26. A picture drew one
+        // frame when that was written and had no reading to carry; since spec
+        // 0085 made it draw every frame it carried a live one, so the still was
+        // a different file every refresh. Two renders a second apart read
+        // 0.67 ms and 0.62 ms.
+        let gpu = if self.published {
             ms(None)
         } else {
             match (self.timed, self.costs.has_gpu()) {
@@ -556,14 +594,14 @@ impl Load {
             ),
             format!(
                 "work {}   95th {}   worst {}   over {} frames",
-                ms(self.costs.middle_ms()),
-                ms(self.costs.tail_ms()),
-                ms(self.costs.worst_ms()),
+                wall(self.costs.middle_ms()),
+                wall(self.costs.tail_ms()),
+                wall(self.costs.worst_ms()),
                 self.costs.len(),
             ),
             format!(
                 "between frames {}   {} samples a pixel at {} by {}",
-                ms(self.costs.between_middle_ms()),
+                wall(self.costs.between_middle_ms()),
                 self.samples,
                 self.surface.0,
                 self.surface.1,
