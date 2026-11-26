@@ -688,6 +688,28 @@ than a signal. Those runs were the clock, hours before `193886c` fixed it.
 The warning is right about how the number was misread and wrong about the
 clip, so it is corrected there rather than left to be read as current.
 
+### 2026-11-26: and with the figures, nothing moved
+
+Two more refreshes, at `xanadu@b6b1434` and at `xanadu@9eb7571`, each
+reporting `1802 frames, 0 differing, worst 0.00000`. Neither was asked for by
+a doubt about the clip. The first cleared a stamp left stale by deleting
+three orphan picture references under `tests/rooms`, which had held the
+0.17.0 release at `check-fresh`; the second cleared the two one-line commits
+that release made in the arcade's own manifest and lockfile.
+
+Which answers the entry above on its own terms. It said three runs each
+differing by a pixel of a frame would have read exactly like a clean keep,
+and that the verdict was on the record while the figures were not. These two
+carry the figures, and they say nothing moved by anything either threshold
+could read. Five runs in a row since `193886c` pinned the hour, three of them
+a verdict and two of them a number.
+
+**What it still is not is a comparison of two files.** `clips-apart` decodes
+both clips and compares frames, so what this says is that the newly filmed
+one decodes to the same frames as the committed one. A keep writes no second
+file, so there is no second hash to set beside `296f1eeb`, and there will not
+be one for as long as the answer is a keep.
+
 ## menger keeps its multisampling
 
 Decided, and not a gap in the work. `menger` is the one clip a refresh can
