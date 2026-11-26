@@ -25,25 +25,25 @@ load.js	e2f34d6	-	2026-11-25T11:07	-
 load_bg.wasm	e2f34d6	-	2026-11-25T11:07	-
 menger.js	e2f34d6	-	2026-11-25T11:07	-
 menger_bg.wasm	e2f34d6	-	2026-11-25T11:07	-
-poolhall.js	e2f34d6	poolhall@80fc69a	2026-11-25T11:07	-
-poolhall_bg.wasm	e2f34d6	poolhall@80fc69a	2026-11-25T11:07	-
+poolhall.js	359995b	poolhall@1f5b85a	2026-11-25T17:24	-
+poolhall_bg.wasm	359995b	poolhall@1f5b85a	2026-11-25T17:24	-
 ripple.js	e2f34d6	-	2026-11-25T11:07	-
 ripple_bg.wasm	e2f34d6	-	2026-11-25T11:07	-
 rolling.js	e2f34d6	-	2026-11-25T11:07	-
 rolling_bg.wasm	e2f34d6	-	2026-11-25T11:07	-
 sierpinski.js	e2f34d6	-	2026-11-25T11:07	-
 sierpinski_bg.wasm	e2f34d6	-	2026-11-25T11:07	-
-slider.js	e2f34d6	slider@f1fe606	2026-11-25T11:07	-
-slider_bg.wasm	e2f34d6	slider@f1fe606	2026-11-25T11:07	-
+slider.js	359995b	slider@e0cca7b	2026-11-25T17:24	-
+slider_bg.wasm	359995b	slider@e0cca7b	2026-11-25T17:24	-
 snake.js	e2f34d6	snake@c98f8ae	2026-11-25T11:07	-
 snake_bg.wasm	e2f34d6	snake@c98f8ae	2026-11-25T11:07	-
 stacking.js	e2f34d6	-	2026-11-25T11:07	-
 stacking_bg.wasm	e2f34d6	-	2026-11-25T11:07	-
-starry.js	e2f34d6	starry@bf7e7ff	2026-11-25T11:07	-
-starry_bg.wasm	e2f34d6	starry@bf7e7ff	2026-11-25T11:07	-
+starry.js	359995b	starry@935d5da	2026-11-25T17:24	-
+starry_bg.wasm	359995b	starry@935d5da	2026-11-25T17:24	-
 teapot.js	e2f34d6	-	2026-11-25T11:07	-
 teapot_bg.wasm	e2f34d6	-	2026-11-25T11:07	-
 tunnel.js	e2f34d6	-	2026-11-25T11:07	-
 tunnel_bg.wasm	e2f34d6	-	2026-11-25T11:07	-
-xanadu.js	5b75149	xanadu@98b77dd	2026-11-25T12:06	7b568671:games/cairn/media/screenshot.png games/carom/media/screenshot.png games/cascada/media/screenshot.png games/lantern/media/screenshot.png games/marble/media/screenshot.png games/monty/media/screenshot.png games/pong/media/screenshot.png games/poolhall/media/screenshot.png games/securitysweep/media/screenshot.png games/slider/media/screenshot.png games/snake/media/screenshot.png games/starry/media/screenshot.png games/tessera/media/screenshot.png
-xanadu_bg.wasm	5b75149	xanadu@98b77dd	2026-11-25T12:06	7b568671:games/cairn/media/screenshot.png games/carom/media/screenshot.png games/cascada/media/screenshot.png games/lantern/media/screenshot.png games/marble/media/screenshot.png games/monty/media/screenshot.png games/pong/media/screenshot.png games/poolhall/media/screenshot.png games/securitysweep/media/screenshot.png games/slider/media/screenshot.png games/snake/media/screenshot.png games/starry/media/screenshot.png games/tessera/media/screenshot.png
+xanadu.js	359995b	xanadu@3f44c09	2026-11-25T17:24	7b568671:games/cairn/media/screenshot.png games/carom/media/screenshot.png games/cascada/media/screenshot.png games/lantern/media/screenshot.png games/marble/media/screenshot.png games/monty/media/screenshot.png games/pong/media/screenshot.png games/poolhall/media/screenshot.png games/securitysweep/media/screenshot.png games/slider/media/screenshot.png games/snake/media/screenshot.png games/starry/media/screenshot.png games/tessera/media/screenshot.png
+xanadu_bg.wasm	359995b	xanadu@3f44c09	2026-11-25T17:24	7b568671:games/cairn/media/screenshot.png games/carom/media/screenshot.png games/cascada/media/screenshot.png games/lantern/media/screenshot.png games/marble/media/screenshot.png games/monty/media/screenshot.png games/pong/media/screenshot.png games/poolhall/media/screenshot.png games/securitysweep/media/screenshot.png games/slider/media/screenshot.png games/snake/media/screenshot.png games/starry/media/screenshot.png games/tessera/media/screenshot.png
