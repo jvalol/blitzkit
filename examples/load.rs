@@ -499,32 +499,27 @@ impl Load {
             Some(ms) => format!("{:.2} ms", ms),
             None => String::from("--"),
         };
-        // **A film and a picture have no wall clock, so nothing timed against
-        // one says a number here.** Both take fixed steps, which is the whole
+        // **Nothing timed against a wall clock is on a published readout at
+        // all.** A film and a picture both take fixed steps, which is the whole
         // reason a film comes back the same twice, and the loop they share
-        // reports no frame time at all: `work_seconds` and `frame_seconds`
-        // both stay at nought. Printed straight that is `0.00 ms` four times
-        // over, which reads as an engine that costs nothing rather than as a
-        // reading nobody took.
+        // reports no frame time: `work_seconds` and `frame_seconds` stay at
+        // nought, so those lines read `0.00 ms` and say an engine costs
+        // nothing.
         //
-        // Jake, 2026-11-26, asked what the clip loses by it: the wall time is
+        // Jake, 2026-11-26, on what a clip loses by it: the wall time is
         // unimportant, it's an incidental implementation of the concept, it
-        // shouldn't get in the way. So a published run says `--`, which is what
-        // this readout already says for a figure it has not got, and a window
-        // keeps every number it ever had.
-        //
-        // The gpu line below reaches the same `--` by its own route and for
-        // the opposite reason: not that nobody took a reading, but that the
-        // reading is real and is different every run. Spec 0084.
-        let wall = |got: Option<f32>| if self.published { ms(None) } else { ms(got) };
+        // shouldn't get in the way. Dashed first and dropped the same morning,
+        // because three lines of `--` are honest and are still three lines of
+        // a poster saying nothing. What they carried that is counted rather
+        // than timed, the samples and the size, moves to a line of its own
+        // below; a window is untouched and keeps all of it.
         // three answers and not two: a device that will not time a frame at
         // all, one that will and has not yet, and a number. The middle one
         // read as the first one until this was split, and the first frames
         // of every run reported a device fault that was not there.
         // **Left out of anything published, because it is the one number here
         // that is measured.** Everything else on this readout is counted, or is
-        // a wall-clock figure, and those say `--` here for the reason the
-        // paragraph above gives.
+        // a wall-clock figure, and those are not on a published one either.
         // This is the card's own timing, so it is a different number every run,
         // and that is the whole of why this example's clip came back a
         // different file every time anybody refilmed it: two runs of 300 frames
@@ -536,26 +531,23 @@ impl Load {
         // plays the staging keys and works the card much harder, came back a
         // different file on the next refresh anyway.
         //
-        // So a film or a picture says what a device with no reading says, which
-        // is the `--` below, and the window keeps the figure. No new words for
-        // the voice gate and the line stays where it is.
+        // It said `--` on a film until 2026-11-26 and now the line is not there
+        // at all, so what is left is the three answers a window wants. The
+        // gating moved out to the readout itself, where one test decides every
+        // line a published run does not have.
         //
-        // This asked `--film-to` alone until 2026-11-26. A picture drew one
-        // frame when that was written and had no reading to carry; since spec
-        // 0085 made it draw every frame it carried a live one, so the still was
-        // a different file every refresh. Two renders a second apart read
-        // 0.67 ms and 0.62 ms.
-        let gpu = if self.published {
-            ms(None)
-        } else {
-            match (self.timed, self.costs.has_gpu()) {
-                (true, true) => ms(self.costs.gpu_middle_ms()),
-                (true, false) => String::from("no reading yet"),
-                (false, _) => String::from("this device will not time a frame"),
-            }
+        // That gating asked `--film-to` alone until the same morning. A picture
+        // drew one frame when the line was first left out and had no reading to
+        // carry; since spec 0085 made it draw every frame it carried a live
+        // one, so the still was a different file on every refresh. Two renders
+        // a second apart read 0.67 ms and 0.62 ms.
+        let gpu = match (self.timed, self.costs.has_gpu()) {
+            (true, true) => ms(self.costs.gpu_middle_ms()),
+            (true, false) => String::from("no reading yet"),
+            (false, _) => String::from("this device will not time a frame"),
         };
 
-        vec![
+        let mut lines = vec![
             String::from("Up and down for cubes, left and right for lamps, C to cast."),
             String::from(
                 "M for one mesh or a mesh each, K for culling, B for a block or a shell, \
@@ -563,7 +555,7 @@ impl Load {
                  S for the contact march, escape to quit.",
             ),
             format!(
-                "{} cubes {}, {}, {}, {} lamps, {} casting, culling {}{}{}{}, {}",
+                "{} cubes {}, {}, {}, {} lamps, {} casting, culling {}{}{}{}{}",
                 self.dials.cubes,
                 self.dials.spread.says(),
                 if self.dials.kept { "kept" } else { "pushed" },
@@ -586,29 +578,57 @@ impl Load {
                 } else {
                     ""
                 },
-                if self.waiting {
-                    "waiting for the display, so these numbers are the display's"
+                // the comma lives in these rather than in the line, because a
+                // published run has no numbers for this to be about and ends
+                // the sentence at the dial it last named.
+                if self.published {
+                    ""
+                } else if self.waiting {
+                    ", waiting for the display, so these numbers are the display's"
                 } else {
-                    "drawing as fast as it will"
+                    ", drawing as fast as it will"
                 },
             ),
-            format!(
+        ];
+
+        // **Three lines of a window that a published readout has not got.**
+        // Two of them are timed against a wall clock a run on fixed steps does
+        // not have, and the third is the card's own figure, which is real and
+        // is a different one every run. Spec 0084 has both.
+        //
+        // The samples and the size come out of the middle line and keep their
+        // own, because they are counted rather than timed and a poster losing
+        // what it was drawn at would be losing something true. Same words,
+        // without the figure in front of them, so nothing new goes near the
+        // voice gate.
+        if self.published {
+            lines.push(format!(
+                "{} samples a pixel at {} by {}",
+                self.samples, self.surface.0, self.surface.1,
+            ));
+        } else {
+            lines.push(format!(
                 "work {}   95th {}   worst {}   over {} frames",
-                wall(self.costs.middle_ms()),
-                wall(self.costs.tail_ms()),
-                wall(self.costs.worst_ms()),
+                ms(self.costs.middle_ms()),
+                ms(self.costs.tail_ms()),
+                ms(self.costs.worst_ms()),
                 self.costs.len(),
-            ),
-            format!(
+            ));
+            lines.push(format!(
                 "between frames {}   {} samples a pixel at {} by {}",
-                wall(self.costs.between_middle_ms()),
+                ms(self.costs.between_middle_ms()),
                 self.samples,
                 self.surface.0,
                 self.surface.1,
-            ),
-            format!("gpu {}", gpu),
-            format!("{} draws, {} triangles", self.counted.0, self.counted.1),
-        ]
+            ));
+            lines.push(format!("gpu {}", gpu));
+        }
+
+        lines.push(format!(
+            "{} draws, {} triangles",
+            self.counted.0, self.counted.1
+        ));
+        lines
     }
 
     /// Where one cube stands and how it is turned, which is the one account

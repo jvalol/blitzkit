@@ -781,12 +781,28 @@ is Jake's call whether it matters.
 Jake, asked: the wall time is unimportant, it's an incidental implementation
 of the concept, it shouldn't get in the way.
 
-Which closes the question above and opens a smaller one in the same breath.
-Nought is not nothing. `work 0.00 ms   95th 0.00 ms   worst 0.00 ms` reads as
-an engine that costs nothing, which is a claim, where `--` reads as a reading
-nobody took, which is the truth. The readout already had the second form for
-a figure it has not got, so the four wall-clock numbers now use it whenever
-the run is drawing something published.
+Which closes the question above and opened a smaller one in the same breath,
+answered the same morning and in two steps, because the first answer was not
+the right one.
+
+**Dashed first.** Nought is not nothing: `work 0.00 ms   95th 0.00 ms
+worst 0.00 ms` reads as an engine that costs nothing, which is a claim, where
+`--` reads as a reading nobody took, which is the truth. The readout already
+had the second form for a figure it has not got, so the four wall-clock
+numbers took it.
+
+**Dropped an hour later, on the picture.** Three lines of `--` are honest and
+are still three lines of a poster saying nothing. Jake, looking at the still:
+drop the lines. So a published readout does not have them at all, and what is
+left is five lines of which every one carries a figure.
+
+What those lines were also carrying, and what had to survive them, is the
+samples and the size. They are counted rather than timed, so they keep a line
+of their own, in the same words with the figure in front of them gone. The
+sentence above them ended `, waiting for the display, so these numbers are
+the display's`, which on a published run pointed at numbers no longer there,
+so its comma moved into the clause and the line now ends at the last dial it
+names.
 
 **And the predicate had to widen to say that.** It asked `--film-to`, because
 when the gpu line was left out a picture drew one frame and had no reading to
@@ -804,11 +820,16 @@ wall clock has a number to give, and the card's own figure has a real one
 that is different every run.
 
 **Verified by hand.** Three renders of `load` a second apart are one file,
-where two before this were two. The readout reads `work --   95th --
-worst --   over 240 frames`, `between frames --` and `gpu --`, with every
-counted thing still a number: 240 frames, 8 samples a pixel at 1200 by 948,
-4 draws and 60312 triangles. A window is untouched and keeps every figure it
-ever had.
+where two before this were two, checked at each of the two steps. A published
+readout is the two key lines, the dials, `8 samples a pixel at 1200 by 948`
+and `4 draws, 60312 triangles`, and the dial line ends at `marching for
+contact`. A window is untouched and keeps every figure it ever had.
+
+Which also means `--` is back to meaning what it meant before any of this: a
+device that has not reported yet, or one that will not time a frame. Both are
+window states. The dash branch this entry added to the gpu line and the
+closure it added beside it are both gone, because a line that is not there
+needs no way of saying it has nothing.
 
 **No test holds this.** `cargo test` does not run an example's tests and the
 example has none, so a harness for one fact would be the machinery rather
