@@ -11,39 +11,39 @@
 # and replaced the first time anything is remade.
 #
 # file	engine	made
-chain.js	5e77e95	-	2026-11-27T07:30	-
-chain_bg.wasm	5e77e95	-	2026-11-27T07:30	-
-cubes.js	5e77e95	-	2026-11-27T07:30	-
-cubes_bg.wasm	5e77e95	-	2026-11-27T07:30	-
-hilbert.js	5e77e95	-	2026-11-27T07:30	-
-hilbert_bg.wasm	5e77e95	-	2026-11-27T07:30	-
-klein.js	5e77e95	-	2026-11-27T07:30	-
-klein_bg.wasm	5e77e95	-	2026-11-27T07:30	-
-knot.js	5e77e95	-	2026-11-27T07:30	-
-knot_bg.wasm	5e77e95	-	2026-11-27T07:30	-
-load.js	5e77e95	-	2026-11-27T07:30	-
-load_bg.wasm	5e77e95	-	2026-11-27T07:30	-
-menger.js	5e77e95	-	2026-11-27T07:30	-
-menger_bg.wasm	5e77e95	-	2026-11-27T07:30	-
-poolhall.js	5e77e95	poolhall@0978ef2	2026-11-27T07:30	-
-poolhall_bg.wasm	5e77e95	poolhall@0978ef2	2026-11-27T07:30	-
-ripple.js	5e77e95	-	2026-11-27T07:30	-
-ripple_bg.wasm	5e77e95	-	2026-11-27T07:30	-
-rolling.js	5e77e95	-	2026-11-27T07:30	-
-rolling_bg.wasm	5e77e95	-	2026-11-27T07:30	-
-sierpinski.js	5e77e95	-	2026-11-27T07:30	-
-sierpinski_bg.wasm	5e77e95	-	2026-11-27T07:30	-
-slider.js	5e77e95	slider@7625548	2026-11-27T07:30	-
-slider_bg.wasm	5e77e95	slider@7625548	2026-11-27T07:30	-
-snake.js	5e77e95	snake@dac3118	2026-11-27T07:30	-
-snake_bg.wasm	5e77e95	snake@dac3118	2026-11-27T07:30	-
-stacking.js	5e77e95	-	2026-11-27T07:30	-
-stacking_bg.wasm	5e77e95	-	2026-11-27T07:30	-
-starry.js	5e77e95	starry@d64da63	2026-11-27T07:30	-
-starry_bg.wasm	5e77e95	starry@d64da63	2026-11-27T07:30	-
-teapot.js	5e77e95	-	2026-11-27T07:30	-
-teapot_bg.wasm	5e77e95	-	2026-11-27T07:30	-
-tunnel.js	5e77e95	-	2026-11-27T07:30	-
-tunnel_bg.wasm	5e77e95	-	2026-11-27T07:30	-
-xanadu.js	3fe9ad2	xanadu@2f181fc	2026-11-27T12:56	7b568671:games/cairn/media/screenshot.png games/carom/media/screenshot.png games/cascada/media/screenshot.png games/lantern/media/screenshot.png games/marble/media/screenshot.png games/monty/media/screenshot.png games/pong/media/screenshot.png games/poolhall/media/screenshot.png games/securitysweep/media/screenshot.png games/slider/media/screenshot.png games/snake/media/screenshot.png games/starry/media/screenshot.png games/tessera/media/screenshot.png
-xanadu_bg.wasm	3fe9ad2	xanadu@2f181fc	2026-11-27T12:56	7b568671:games/cairn/media/screenshot.png games/carom/media/screenshot.png games/cascada/media/screenshot.png games/lantern/media/screenshot.png games/marble/media/screenshot.png games/monty/media/screenshot.png games/pong/media/screenshot.png games/poolhall/media/screenshot.png games/securitysweep/media/screenshot.png games/slider/media/screenshot.png games/snake/media/screenshot.png games/starry/media/screenshot.png games/tessera/media/screenshot.png
+chain.js	8924808	-	2026-11-28T00:52	-
+chain_bg.wasm	8924808	-	2026-11-28T00:52	-
+cubes.js	8924808	-	2026-11-28T00:52	-
+cubes_bg.wasm	8924808	-	2026-11-28T00:52	-
+hilbert.js	8924808	-	2026-11-28T00:52	-
+hilbert_bg.wasm	8924808	-	2026-11-28T00:52	-
+klein.js	8924808	-	2026-11-28T00:52	-
+klein_bg.wasm	8924808	-	2026-11-28T00:52	-
+knot.js	8924808	-	2026-11-28T00:52	-
+knot_bg.wasm	8924808	-	2026-11-28T00:52	-
+load.js	8924808	-	2026-11-28T00:52	-
+load_bg.wasm	8924808	-	2026-11-28T00:52	-
+menger.js	8924808	-	2026-11-28T00:52	-
+menger_bg.wasm	8924808	-	2026-11-28T00:52	-
+poolhall.js	8924808	poolhall@0978ef2	2026-11-28T00:52	-
+poolhall_bg.wasm	8924808	poolhall@0978ef2	2026-11-28T00:52	-
+ripple.js	8924808	-	2026-11-28T00:52	-
+ripple_bg.wasm	8924808	-	2026-11-28T00:52	-
+rolling.js	8924808	-	2026-11-28T00:52	-
+rolling_bg.wasm	8924808	-	2026-11-28T00:52	-
+sierpinski.js	8924808	-	2026-11-28T00:52	-
+sierpinski_bg.wasm	8924808	-	2026-11-28T00:52	-
+slider.js	8924808	slider@7625548	2026-11-28T00:52	-
+slider_bg.wasm	8924808	slider@7625548	2026-11-28T00:52	-
+snake.js	8924808	snake@dac3118	2026-11-28T00:52	-
+snake_bg.wasm	8924808	snake@dac3118	2026-11-28T00:52	-
+stacking.js	8924808	-	2026-11-28T00:52	-
+stacking_bg.wasm	8924808	-	2026-11-28T00:52	-
+starry.js	8924808	starry@d64da63	2026-11-28T00:52	-
+starry_bg.wasm	8924808	starry@d64da63	2026-11-28T00:52	-
+teapot.js	8924808	-	2026-11-28T00:52	-
+teapot_bg.wasm	8924808	-	2026-11-28T00:52	-
+tunnel.js	8924808	-	2026-11-28T00:53	-
+tunnel_bg.wasm	8924808	-	2026-11-28T00:53	-
+xanadu.js	8924808	xanadu@ce6f94f	2026-11-28T00:53	7b568671:games/cairn/media/screenshot.png games/carom/media/screenshot.png games/cascada/media/screenshot.png games/lantern/media/screenshot.png games/marble/media/screenshot.png games/monty/media/screenshot.png games/pong/media/screenshot.png games/poolhall/media/screenshot.png games/securitysweep/media/screenshot.png games/slider/media/screenshot.png games/snake/media/screenshot.png games/starry/media/screenshot.png games/tessera/media/screenshot.png
+xanadu_bg.wasm	8924808	xanadu@ce6f94f	2026-11-28T00:53	7b568671:games/cairn/media/screenshot.png games/carom/media/screenshot.png games/cascada/media/screenshot.png games/lantern/media/screenshot.png games/marble/media/screenshot.png games/monty/media/screenshot.png games/pong/media/screenshot.png games/poolhall/media/screenshot.png games/securitysweep/media/screenshot.png games/slider/media/screenshot.png games/snake/media/screenshot.png games/starry/media/screenshot.png games/tessera/media/screenshot.png
